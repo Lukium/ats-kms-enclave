@@ -274,7 +274,17 @@ async function signJWT(
   payload: JWTPayload,
   requestId: string,
   origin?: string
-): Promise<{ jwt: string }> {
+): Promise<{
+  jwt: string;
+  debug?: {
+    signatureConversion: {
+      originalFormat: string;
+      originalBytes: number[];
+      convertedBytes: number[];
+      wasConverted: boolean;
+    };
+  };
+}> {
   // Ensure worker is initialized
   await init();
 
@@ -412,7 +422,19 @@ async function signJWT(
 
   await logOperation(auditOp);
 
-  return { jwt };
+  // Return JWT with optional debug information for demo purposes
+  return {
+    jwt,
+    // Debug information (for demo visualization)
+    debug: {
+      signatureConversion: {
+        originalFormat: format,
+        originalBytes: Array.from(signatureBytes),
+        convertedBytes: Array.from(signatureP1363),
+        wasConverted: format === 'DER',
+      },
+    },
+  };
 }
 
 /**

@@ -60,6 +60,14 @@ interface DemoState {
     afterValid: boolean;
     errors: string[];
   } | null;
+  signatureConversion: {
+    originalFormat: 'DER' | 'P-1363';
+    originalBytes: Uint8Array;
+    convertedBytes: Uint8Array;
+    wasConverted: boolean;
+  } | null;
+  chainHeadHash: string | null;
+  auditEntryHashes: Map<number, string>;
 }
 
 interface AuditEntry {
@@ -123,11 +131,40 @@ const state: DemoState = {
   auditPublicKey: null,
   auditVerification: null,
   tamperTestResult: null,
+  signatureConversion: null,
+  chainHeadHash: null,
+  auditEntryHashes: new Map(),
 };
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
+
+/**
+ * Compute hash of audit entry (same algorithm as audit.ts)
+ */
+async function computeAuditEntryHash(entry: StorageAuditEntry): Promise<string> {
+  const data = JSON.stringify({
+    version: entry.version,
+    timestamp: entry.timestamp,
+    op: entry.op,
+    kid: entry.kid,
+    requestId: entry.requestId,
+    origin: entry.origin,
+    clientInfo: entry.clientInfo,
+    prevHash: entry.prevHash,
+    nonce: entry.nonce,
+    ...(entry.details && { details: entry.details }),
+  });
+
+  const buffer = new TextEncoder().encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+
+  // Convert to hex string
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 /**
  * Update button states based on current demo state
@@ -143,11 +180,11 @@ function updateButtonStates(): void {
   const stage9Btn = document.getElementById('stage9-btn') as HTMLButtonElement;
   const scrollBtn = document.getElementById('scroll-to-output-btn') as HTMLButtonElement;
 
-  // Generate VAPID: enabled when setup is complete AND worker is unlocked
-  stage2Btn.disabled = !state.setupComplete || state.isLocked;
+  // Generate VAPID: enabled when setup is complete (lock state checked at runtime)
+  stage2Btn.disabled = !state.setupComplete;
 
-  // Sign JWT: enabled when we have a VAPID key AND worker is unlocked
-  stage3Btn.disabled = !state.vapidKid || state.isLocked;
+  // Sign JWT: enabled when we have a VAPID key (lock state checked at runtime)
+  stage3Btn.disabled = !state.vapidKid;
 
   // Lock Worker: enabled when setup is complete AND worker is unlocked
   stage4Btn.disabled = !state.setupComplete || state.isLocked;
@@ -158,11 +195,11 @@ function updateButtonStates(): void {
   // Persistence Test: enabled when we have stored keys
   stage6Btn.disabled = state.storedKeys.length === 0;
 
-  // Verify JWT: enabled when we have a VAPID public key AND worker is unlocked
-  stage7Btn.disabled = !state.vapidPublicKey || state.isLocked;
+  // Verify JWT: enabled when we have a VAPID public key (lock state checked at runtime)
+  stage7Btn.disabled = !state.vapidPublicKey;
 
-  // Verify Audit Chain: enabled when setup is complete AND worker is unlocked
-  stage8Btn.disabled = !state.setupComplete || state.isLocked;
+  // Verify Audit Chain: enabled when setup is complete (lock state checked at runtime)
+  stage8Btn.disabled = !state.setupComplete;
 
   // Tamper Detection: enabled when audit verification has been performed
   stage9Btn.disabled = !state.auditVerification;
@@ -201,8 +238,8 @@ function scrollToCard(cardName: string): void {
   }
 }
 
-function renderCheck(status: 'pass' | 'fail' | 'pending', label: string, detail?: string): string {
-  const icons = { pass: '✅', fail: '❌', pending: '⏳' };
+function renderCheck(status: 'pass' | 'fail' | 'pending' | 'info', label: string, detail?: string): string {
+  const icons = { pass: '✅', fail: '❌', pending: '⏳', info: 'ℹ️' };
   const icon = icons[status];
   const detailHtml = detail ? `<div class="check-detail">${detail}</div>` : '';
 
@@ -616,6 +653,13 @@ function renderAuditVerificationCard(): void {
           `${state.auditVerification.verified} entries checked`
         )
       : renderCheck('pending', 'Entries: Pending'),
+    state.chainHeadHash
+      ? renderCheck(
+          'info',
+          'Chain Head Hash',
+          `${state.chainHeadHash.substring(0, 16)}... (${state.chainHeadHash.length} chars)`
+        )
+      : renderCheck('pending', 'Chain Head: Pending', 'Verify chain to compute hash'),
     state.auditVerification && state.auditVerification.errors.length > 0
       ? renderCheck('fail', 'Verification Errors', state.auditVerification.errors.slice(0, 3).join(', '))
       : state.auditVerification
@@ -662,6 +706,95 @@ function renderTamperDetectionCard(): void {
   );
 
   document.getElementById('tamper-card')!.innerHTML = card;
+}
+
+function renderSignatureConversionCard(): void {
+  const conv = state.signatureConversion;
+
+  if (!conv) {
+    document.getElementById('sig-conversion-card')!.innerHTML = renderCard(
+      '🔄 Signature Format Conversion',
+      '<strong>What this shows:</strong> WebCrypto returns DER format, but JWS ES256 requires P-1363. If conversion didn\'t happen, all JWT validators would reject our tokens.',
+      renderCheck('pending', 'Conversion: Pending', 'Sign a JWT to see conversion details')
+    );
+    return;
+  }
+
+  // Convert bytes to hex string
+  const toHex = (bytes: Uint8Array, limit = 16): string => {
+    const preview = Array.from(bytes.slice(0, limit))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join(' ');
+    return bytes.length > limit ? `${preview} ...` : preview;
+  };
+
+  // Convert bytes to base64url
+  const toB64u = (bytes: Uint8Array): string => {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  };
+
+  const checks = [
+    renderCheck(
+      'info',
+      'Original Format',
+      `${conv.originalFormat} (${conv.originalBytes.length} bytes)`
+    ),
+    conv.originalFormat === 'DER'
+      ? renderCheck(
+          'info',
+          'Original (DER)',
+          `Leading byte: 0x${conv.originalBytes[0]?.toString(16).padStart(2, '0')} (DER SEQUENCE)`
+        )
+      : renderCheck('info', 'Original', `Already P-1363 (test environment)`),
+    renderCheck(
+      'info',
+      'Original hex (first 16 bytes)',
+      toHex(conv.originalBytes)
+    ),
+    renderCheck(
+      'info',
+      'Original base64url',
+      `${toB64u(conv.originalBytes).substring(0, 20)}... (${toB64u(conv.originalBytes).length} chars)`
+    ),
+    renderCheck(
+      conv.wasConverted ? 'pass' : 'info',
+      'Conversion',
+      conv.wasConverted ? '↓ Converted DER → P-1363' : 'No conversion needed'
+    ),
+    renderCheck(
+      'info',
+      'Output Format',
+      `P-1363 (${conv.convertedBytes.length} bytes, raw r‖s)`
+    ),
+    renderCheck(
+      'info',
+      'Output (P-1363)',
+      `Leading byte: 0x${conv.convertedBytes[0]?.toString(16).padStart(2, '0')} (r value start)`
+    ),
+    renderCheck(
+      'info',
+      'Output hex (first 16 bytes)',
+      toHex(conv.convertedBytes)
+    ),
+    renderCheck(
+      'info',
+      'Output base64url',
+      `${toB64u(conv.convertedBytes).substring(0, 20)}... (${toB64u(conv.convertedBytes).length} chars)`
+    ),
+    conv.wasConverted
+      ? renderCheck('pass', 'Result', '✅ Conversion successful, compatible with JWS ES256')
+      : renderCheck('pass', 'Result', '✅ Already in correct format'),
+  ].join('');
+
+  const card = renderCard(
+    '🔄 Signature Format Conversion (DER → P-1363)',
+    '<strong>Why this matters:</strong> WebCrypto returns DER format (70-72 bytes), but JWS ES256 requires P-1363 (64 bytes). If we didn\'t convert, all JWT validators would reject our tokens. This visualization proves the conversion works correctly.',
+    checks
+  );
+
+  document.getElementById('sig-conversion-card')!.innerHTML = card;
 }
 
 function renderJWTPolicyCard(): void {
@@ -721,6 +854,7 @@ function updateAllCards(): void {
   renderVAPIDCard();
   renderJWTCard();
   renderJWTPolicyCard();
+  renderSignatureConversionCard();
   renderVerifyJWTCard();
   renderAuditPublicKeyCard();
   renderAuditVerificationCard();
@@ -1203,6 +1337,17 @@ async function stage3SignJWT(): Promise<void> {
 
     state.jwt = result.jwt;
 
+    // Capture signature conversion details if available (for demo visualization)
+    if (result.debug?.signatureConversion) {
+      const conv = result.debug.signatureConversion;
+      state.signatureConversion = {
+        originalFormat: conv.originalFormat as 'DER' | 'P-1363',
+        originalBytes: new Uint8Array(conv.originalBytes),
+        convertedBytes: new Uint8Array(conv.convertedBytes),
+        wasConverted: conv.wasConverted,
+      };
+    }
+
     // Split JWT into parts
     const parts = result.jwt.split('.');
     state.jwtParts = {
@@ -1468,6 +1613,14 @@ async function stage8VerifyAuditChain(): Promise<void> {
     // Verify audit chain
     const result = await client.verifyAuditChain();
     state.auditVerification = result;
+
+    // Compute chain head hash (hash of latest entry)
+    await initDB();
+    const entries = await getAllAuditEntries();
+    if (entries.length > 0) {
+      const latestEntry = entries[entries.length - 1]!;
+      state.chainHeadHash = await computeAuditEntryHash(latestEntry);
+    }
 
     updateAllCards();
 

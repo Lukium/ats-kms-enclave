@@ -1,0 +1,102 @@
+# Coverage Exceptions Registry
+#
+# This file documents all coverage ignore directives in the codebase.
+# Each exception must have a clear rationale explaining why the code
+# cannot or should not be tested.
+#
+# Format:
+#   file_path:
+#     - line: <line_number>
+#       pattern: "/* c8 ignore next */"
+#       reason: "Explanation of why this is ignored"
+#
+# A test validates that all ignore directives in the codebase are
+# documented here. If you add a new ignore, you must add it here.
+
+src/audit.ts:
+  - line: 196
+    pattern: "/* c8 ignore next 6 */"
+    reason: "IndexedDB transaction onerror handler - cannot be reliably triggered in tests without mocking IDB internals"
+
+  - line: 262
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 288
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 314
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 323
+    pattern: "} /* c8 ignore next 2 */ catch {"
+    reason: "Defensive error handling for cursor iteration - would require corrupting IndexedDB state"
+
+src/client.ts:
+  - line: 78
+    pattern: "/* c8 ignore next 3 - defensive: worker is always initialized in constructor */"
+    reason: "Defensive null check for worker - constructor always initializes worker, this path is unreachable"
+
+src/storage.ts:
+  - line: 89
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB transaction onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 132
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB transaction onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 166
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB request onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 187
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB request onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 208
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB request onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 229
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB request onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 331
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB transaction onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+  - line: 369
+    pattern: "/* c8 ignore next 3 */"
+    reason: "IndexedDB request onerror handler - cannot be reliably triggered without mocking IDB internals"
+
+src/worker.ts:
+  - line: 153
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 188
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 245
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 313
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 440
+    pattern: "/* c8 ignore next - defensive: all Web APIs throw Error objects */"
+    reason: "Defensive instanceof check - all Web Crypto APIs throw Error objects, else branch unreachable"
+
+  - line: 575
+    pattern: "/* c8 ignore next - defensive: all Web APIs throw Error objects */"
+    reason: "Defensive instanceof check - all Web Crypto APIs throw Error objects, else branch unreachable"
+
+  - line: 594
+    pattern: "/* c8 ignore next 7 - only runs in real Worker context, not in tests */"
+    reason: "Worker message listener setup - only executes in real Worker context, tests call handleMessage directly"

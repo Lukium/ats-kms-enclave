@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import * as yaml from 'yaml';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -115,6 +116,42 @@ function buildCoverageTable() {
 }
 
 /**
+ * Count coverage exceptions from COVERAGE_EXCEPTIONS.yml
+ * Parses patterns to count actual number of lines excluded
+ */
+function countCoverageExceptions() {
+  try {
+    const exceptionsPath = join(rootDir, 'COVERAGE_EXCEPTIONS.yml');
+    const exceptionsContent = readFileSync(exceptionsPath, 'utf-8');
+    const exceptions = yaml.parse(exceptionsContent);
+
+    let totalLines = 0;
+    for (const fileExceptions of Object.values(exceptions)) {
+      if (Array.isArray(fileExceptions)) {
+        for (const exc of fileExceptions) {
+          const pattern = exc.pattern || '';
+
+          // Parse "/* c8 ignore next N */" or "/* v8 ignore next N */"
+          const nextMatch = pattern.match(/ignore next (\d+)/);
+          if (nextMatch) {
+            totalLines += parseInt(nextMatch[1], 10);
+          }
+          // Parse "/* c8 ignore next */" (default to 1 line)
+          else if (pattern.includes('ignore next')) {
+            totalLines += 1;
+          }
+        }
+      }
+    }
+
+    return totalLines;
+  } catch (error) {
+    console.warn('Failed to read coverage exceptions:', error.message);
+    return 0;
+  }
+}
+
+/**
  * Count test files in tests directory
  */
 function countTestFiles() {
@@ -149,46 +186,30 @@ async function getTestStats() {
   const { execSync } = await import('child_process');
 
   try {
-    // Run vitest with JSON reporter
-    const output = execSync('pnpm vitest run --reporter=json --reporter=default', {
+    // Run vitest with default reporter
+    const output = execSync('pnpm vitest run', {
       cwd: rootDir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Parse the JSON output (last line should be JSON)
-    const lines = output.split('\n').filter(line => line.trim());
-    const jsonLine = lines.find(line => line.startsWith('{') && line.includes('"testResults"'));
+    // Parse standard output for summary lines
+    // Example: "Test Files  8 passed (8)"
+    // Example: "Tests  190 passed (190)"
+    // Example: "Duration  3.77s"
+    const testFileMatch = output.match(/Test Files\s+(\d+)\s+passed/);
+    const testMatch = output.match(/Tests\s+(\d+)\s+passed/);
+    const durationMatch = output.match(/Duration\s+([\d.]+s)/);
 
-    if (jsonLine) {
-      const result = JSON.parse(jsonLine);
-      // Use testResults.length for file count (numTotalTestSuites counts describe blocks)
-      const numTestFiles = result.testResults?.length || 0;
-      const numTests = result.numTotalTests || 0;
-      const duration = result.startTime && result.endTime
-        ? `${Math.round((result.endTime - result.startTime) / 1000)}s`
-        : '~1s';
+    if (testFileMatch && testMatch) {
+      const numTestFiles = parseInt(testFileMatch[1], 10);
+      const numTests = parseInt(testMatch[1], 10);
+      const duration = durationMatch ? durationMatch[1] : '~1s';
 
       return {
         testFiles: `${numTestFiles} passed (${numTestFiles})`,
         tests: `${numTests} passed (${numTests})`,
         duration,
-      };
-    }
-
-    // Fallback: parse standard output for summary line
-    // Example: "Test Files  7 passed (7)"
-    const testFileMatch = output.match(/Test Files\s+(\d+)\s+passed/);
-    const testMatch = output.match(/Tests\s+(\d+)\s+passed/);
-
-    if (testFileMatch && testMatch) {
-      const numTestFiles = parseInt(testFileMatch[1], 10);
-      const numTests = parseInt(testMatch[1], 10);
-
-      return {
-        testFiles: `${numTestFiles} passed (${numTestFiles})`,
-        tests: `${numTests} passed (${numTests})`,
-        duration: '~1s',
       };
     }
 
@@ -222,6 +243,7 @@ async function updateReadme() {
   }
 
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const exceptionsCount = countCoverageExceptions();
 
   const newSection = `### Test Coverage & Statistics
 
@@ -236,6 +258,8 @@ async function updateReadme() {
 **Coverage Report:**
 \`\`\`
 ${coverageTable}\`\`\`
+
+**Coverage Exceptions:** ${exceptionsCount} lines excluded ([view exceptions](COVERAGE_EXCEPTIONS.yml))
 <!-- END AUTO-GENERATED -->`;
 
   // Find and replace the auto-generated section

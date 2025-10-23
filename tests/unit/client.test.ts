@@ -129,8 +129,10 @@ describe('Client RPC Bridge - Worker Management', () => {
 describe('Client RPC Bridge - generateVAPID', () => {
   let client: KMSClient;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     client = new KMSClient();
+    // Setup passphrase to unlock worker for crypto operations
+    await client.setupPassphrase('test-passphrase-12345');
   });
 
   afterEach(() => {
@@ -177,6 +179,8 @@ describe('Client RPC Bridge - signJWT', () => {
 
   beforeEach(async () => {
     client = new KMSClient();
+    // Setup passphrase to unlock worker for crypto operations
+    await client.setupPassphrase('test-passphrase-12345');
     const result = await client.generateVAPID();
     kid = result.kid;
   });
@@ -249,6 +253,8 @@ describe('Client RPC Bridge - getPublicKey', () => {
 
   beforeEach(async () => {
     client = new KMSClient();
+    // Setup passphrase to unlock worker for crypto operations
+    await client.setupPassphrase('test-passphrase-12345');
     const result = await client.generateVAPID();
     kid = result.kid;
     publicKey = result.publicKey;
@@ -285,8 +291,10 @@ describe('Client RPC Bridge - getPublicKey', () => {
 describe('Client RPC Bridge - Error Handling', () => {
   let client: KMSClient;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     client = new KMSClient();
+    // Setup passphrase to unlock worker for crypto operations
+    await client.setupPassphrase('test-passphrase-12345');
   });
 
   afterEach(() => {
@@ -386,8 +394,10 @@ describe('Client RPC Bridge - Error Handling', () => {
 describe('Client RPC Bridge - Request Correlation', () => {
   let client: KMSClient;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     client = new KMSClient();
+    // Setup passphrase to unlock worker for crypto operations
+    await client.setupPassphrase('test-passphrase-12345');
   });
 
   afterEach(() => {
@@ -434,5 +444,54 @@ describe('Client RPC Bridge - Request Correlation', () => {
     expect(results[0]).toHaveProperty('kid');
     expect(results[1]).toHaveProperty('jwt');
     expect(results[2]).toHaveProperty('publicKey');
+  });
+});
+
+describe('Client RPC Bridge - Unlock Methods', () => {
+  let client: KMSClient;
+
+  beforeEach(() => {
+    client = new KMSClient();
+  });
+
+  afterEach(() => {
+    client.destroy();
+  });
+
+  it('should have setupPassphrase method', () => {
+    expect(typeof client.setupPassphrase).toBe('function');
+  });
+
+  it('should have unlockWithPassphrase method', () => {
+    expect(typeof client.unlockWithPassphrase).toBe('function');
+  });
+
+  it('should have isUnlockSetup method', () => {
+    expect(typeof client.isUnlockSetup).toBe('function');
+  });
+
+  it('should return promise for setupPassphrase', async () => {
+    const result = client.setupPassphrase('test-passphrase-12345');
+    expect(result).toBeInstanceOf(Promise);
+    await result; // Must await to prevent unhandled rejection
+  });
+
+  it('should return promise for unlockWithPassphrase', async () => {
+    await client.setupPassphrase('test-pass-12345');
+    const result = client.unlockWithPassphrase('test-pass-12345');
+    expect(result).toBeInstanceOf(Promise);
+    await result; // Must await to prevent unhandled rejection
+  });
+
+  it('should return promise for isUnlockSetup', async () => {
+    const result = client.isUnlockSetup();
+    expect(result).toBeInstanceOf(Promise);
+    await result; // Must await to prevent unhandled rejection
+  });
+
+  it('should check unlock setup status', async () => {
+    const result = await client.isUnlockSetup();
+    expect(result).toHaveProperty('isSetup');
+    expect(typeof result.isSetup).toBe('boolean');
   });
 });

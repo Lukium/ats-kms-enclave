@@ -11,6 +11,11 @@
 
 import { initDB, wrapKey, unwrapKey, getWrappedKey } from './storage.js';
 import { initAuditLogger, logOperation, type AuditOperation } from './audit.js';
+import {
+  setupPassphrase,
+  unlockWithPassphrase,
+  isSetup,
+} from './unlock.js';
 
 // ============================================================================
 // Type Definitions
@@ -50,11 +55,9 @@ interface JWTPayload {
 // Initialization state
 let isInitialized = false;
 
-// Temporary wrapping key (Phase 1 - will be replaced by unlock manager in next task)
-// TODO: Replace with proper unlock manager that derives key from passphrase/passkey
+// Unlock state (replaces temporary wrapping key)
 let wrappingKey: CryptoKey | null = null;
-const TEMP_SALT = new Uint8Array(16); // All zeros - temporary placeholder
-const TEMP_ITERATIONS = 600000;
+let isUnlocked = false;
 
 /**
  * Initialize worker storage and audit logging
@@ -67,27 +70,28 @@ async function init(): Promise<void> {
   await initDB();
   await initAuditLogger();
 
-  // Generate temporary wrapping key (will be replaced by unlock manager)
-  // In Phase 1+, this will be derived from user passphrase/passkey
-  // For now, generate a fresh key each time (keys won't persist across worker restarts)
-  wrappingKey = await crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    false, // non-extractable
-    ['wrapKey', 'unwrapKey']
-  );
-
   isInitialized = true;
 }
 
 /**
- * Get the current wrapping key (temporary implementation)
+ * Get the current wrapping key
+ * @throws {Error} if worker is not unlocked
  */
 function getWrappingKey(): CryptoKey {
-  /* c8 ignore next 3 - defensive: init() always called before this */
-  if (!wrappingKey) {
-    throw new Error('Worker not initialized');
+  if (!isUnlocked || !wrappingKey) {
+    throw new Error('Worker not unlocked');
   }
   return wrappingKey;
+}
+
+/**
+ * Reset worker state (for testing only)
+ * @internal
+ */
+export function resetWorkerState(): void {
+  isInitialized = false;
+  wrappingKey = null;
+  isUnlocked = false;
 }
 
 // ============================================================================
@@ -120,6 +124,87 @@ function generateKid(purpose: string): string {
 // ============================================================================
 
 /**
+ * Setup passphrase for first-time unlock
+ */
+async function setupPassphraseMethod(
+  passphrase: string,
+  requestId: string,
+  origin?: string
+): Promise<{ success: boolean; error?: string }> {
+  // Ensure worker is initialized
+  await init();
+
+  // Call unlock manager to setup
+  const result = await setupPassphrase(passphrase);
+
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+
+  // Store the wrapping key and mark as unlocked
+  wrappingKey = result.key;
+  isUnlocked = true;
+
+  // Log operation to audit log
+  const auditOp: AuditOperation = {
+    op: 'setup',
+    kid: 'unlock',
+    requestId,
+    /* c8 ignore next */
+    ...(origin && { origin }),
+  };
+  await logOperation(auditOp);
+
+  return { success: true };
+}
+
+/**
+ * Unlock with passphrase
+ */
+async function unlockWithPassphraseMethod(
+  passphrase: string,
+  requestId: string,
+  origin?: string
+): Promise<{ success: boolean; error?: string }> {
+  // Ensure worker is initialized
+  await init();
+
+  // Call unlock manager to unlock
+  const result = await unlockWithPassphrase(passphrase);
+
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+
+  // Store the wrapping key and mark as unlocked
+  wrappingKey = result.key;
+  isUnlocked = true;
+
+  // Log operation to audit log
+  const auditOp: AuditOperation = {
+    op: 'unlock',
+    kid: 'unlock',
+    requestId,
+    /* c8 ignore next */
+    ...(origin && { origin }),
+  };
+  await logOperation(auditOp);
+
+  return { success: true };
+}
+
+/**
+ * Check if unlock is configured
+ */
+async function isUnlockSetup(): Promise<{ isSetup: boolean }> {
+  // Ensure worker is initialized
+  await init();
+
+  const setup = await isSetup();
+  return { isSetup: setup };
+}
+
+/**
  * Generate a VAPID keypair
  */
 async function generateVAPID(requestId: string, origin?: string): Promise<VAPIDKeyPair> {
@@ -146,7 +231,7 @@ async function generateVAPID(requestId: string, origin?: string): Promise<VAPIDK
   const kid = generateKid('vapid');
 
   // Wrap and store keypair
-  await wrapKey(keypair.privateKey, getWrappingKey(), kid, TEMP_SALT, TEMP_ITERATIONS, {
+  await wrapKey(keypair.privateKey, getWrappingKey(), kid, undefined, undefined, {
     publicKeyRaw: publicKeyRaw,
     alg: 'ES256',
     purpose: 'vapid',
@@ -398,6 +483,84 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         };
       }
 
+      case 'setupPassphrase': {
+        // Validate params
+        if (!request.params || typeof request.params !== 'object') {
+          return {
+            id: request.id,
+            error: {
+              code: 'INVALID_PARAMS',
+              message: 'setupPassphrase requires params object',
+            },
+          };
+        }
+
+        const params = request.params as { passphrase?: string };
+
+        if (!params.passphrase || typeof params.passphrase !== 'string') {
+          return {
+            id: request.id,
+            error: {
+              code: 'INVALID_PARAMS',
+              message: 'setupPassphrase requires passphrase parameter',
+            },
+          };
+        }
+
+        const result = await setupPassphraseMethod(
+          params.passphrase,
+          request.id,
+          request.origin
+        );
+        return {
+          id: request.id,
+          result,
+        };
+      }
+
+      case 'unlockWithPassphrase': {
+        // Validate params
+        if (!request.params || typeof request.params !== 'object') {
+          return {
+            id: request.id,
+            error: {
+              code: 'INVALID_PARAMS',
+              message: 'unlockWithPassphrase requires params object',
+            },
+          };
+        }
+
+        const params = request.params as { passphrase?: string };
+
+        if (!params.passphrase || typeof params.passphrase !== 'string') {
+          return {
+            id: request.id,
+            error: {
+              code: 'INVALID_PARAMS',
+              message: 'unlockWithPassphrase requires passphrase parameter',
+            },
+          };
+        }
+
+        const result = await unlockWithPassphraseMethod(
+          params.passphrase,
+          request.id,
+          request.origin
+        );
+        return {
+          id: request.id,
+          result,
+        };
+      }
+
+      case 'isUnlockSetup': {
+        const result = await isUnlockSetup();
+        return {
+          id: request.id,
+          result,
+        };
+      }
+
       default:
         return {
           id: request.id,
@@ -428,11 +591,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 /**
  * Set up message listener for Worker context
  */
-/* c8 ignore start - only runs in real Worker context, not in tests */
+/* c8 ignore next 7 - only runs in real Worker context, not in tests */
 if (typeof self !== 'undefined' && 'onmessage' in self) {
   self.onmessage = async (event: MessageEvent): Promise<void> => {
     const response = await handleMessage(event.data as RPCRequest);
     self.postMessage(response);
   };
 }
-/* c8 ignore stop */

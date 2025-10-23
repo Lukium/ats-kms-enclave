@@ -118,6 +118,44 @@ export class KMSClient {
     }
   }
 
+  // ============================================================================
+  // Unlock Methods
+  // ============================================================================
+
+  /**
+   * Setup passphrase for first-time unlock
+   */
+  setupPassphrase(
+    passphrase: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>('setupPassphrase', {
+      passphrase,
+    });
+  }
+
+  /**
+   * Unlock with passphrase
+   */
+  unlockWithPassphrase(
+    passphrase: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>(
+      'unlockWithPassphrase',
+      { passphrase }
+    );
+  }
+
+  /**
+   * Check if unlock is configured
+   */
+  isUnlockSetup(): Promise<{ isSetup: boolean }> {
+    return this.request<{ isSetup: boolean }>('isUnlockSetup');
+  }
+
+  // ============================================================================
+  // Crypto Operations (require unlock)
+  // ============================================================================
+
   generateVAPID(): Promise<{ kid: string; publicKey: string }> {
     return this.request<{ kid: string; publicKey: string }>('generateVAPID');
   }

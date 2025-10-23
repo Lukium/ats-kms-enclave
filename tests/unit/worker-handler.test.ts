@@ -9,11 +9,18 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { handleMessage } from '@/worker';
+import { handleMessage, resetWorkerState } from '@/worker';
 
-// Initialize IndexedDB before each test
-beforeEach(() => {
+// Initialize IndexedDB and unlock worker before each test
+beforeEach(async () => {
   globalThis.indexedDB = new IDBFactory();
+
+  // Setup passphrase to unlock the worker for crypto operations
+  await handleMessage({
+    id: 'setup-test',
+    method: 'setupPassphrase',
+    params: { passphrase: 'test-passphrase-12345' },
+  });
 });
 
 // Type definitions for our RPC protocol
@@ -21,6 +28,7 @@ interface RPCRequest {
   id: string;
   method: string;
   params?: unknown;
+  origin?: string;
 }
 
 interface RPCResponse {
@@ -539,5 +547,278 @@ describe('Worker RPC Handler - Error Handling', () => {
 
     expect(response.id).toBe('req-405-error-id');
     expect(response.error).toBeDefined();
+  });
+});
+
+describe('Worker RPC Handler - Unlock Error Paths', () => {
+  // No beforeEach setup - test error paths in clean state
+
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory();
+  });
+
+  it('should return error result for setupPassphrase with too-short passphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-600',
+      method: 'setupPassphrase',
+      params: {
+        passphrase: 'short', // Too short
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('PASSPHRASE_TOO_SHORT');
+  });
+
+  it('should return success:false for unlockWithPassphrase with wrong passphrase', async () => {
+    // Setup first with a known passphrase
+    const setupResponse = await handleMessage({
+      id: 'req-600a',
+      method: 'setupPassphrase',
+      params: { passphrase: 'correct-passphrase-12345' },
+    });
+
+    // Verify setup succeeded or already setup
+    const setupResult = setupResponse.result as { success: boolean; error?: string };
+    if (!setupResult.success && setupResult.error !== 'ALREADY_SETUP') {
+      throw new Error(`Setup failed: ${setupResult.error}`);
+    }
+
+    // Then try to unlock with wrong passphrase
+    const request: RPCRequest = {
+      id: 'req-601',
+      method: 'unlockWithPassphrase',
+      params: {
+        passphrase: 'wrong-passphrase-12345',
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('INCORRECT_PASSPHRASE');
+  });
+
+  it('should return error when attempting crypto operations without unlock', async () => {
+    // Reset worker state to simulate uninitialized worker
+    resetWorkerState();
+
+    // Try to generate VAPID without unlocking
+    const request: RPCRequest = {
+      id: 'req-602',
+      method: 'generateVAPID',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    // Should get a CRYPTO_ERROR
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('CRYPTO_ERROR');
+    expect(response.error?.message).toContain('Worker not unlocked');
+  });
+});
+
+describe('Worker RPC Handler - Unlock Methods', () => {
+  it('should handle isUnlockSetup method', async () => {
+    const request: RPCRequest = {
+      id: 'req-500',
+      method: 'isUnlockSetup',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.id).toBe('req-500');
+    expect(response.result).toBeDefined();
+    expect(response.error).toBeUndefined();
+
+    const result = response.result as { isSetup: boolean };
+    expect(typeof result.isSetup).toBe('boolean');
+  });
+
+  it('should handle origin parameter in setupPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-500b',
+      method: 'setupPassphrase',
+      params: { passphrase: 'test-origin-pass-12345' },
+      origin: 'https://test.example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.id).toBe('req-500b');
+    expect(response.result).toBeDefined();
+  });
+
+  it('should handle origin parameter in unlockWithPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-500c',
+      method: 'unlockWithPassphrase',
+      params: { passphrase: 'test-passphrase-12345' },
+      origin: 'https://test.example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.id).toBe('req-500c');
+    expect(response.result).toBeDefined();
+  });
+
+  it('should handle origin parameter in generateVAPID', async () => {
+    const request: RPCRequest = {
+      id: 'req-500d',
+      method: 'generateVAPID',
+      origin: 'https://test.example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.id).toBe('req-500d');
+    expect(response.result).toBeDefined();
+
+    const result = response.result as VAPIDKeyPair;
+    expect(result.kid).toBeDefined();
+  });
+
+  it('should return isSetup: true after setupPassphrase', async () => {
+    // First check before setup
+    const checkBefore: RPCRequest = {
+      id: 'req-501a',
+      method: 'isUnlockSetup',
+    };
+    const beforeResponse = await handleMessage(checkBefore) as RPCResponse;
+    const beforeResult = beforeResponse.result as { isSetup: boolean };
+    expect(beforeResult.isSetup).toBe(true); // Already set up in beforeEach
+
+    // The beforeEach already set up passphrase, so isSetup should be true
+  });
+
+  it('should require params for setupPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-502',
+      method: 'setupPassphrase',
+      // Missing params
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('params');
+  });
+
+  it('should require passphrase parameter for setupPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-503',
+      method: 'setupPassphrase',
+      params: {
+        // params exists but passphrase is missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('passphrase');
+  });
+
+  it('should require params for unlockWithPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-504',
+      method: 'unlockWithPassphrase',
+      // Missing params
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('params');
+  });
+
+  it('should require passphrase parameter for unlockWithPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-505',
+      method: 'unlockWithPassphrase',
+      params: {
+        // params exists but passphrase is missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('passphrase');
+  });
+
+  it('should reject non-string passphrase for setupPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-506',
+      method: 'setupPassphrase',
+      params: {
+        passphrase: 12345, // Invalid type
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+  });
+
+  it('should reject non-string passphrase for unlockWithPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-507',
+      method: 'unlockWithPassphrase',
+      params: {
+        passphrase: 12345, // Invalid type
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+  });
+
+  it('should return error for setupPassphrase with short passphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-508',
+      method: 'setupPassphrase',
+      params: {
+        passphrase: 'short', // Too short
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+  });
+
+  it('should return error for unlockWithPassphrase with incorrect passphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-509',
+      method: 'unlockWithPassphrase',
+      params: {
+        passphrase: 'wrong-passphrase-12345', // Incorrect
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
   });
 });

@@ -418,15 +418,15 @@ export async function getAllMeta(): Promise<
  * @param key - The CryptoKey to wrap (e.g., ECDSA private key)
  * @param unwrapKey - The AES-GCM key used for wrapping
  * @param kid - Key identifier
- * @param salt - Salt used in key derivation (16 bytes)
- * @param iterations - PBKDF2 iterations
+ * @param salt - Optional: Salt used in key derivation (16 bytes) - for metadata only
+ * @param iterations - Optional: PBKDF2 iterations - for metadata only
  */
 export async function wrapKey(
   key: CryptoKey,
   unwrapKey: CryptoKey,
   kid: string,
-  salt: Uint8Array,
-  iterations: number,
+  salt?: Uint8Array,
+  iterations?: number,
   options?: {
     publicKeyRaw?: ArrayBuffer; // Already exported public key bytes
     alg?: string;
@@ -452,9 +452,9 @@ export async function wrapKey(
     wrapParams: {
       alg: 'AES-GCM',
       keySize: 256,
-      salt: salt.buffer,
+      salt: salt ? salt.buffer : new ArrayBuffer(0),
       iv: iv.buffer,
-      iterations,
+      iterations: iterations ?? 0,
     },
     wrappedAt: new Date().toISOString(),
     ...(options?.publicKeyRaw && { publicKeyRaw: options.publicKeyRaw }),

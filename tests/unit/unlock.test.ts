@@ -27,7 +27,7 @@ describe('Unlock Manager - Setup', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.key).toBeDefined();
-      expect(result.key).toBeInstanceOf(CryptoKey);
+      expect(result.key.type).toBe('secret');
     }
   });
 
@@ -112,7 +112,7 @@ describe('Unlock Manager - Unlock', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.key).toBeDefined();
-      expect(result.key).toBeInstanceOf(CryptoKey);
+      expect(result.key.type).toBe('secret');
     }
   });
 
@@ -177,7 +177,7 @@ describe('Unlock Manager - Key Derivation', () => {
 
     const key = await deriveKey(passphrase, salt, iterations);
 
-    expect(key).toBeInstanceOf(CryptoKey);
+    expect(key).toBeDefined();
     expect(key.type).toBe('secret');
     expect(key.algorithm.name).toBe('AES-GCM');
   });

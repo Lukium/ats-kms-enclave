@@ -458,6 +458,26 @@ describe('Storage - Key Wrapping', () => {
     expect(Array.from(iv1)).not.toEqual(Array.from(iv2));
   });
 
+  it('should wrap key without salt and iterations (optional params)', async () => {
+    const keypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const kid = 'test-key-no-salt';
+
+    // Call wrapKey without salt/iterations
+    await wrapKey(keypair.privateKey, testUnwrapKey, kid);
+
+    // Verify key was stored with default values
+    const stored = await getWrappedKey(kid);
+    expect(stored).toBeDefined();
+    expect(stored?.kid).toBe(kid);
+    expect(stored?.wrapParams.iterations).toBe(0);
+    expect(stored?.wrapParams.salt.byteLength).toBe(0);
+  });
+
   it('should unwrap a wrapped key', async () => {
     // Generate and wrap a key
     const originalKeypair = await crypto.subtle.generateKey(

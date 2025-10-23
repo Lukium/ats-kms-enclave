@@ -36,24 +36,26 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-23 17:57:31 UTC*
+*Last updated: 2025-10-23 18:47:03 UTC*
 
 **Test Results:**
-- Test Files: 8 passed (8)
-- Tests: 190 passed (190)
-- Duration: ~1s
+- Test Files: 9 passed (9)
+- Tests: 219 passed (219)
+- Duration: 3.69s
 
 **Coverage Report:**
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 1739    │     100│      100 │     100│     100 │
+All files           │ 1939    │     100│      100 │     100│     100 │
  audit.ts           │ 347     │     100│      100 │     100│     100 │ 
- client.ts          │ 133     │     100│      100 │     100│     100 │ 
+ client.ts          │ 171     │     100│      100 │     100│     100 │ 
  storage.ts         │ 502     │     100│      100 │     100│     100 │ 
  unlock.ts          │ 318     │     100│      100 │     100│     100 │ 
- worker.ts          │ 439     │     100│      100 │     100│     100 │ 
+ worker.ts          │ 601     │     100│      100 │     100│     100 │ 
 ```
+
+**Coverage Exceptions:** 51 lines excluded ([view exceptions](COVERAGE_EXCEPTIONS.yml))
 <!-- END AUTO-GENERATED -->
 
 ## Documentation

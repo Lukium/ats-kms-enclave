@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ATS KMS Enclave - Phase 0 Demo</title>
+  <title>ATS KMS Enclave - Progressive Verification Demo</title>
   <style>
     * {
       margin: 0;
@@ -12,17 +12,18 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       padding: 2rem;
+      line-height: 1.6;
     }
 
     .container {
-      max-width: 800px;
+      max-width: 1400px;
       margin: 0 auto;
       background: white;
-      border-radius: 12px;
+      border-radius: 16px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
       overflow: hidden;
     }
@@ -30,63 +31,56 @@
     .header {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 2rem;
+      padding: 2.5rem 2rem;
       text-align: center;
     }
 
     .header h1 {
-      font-size: 2rem;
+      font-size: 2.5rem;
       margin-bottom: 0.5rem;
+      font-weight: 700;
     }
 
     .header p {
-      opacity: 0.9;
-      font-size: 0.95rem;
+      opacity: 0.95;
+      font-size: 1rem;
     }
 
     .content {
       padding: 2rem;
     }
 
-    .section {
+    .controls {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
       margin-bottom: 2rem;
       padding: 1.5rem;
       background: #f8f9fa;
-      border-radius: 8px;
-      border: 1px solid #e9ecef;
-    }
-
-    .section h2 {
-      color: #667eea;
-      margin-bottom: 1rem;
-      font-size: 1.25rem;
-    }
-
-    .button-group {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 1rem;
-      flex-wrap: wrap;
+      border-radius: 12px;
     }
 
     button {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       border: none;
-      padding: 0.75rem 1.5rem;
-      border-radius: 6px;
-      font-size: 0.95rem;
-      font-weight: 500;
+      padding: 0.875rem 1.75rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
       cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
+      transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+      min-width: 180px;
     }
 
-    button:hover {
+    button:hover:not(:disabled) {
       transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
     }
 
-    button:active {
+    button:active:not(:disabled) {
       transform: translateY(0);
     }
 
@@ -96,51 +90,219 @@
       transform: none;
     }
 
-    .output {
-      background: #2d3748;
-      color: #a0aec0;
+    button#full-btn {
+      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      box-shadow: 0 4px 12px rgba(72, 187, 120, 0.3);
+    }
+
+    button#full-btn:hover:not(:disabled) {
+      box-shadow: 0 6px 20px rgba(72, 187, 120, 0.4);
+    }
+
+    .verification-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .verify-card {
+      background: white;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .verify-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 12px rgba(0,0,0,0.1);
+    }
+
+    .verify-card h3 {
+      color: #2d3748;
+      margin-bottom: 1rem;
+      font-size: 1.25rem;
+    }
+
+    .explanation {
+      background: #edf2f7;
       padding: 1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      color: #4a5568;
+      margin-bottom: 1.5rem;
+      line-height: 1.7;
+    }
+
+    .explanation strong {
+      color: #2d3748;
+    }
+
+    .checks {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .check-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      border-radius: 6px;
+      border-left: 3px solid transparent;
+    }
+
+    .check-item.pass {
+      border-left-color: #48bb78;
+      background: #f0fff4;
+    }
+
+    .check-item.fail {
+      border-left-color: #f56565;
+      background: #fff5f5;
+    }
+
+    .check-item.pending {
+      border-left-color: #cbd5e0;
+      background: #f7fafc;
+      opacity: 0.7;
+    }
+
+    .check-icon {
+      font-size: 1.2rem;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .check-label {
+      flex: 1;
+      font-weight: 500;
+      color: #2d3748;
+      font-size: 0.95rem;
+    }
+
+    .check-item.pending .check-label {
+      color: #718096;
+    }
+
+    .check-detail {
+      margin-top: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid #e2e8f0;
+      font-size: 0.85rem;
+      color: #718096;
+      font-family: 'Monaco', 'Menlo', monospace;
+      word-break: break-all;
+      line-height: 1.6;
+      max-width: 100%;
+      overflow-wrap: break-word;
+    }
+
+    #output-section {
+      margin-top: 2rem;
+    }
+
+    .output-card {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 1.5rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .output-card h4 {
+      color: #90cdf4;
+      margin-bottom: 1rem;
+      font-size: 1.2rem;
+    }
+
+    .output-item {
+      margin-bottom: 1rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #4a5568;
+    }
+
+    .output-item:last-of-type {
+      border-bottom: none;
+    }
+
+    .output-item strong {
+      display: block;
+      color: #90cdf4;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+
+    .output-item code {
+      display: block;
+      background: #1a202c;
+      padding: 0.75rem;
       border-radius: 6px;
       font-family: 'Monaco', 'Menlo', monospace;
       font-size: 0.85rem;
-      line-height: 1.6;
-      max-height: 300px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
+      color: #68d391;
+      overflow-x: auto;
+      white-space: nowrap;
     }
 
-    .output.empty {
-      color: #718096;
+    .output-item code.truncate {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .output-item code.wrap {
+      white-space: pre-wrap;
+      word-break: break-all;
+      overflow-wrap: break-word;
+    }
+
+    .output-item .length {
+      display: inline-block;
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: #a0aec0;
       font-style: italic;
     }
 
-    .status {
-      display: inline-block;
-      padding: 0.25rem 0.75rem;
-      border-radius: 12px;
+    details {
+      margin-top: 0.75rem;
+      cursor: pointer;
+    }
+
+    details summary {
+      color: #90cdf4;
+      font-size: 0.9rem;
+      padding: 0.5rem 0;
+      user-select: none;
+    }
+
+    details summary:hover {
+      color: #63b3ed;
+    }
+
+    details pre {
+      background: #1a202c;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
       font-size: 0.85rem;
-      font-weight: 500;
-      margin-bottom: 1rem;
+      color: #68d391;
+      margin-top: 0.5rem;
     }
 
-    .status.success {
-      background: #c6f6d5;
-      color: #22543d;
-    }
-
-    .status.error {
-      background: #fed7d7;
-      color: #742a2a;
-    }
-
-    .status.info {
-      background: #bee3f8;
-      color: #2c5282;
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: #a0aec0;
+      font-style: italic;
     }
 
     .footer {
-      padding: 1.5rem 2rem;
+      padding: 2rem;
       background: #f8f9fa;
       color: #6c757d;
       text-align: center;
@@ -148,33 +310,27 @@
       border-top: 1px solid #e9ecef;
     }
 
-    .key-info {
-      background: white;
-      padding: 0.75rem;
-      border-radius: 6px;
-      margin-bottom: 0.5rem;
-      border-left: 3px solid #667eea;
-    }
-
-    .key-info strong {
+    .footer strong {
       color: #667eea;
-      display: inline-block;
-      width: 100px;
     }
 
-    .loading {
-      display: inline-block;
-      width: 12px;
-      height: 12px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-left: 0.5rem;
-    }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    @media (max-width: 768px) {
+      body {
+        padding: 1rem;
+      }
+
+      .header h1 {
+        font-size: 2rem;
+      }
+
+      .controls {
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -182,49 +338,32 @@
   <div class="container">
     <div class="header">
       <h1>🔐 ATS KMS Enclave</h1>
-      <p>Phase 0 Prototype - VAPID Key Generation & JWT Signing</p>
+      <p>Progressive Verification Demo - Watch The Checks Fill In</p>
     </div>
 
     <div class="content">
-      <div class="section">
-        <h2>1. Generate VAPID Keypair</h2>
-        <div class="button-group">
-          <button id="generate-btn">Generate New VAPID Key</button>
-        </div>
-        <div id="vapid-output" class="output empty">Click "Generate" to create a new VAPID keypair...</div>
+      <div class="controls">
+        <button id="gen-btn">1️⃣ Generate VAPID Keypair</button>
+        <button id="sign-btn" disabled>2️⃣ Sign JWT Token</button>
+        <button id="full-btn">▶️ Run Full Demo</button>
       </div>
 
-      <div class="section">
-        <h2>2. Sign JWT Token</h2>
-        <div class="button-group">
-          <button id="sign-btn" disabled>Sign JWT with Key</button>
-        </div>
-        <div id="jwt-output" class="output empty">Generate a VAPID key first...</div>
+      <div class="verification-cards">
+        <div id="pubkey-card"></div>
+        <div id="jwt-card"></div>
+        <div id="keyprops-card"></div>
       </div>
 
-      <div class="section">
-        <h2>3. Retrieve Public Key</h2>
-        <div class="button-group">
-          <button id="getkey-btn" disabled>Get Public Key</button>
-        </div>
-        <div id="getkey-output" class="output empty">Generate a VAPID key first...</div>
-      </div>
-
-      <div class="section">
-        <h2>4. Full Workflow Test</h2>
-        <div class="button-group">
-          <button id="test-btn">Run Complete Test</button>
-        </div>
-        <div id="test-output" class="output empty">Run test to verify all operations work...</div>
-      </div>
+      <div id="output-section"></div>
     </div>
 
     <div class="footer">
-      <strong>Phase 0</strong> - In-memory storage, Worker-based isolation<br>
-      Built with TDD • 100% test coverage • 108 tests passing
+      <strong>Phase 0 Prototype</strong> - In-memory storage, Worker-based isolation<br>
+      Built with TDD • 100% test coverage • 109 tests passing<br>
+      <small style="margin-top: 0.5rem; display: block;">All cryptographic operations use WebCrypto API with non-extractable private keys</small>
     </div>
   </div>
 
-  <script type="module" src="./demo.js"></script>
+  <script type="module" src="./demo-progressive.js"></script>
 </body>
 </html>

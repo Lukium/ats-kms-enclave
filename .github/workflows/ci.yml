@@ -33,28 +33,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run tests
-        run: pnpm test
-
-      - name: Check coverage (MUST be 100%)
+      - name: Run tests with coverage (enforces 100%)
         run: pnpm test:coverage
-
-      - name: Verify 100% coverage
-        run: |
-          # Extract coverage percentages
-          LINES=$(pnpm test:coverage | grep -oP 'Lines\s+:\s+\K[\d.]+')
-          BRANCHES=$(pnpm test:coverage | grep -oP 'Branches\s+:\s+\K[\d.]+')
-          FUNCTIONS=$(pnpm test:coverage | grep -oP 'Functions\s+:\s+\K[\d.]+')
-          STATEMENTS=$(pnpm test:coverage | grep -oP 'Statements\s+:\s+\K[\d.]+')
-
-          # Check if all are 100%
-          if [ "$LINES" != "100" ] || [ "$BRANCHES" != "100" ] || [ "$FUNCTIONS" != "100" ] || [ "$STATEMENTS" != "100" ]; then
-            echo "❌ Coverage is below 100%"
-            echo "Lines: $LINES%, Branches: $BRANCHES%, Functions: $FUNCTIONS%, Statements: $STATEMENTS%"
-            exit 1
-          fi
-
-          echo "✅ Coverage is 100%"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3

@@ -16,7 +16,8 @@
     "build:reproducible": "node build/esbuild.js --reproducible",
     "demo": "vite --config example/vite.config.ts",
     "demo:build": "vite build --config example/vite.config.ts",
-    "demo:phase-0": "vite --config example/vite.config.ts"
+    "demo:phase-0": "vite --config example/vite.config.ts",
+    "demo:enhanced": "vite --config example/vite.config.ts --open /index-enhanced.html"
   },
   "keywords": [
     "cryptography",

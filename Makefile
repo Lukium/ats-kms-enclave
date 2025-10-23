@@ -1,4 +1,4 @@
-.PHONY: help install test typecheck lint pre-commit clean
+.PHONY: help install test test-coverage test-coverage-lines typecheck lint pre-commit clean demo demo-phase-0
 
 # Default target - show help
 help:
@@ -9,9 +9,10 @@ help:
 	@echo "Targets:"
 	@echo "  help           Show this help message"
 	@echo "  install        Install dependencies"
-	@echo "  test           Run all tests"
-	@echo "  test-coverage  Run tests with 100% coverage enforcement"
-	@echo "  typecheck      Run TypeScript type checking"
+	@echo "  test                   Run all tests"
+	@echo "  test-coverage          Run tests with 100% coverage enforcement"
+	@echo "  test-coverage-lines    Run tests with coverage + line counts"
+	@echo "  typecheck              Run TypeScript type checking"
 	@echo "  lint           Run ESLint"
 	@echo "  pre-commit     Run all pre-commit checks (test-coverage + typecheck + lint)"
 	@echo "  demo           Run latest demo (currently Phase 0)"
@@ -38,6 +39,11 @@ test-coverage:
 	@echo "🎯 Running tests with coverage..."
 	pnpm test:coverage
 
+# Run tests with coverage + line counts
+test-coverage-lines:
+	@echo "📊 Running tests with coverage and line counts..."
+	pnpm test:coverage:lines
+
 # Run TypeScript type checking
 typecheck:
 	@echo "🔍 Type checking..."
@@ -49,10 +55,14 @@ lint:
 	pnpm lint
 
 # Run all pre-commit checks
-pre-commit: test-coverage typecheck lint
+pre-commit: test-coverage-lines typecheck lint
+	@echo ""
+	@echo "📝 Updating README.md with test stats..."
+	@pnpm update:readme
 	@echo ""
 	@echo "✅ All pre-commit checks passed!"
 	@echo "✅ 100% test coverage verified!"
+	@echo "✅ README.md updated!"
 	@echo "Ready to commit 🚀"
 
 # Run latest demo (alias to current phase)

@@ -127,9 +127,7 @@ describe('Client RPC Bridge - generateVAPID', () => {
     client = new KMSClient();
   });
 
-  afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  afterEach(() => {
     client.destroy();
   });
 
@@ -137,9 +135,11 @@ describe('Client RPC Bridge - generateVAPID', () => {
     expect(typeof client.generateVAPID).toBe('function');
   });
 
-  it('should return a promise', () => {
+  it('should return a promise', async () => {
     const result = client.generateVAPID();
     expect(result).toBeInstanceOf(Promise);
+    // Must await to prevent unhandled rejection on cleanup
+    await result;
   });
 
   it('should generate VAPID keypair', async () => {
@@ -175,9 +175,7 @@ describe('Client RPC Bridge - signJWT', () => {
     kid = result.kid;
   });
 
-  afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  afterEach(() => {
     client.destroy();
   });
 
@@ -185,7 +183,7 @@ describe('Client RPC Bridge - signJWT', () => {
     expect(typeof client.signJWT).toBe('function');
   });
 
-  it('should return a promise', () => {
+  it('should return a promise', async () => {
     const payload: JWTPayload = {
       aud: 'https://fcm.googleapis.com',
       sub: 'mailto:test@ats.run',
@@ -194,6 +192,8 @@ describe('Client RPC Bridge - signJWT', () => {
 
     const result = client.signJWT(kid, payload);
     expect(result).toBeInstanceOf(Promise);
+    // Must await to prevent unhandled rejection on cleanup
+    await result;
   });
 
   it('should sign JWT with valid kid', async () => {
@@ -248,9 +248,7 @@ describe('Client RPC Bridge - getPublicKey', () => {
     publicKey = result.publicKey;
   });
 
-  afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  afterEach(() => {
     client.destroy();
   });
 
@@ -258,9 +256,11 @@ describe('Client RPC Bridge - getPublicKey', () => {
     expect(typeof client.getPublicKey).toBe('function');
   });
 
-  it('should return a promise', () => {
+  it('should return a promise', async () => {
     const result = client.getPublicKey(kid);
     expect(result).toBeInstanceOf(Promise);
+    // Must await to prevent unhandled rejection on cleanup
+    await result;
   });
 
   it('should retrieve public key for valid kid', async () => {
@@ -283,9 +283,7 @@ describe('Client RPC Bridge - Error Handling', () => {
     client = new KMSClient();
   });
 
-  afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  afterEach(() => {
     client.destroy();
   });
 
@@ -323,7 +321,7 @@ describe('Client RPC Bridge - Error Handling', () => {
   it('should handle worker onerror events', async () => {
     // Suppress console.error for this test
     const consoleError = console.error;
-    console.error = () => {};
+    console.error = (): void => {};
 
     try {
       // Start a request
@@ -346,6 +344,37 @@ describe('Client RPC Bridge - Error Handling', () => {
       console.error = consoleError;
     }
   });
+
+  it('should log warning for responses with unknown request IDs', () => {
+    // Suppress console.warn for this test
+    const consoleWarn = console.warn;
+    const warnings: unknown[] = [];
+    console.warn = (...args: unknown[]): void => {
+      warnings.push(args);
+    };
+
+    try {
+      // Simulate receiving a response for a non-existent request
+      const worker = (client as unknown as { worker: Worker }).worker;
+      if (worker && worker.onmessage) {
+        const fakeResponse = {
+          id: 'non-existent-request-id',
+          result: { some: 'data' },
+        };
+        const messageEvent = new MessageEvent('message', { data: fakeResponse });
+        worker.onmessage(messageEvent);
+      }
+
+      // Verify warning was logged
+      expect(warnings.length).toBeGreaterThan(0);
+      const warningArgs = warnings[0] as unknown[];
+      expect(warningArgs[0]).toContain('Received response for unknown request');
+      expect(warningArgs[1]).toBe('non-existent-request-id');
+    } finally {
+      // Restore console.warn
+      console.warn = consoleWarn;
+    }
+  });
 });
 
 describe('Client RPC Bridge - Request Correlation', () => {
@@ -355,9 +384,7 @@ describe('Client RPC Bridge - Request Correlation', () => {
     client = new KMSClient();
   });
 
-  afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  afterEach(() => {
     client.destroy();
   });
 

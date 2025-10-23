@@ -37,10 +37,13 @@ if (typeof Worker === 'undefined') {
 
             const messageEvent = new MessageEvent('message', { data: response });
 
+            // Only dispatch event - onmessage will be called automatically by EventTarget
+            // if it's set (similar to real Worker behavior)
             if (this.onmessage) {
               this.onmessage(messageEvent);
+            } else {
+              this.dispatchEvent(messageEvent);
             }
-            this.dispatchEvent(messageEvent);
           })
           .catch((error: Error) => {
             if (this.isTerminated) {
@@ -52,10 +55,13 @@ if (typeof Worker === 'undefined') {
               message: error.message,
             });
 
+            // Only dispatch event - onerror will be called automatically by EventTarget
+            // if it's set (similar to real Worker behavior)
             if (this.onerror) {
               this.onerror(errorEvent);
+            } else {
+              this.dispatchEvent(errorEvent);
             }
-            this.dispatchEvent(errorEvent);
           });
       }, 0);
     }

@@ -21,10 +21,14 @@ describe('Client RPC Bridge - Initialization', () => {
   let client: KMSClient;
 
   afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Wait for any pending async operations to complete
+    await new Promise((resolve) => setTimeout(resolve, 20));
     if (client) {
-      client.destroy();
+      try {
+        client.destroy();
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   });
 
@@ -52,10 +56,15 @@ describe('Client RPC Bridge - Worker Management', () => {
   });
 
   afterEach(async () => {
-    // Wait a bit for any pending async operations
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Wait for any pending async operations to complete
+    await new Promise((resolve) => setTimeout(resolve, 20));
     if (client && !(client as unknown as { destroyed: boolean }).destroyed) {
-      client.destroy();
+      // Destroy and suppress expected "Client destroyed" rejections
+      try {
+        client.destroy();
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   });
 
@@ -312,21 +321,30 @@ describe('Client RPC Bridge - Error Handling', () => {
   });
 
   it('should handle worker onerror events', async () => {
-    // Start a request
-    const promise = client.generateVAPID();
+    // Suppress console.error for this test
+    const consoleError = console.error;
+    console.error = () => {};
 
-    // Simulate worker error
-    const worker = (client as unknown as { worker: Worker }).worker;
-    if (worker && worker.onerror) {
-      const errorEvent = new ErrorEvent('error', {
-        error: new Error('Worker crashed'),
-        message: 'Worker crashed',
-      });
-      worker.onerror(errorEvent);
+    try {
+      // Start a request
+      const promise = client.generateVAPID();
+
+      // Simulate worker error
+      const worker = (client as unknown as { worker: Worker }).worker;
+      if (worker && worker.onerror) {
+        const errorEvent = new ErrorEvent('error', {
+          error: new Error('Worker crashed'),
+          message: 'Worker crashed',
+        });
+        worker.onerror(errorEvent);
+      }
+
+      // Request should be rejected
+      await expect(promise).rejects.toThrow('Worker error');
+    } finally {
+      // Restore console.error
+      console.error = consoleError;
     }
-
-    // Request should be rejected
-    await expect(promise).rejects.toThrow('Worker error');
   });
 });
 

@@ -145,7 +145,7 @@ function updateReadme() {
   const newSection = `### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: ${timestamp}*
+*Last updated: ${timestamp} UTC*
 
 **Test Results:**
 - Test Files: ${stats.testFiles}

@@ -387,35 +387,37 @@ function renderKeyPropertiesCard(): void {
 
     keyMetadata
       ? renderCheck(
-          !keyMetadata.extractable ? 'pass' : 'fail',
-          `Extractable: ${keyMetadata.extractable}`,
-          'Private key cannot be exported from browser'
-        )
-      : renderCheck('pending', 'Extractable flag: Pending', 'Generate a key to check extractable flag'),
-
-    keyMetadata
-      ? renderCheck(
           keyMetadata.usages.includes('sign') ? 'pass' : 'fail',
           `Usages: ${keyMetadata.usages.join(', ')}`,
           'Key can sign (but not export)'
         )
       : renderCheck('pending', 'Key usages: Pending', 'Generate a key to check usages'),
 
+    vapidKid && thumbprint
+      ? renderCheck(
+          vapidKid === thumbprint ? 'pass' : 'fail',
+          `kid matches JWK thumbprint`,
+          vapidKid === thumbprint
+            ? '✅ kid is content-derived from public key (RFC 7638)'
+            : `❌ Mismatch: kid=${vapidKid.substring(0, 16)}..., thumbprint=${thumbprint.substring(0, 16)}...`
+        )
+      : renderCheck('pending', 'kid verification: Pending', 'Generate a key to verify kid'),
+
     vapidKid
       ? renderCheck(
-          'pass',
-          `Key ID format: ${vapidKid.split('-')[0]}-timestamp-random`,
-          `kid = ${vapidKid}`
+          vapidKid.length === 43 && /^[A-Za-z0-9_-]{43}$/.test(vapidKid) ? 'pass' : 'fail',
+          `Kid format: RFC 7638 JWK Thumbprint`,
+          `43 chars base64url-encoded SHA-256 hash`
         )
-      : renderCheck('pending', 'Key ID format: Pending', 'Generate a key to see kid format'),
+      : renderCheck('pending', 'Kid format: Pending', 'Generate a key to see kid format'),
 
-    thumbprint
+    keyMetadata
       ? renderCheck(
-          'pass',
-          `JWK Thumbprint (RFC 7638) - informational`,
-          `${thumbprint} (Note: Phase 1 uses timestamp-based kids, not thumbprints)`
+          !keyMetadata.extractable ? 'pass' : 'fail',
+          `Private Key: 🔒 Non-extractable`,
+          'Browser enforces - cannot be exported even if code is compromised'
         )
-      : renderCheck('pending', 'JWK Thumbprint: Pending', 'Generate a key to compute thumbprint'),
+      : renderCheck('pending', 'Private key status: Pending', 'Generate a key to check'),
 
     vapidKid
       ? renderCheck('pass', 'Stored in IndexedDB', 'Wrapped with AES-GCM encryption')

@@ -29,6 +29,9 @@ devDependencies:
   eslint:
     specifier: ^9.38.0
     version: 9.38.0
+  fake-indexeddb:
+    specifier: ^6.2.4
+    version: 6.2.4
   happy-dom:
     specifier: ^12.10.3
     version: 12.10.3
@@ -1699,6 +1702,11 @@ packages:
       onetime: 6.0.0
       signal-exit: 4.1.0
       strip-final-newline: 3.0.0
+    dev: true
+
+  /fake-indexeddb@6.2.4:
+    resolution: {integrity: sha512-INKeIKEtSViN4yVtEWEUqbsqmaIy7Ls+MfU0yxQVXg67pOJ/sH1ZxcVrP8XrKULUFohcPD9gnmym+qBfEybACw==}
+    engines: {node: '>=18'}
     dev: true
 
   /fast-deep-equal@3.1.3:

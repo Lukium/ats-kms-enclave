@@ -5,6 +5,12 @@
  */
 
 import { handleMessage } from '@/worker';
+import { IDBFactory } from 'fake-indexeddb';
+import { IDBKeyRange } from 'fake-indexeddb';
+
+// Mock IndexedDB for testing
+globalThis.indexedDB = new IDBFactory();
+globalThis.IDBKeyRange = IDBKeyRange;
 
 // Mock Worker for testing in happy-dom environment
 if (typeof Worker === 'undefined') {

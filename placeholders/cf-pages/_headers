@@ -9,7 +9,8 @@
 # - Permissions Policy: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy
 
 # KMS Enclave HTML (iframe entry point)
-/kms.html
+# Applies to both root (index.html) and /kms.html
+/*
   # Content Security Policy - Strict isolation
   # - default-src 'none': Block all by default
   # - script-src 'self': Only load scripts from same origin

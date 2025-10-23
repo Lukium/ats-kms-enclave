@@ -16,8 +16,10 @@ These placeholder files enable early infrastructure testing and validation of th
 
 ## Files
 
-### `kms.html`
-Minimal HTML placeholder that will be replaced by the real enclave iframe in Phase 2.
+### `index.html`
+Minimal HTML placeholder served at root path (`https://kms.ats.run/`).
+This will be replaced by the real enclave iframe in Phase 2.
+Named `index.html` so Cloudflare Pages serves it by default without 404.
 
 ### `.well-known/kms-manifest.json`
 Placeholder manifest with dummy values. In Phase 2, this will contain:

@@ -152,11 +152,17 @@ Below the verification cards, the demo displays detailed output for each complet
 
 ## Files
 
+**Demo Files:**
 - **`index.html`** - Progressive demo page with three control buttons
 - **`demo.ts`** - Progressive demo logic with stage management
-- **`demo-worker.ts`** - Enhanced worker that returns verification metadata
+- **`demo-worker.ts`** - Enhanced demo worker with verification metadata
 - **`verify.ts`** - Verification utilities (format checkers, JWK thumbprints)
 - **`README.md`** - This file
+
+**Phase 0 Historical Snapshots:**
+- **`phase-0-client.ts`** - Production client as of Phase 0 completion
+- **`phase-0-worker.ts`** - Production worker as of Phase 0 completion
+- Preserved for reference as Phase 1 will modify production versions
 
 ## Visual States
 
@@ -196,14 +202,37 @@ const kid = base64url(sha256(canonical));
 
 ### Why Separate Demo Worker?
 
-The production `worker.ts` returns minimal data for security. The demo's `demo-worker.ts` extends it to return verification metadata:
+The production worker (`src/worker.ts`) returns minimal data for security. The demo's `demo-worker.ts` **functionally matches** the Phase 0 production worker but extends it to return verification metadata:
 
+**Core functionality (identical to production):**
+- VAPID keypair generation (P-256 ECDSA, non-extractable)
+- JWT signing (ES256)
+- Public key retrieval
+- In-memory key storage
+
+**Additional demo metadata:**
 - JWK representation of keys
-- Algorithm and property details
-- Decoded JWT parts
+- Algorithm and property details (name, curve, extractable, usages)
+- Decoded JWT parts (header, payload, signature)
 - Signature byte counts
+- RFC 7638 JWK thumbprints as key IDs
 
-This keeps demo-specific code isolated while showing all the proofs users need.
+**Why this approach:**
+1. **Keeps demo code isolated** - Production code stays minimal and secure
+2. **Shows verification proofs** - Users can see the exact properties
+3. **Matches Phase 0 behavior** - Same crypto operations, just more visibility
+4. **Educational** - Demonstrates what the browser is actually doing
+
+**Historical Reference:**
+The `phase-0-worker.ts` and `phase-0-client.ts` files are snapshots of the production Phase 0 implementation. They're preserved here because Phase 1 will modify the production versions (adding IndexedDB), and these files document the original Phase 0 behavior.
+
+To see the difference:
+```bash
+# Compare demo worker to Phase 0 production snapshot
+diff phase-0-worker.ts demo-worker.ts
+
+# Key differences: enhanced types, JWK export, metadata returns
+```
 
 ## Development
 

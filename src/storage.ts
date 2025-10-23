@@ -76,7 +76,7 @@ let db: IDBDatabase | null = null;
  *
  * Creates three object stores:
  * - keys (keyPath: kid)
- * - audit (keyPath: timestamp, with indexes)
+ * - audit (autoIncrement: true, with indexes)
  * - meta (keyPath: key)
  */
 export async function initDB(): Promise<void> {
@@ -104,7 +104,7 @@ export async function initDB(): Promise<void> {
       // Create audit object store with indexes
       if (!database.objectStoreNames.contains('audit')) {
         const auditStore = database.createObjectStore('audit', {
-          keyPath: 'timestamp',
+          autoIncrement: true,
         });
         auditStore.createIndex('by-kid', 'kid', { unique: false });
         auditStore.createIndex('by-op', 'op', { unique: false });
@@ -316,30 +316,51 @@ export async function pruneAuditEntries(
   // Keep entries that are:
   // 1. In the last N entries, OR
   // 2. Newer than D days
-  const toDelete: string[] = [];
+  const toDelete: IDBValidKey[] = [];
   for (let i = 0; i < all.length; i++) {
     const entry = all[i];
     if (entry && i >= keepCount && entry.timestamp < cutoffISO) {
-      toDelete.push(entry.timestamp);
+      // Need to get the key for this entry using cursor
+      toDelete.push(i); // Store index for now, will map to keys
     }
   }
 
-  // Delete old entries
+  /* c8 ignore next 3 */
+  if (toDelete.length === 0) {
+    return 0;
+  }
+
+  // Delete old entries using cursor to get keys
   const database = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction('audit', 'readwrite');
     const store = transaction.objectStore('audit');
+    const index = store.index('by-timestamp');
+    const keys: IDBValidKey[] = [];
+    let cursorIndex = 0;
 
-    let deleted = 0;
-    toDelete.forEach((timestamp) => {
-      const request = store.delete(timestamp);
-      request.onsuccess = (): void => {
-        deleted++;
-      };
-    });
+    const cursorRequest = index.openCursor();
+
+    cursorRequest.onsuccess = (event): void => {
+      const cursor = (event.target as IDBRequest).result as IDBCursorWithValue | null;
+
+      if (cursor) {
+        // Check if this index should be deleted
+        if (toDelete.includes(cursorIndex)) {
+          keys.push(cursor.primaryKey);
+        }
+        cursorIndex++;
+        cursor.continue();
+      } else {
+        // Done collecting keys, now delete them
+        keys.forEach((key) => {
+          store.delete(key);
+        });
+      }
+    };
 
     transaction.oncomplete = (): void => {
-      resolve(deleted);
+      resolve(keys.length);
     };
 
     /* c8 ignore next 3 */

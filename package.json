@@ -8,7 +8,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:lines": "vitest run --coverage && node tools/coverage-with-lines.js",
+    "test:coverage:lines": "vitest run --coverage; EXIT_CODE=$?; node tools/coverage-with-lines.js; exit $EXIT_CODE",
     "test:ui": "vitest --ui",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

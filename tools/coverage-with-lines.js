@@ -139,7 +139,19 @@ function main() {
   }
 
   console.log('─'.repeat(100));
-  console.log('\n✨ Coverage meets 100% threshold for all metrics\n');
+
+  // Check if coverage meets threshold
+  const meetsThreshold =
+    total.lines.pct === 100 &&
+    total.statements.pct === 100 &&
+    total.branches.pct === 100 &&
+    total.functions.pct === 100;
+
+  if (meetsThreshold) {
+    console.log('\n✅ Coverage meets 100% threshold for all metrics\n');
+  } else {
+    console.log('\n⚠️  Coverage does not meet 100% threshold\n');
+  }
 }
 
 main();

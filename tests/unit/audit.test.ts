@@ -18,6 +18,7 @@ import {
   logOperation,
   verifyAuditChain,
   getAuditLog,
+  getAuditPublicKey,
   resetAuditLogger,
   type AuditOperation,
   type AuditLogEntry,
@@ -356,8 +357,22 @@ describe('Audit Logger - Error Handling', () => {
 
     resetAuditLogger();
 
-    // Verification should fail without signing key
-    await expect(verifyAuditChain()).rejects.toThrow('Audit logger not initialized');
+    // Verification should still work (uses public key from storage)
+    // This enables independent verification without private key
+    const result = await verifyAuditChain();
+    expect(result.valid).toBe(true);
+    expect(result.verified).toBe(1);
+
+    // But logging should fail without private key
+    await expect(
+      logOperation({
+        op: 'generate_vapid',
+        kid: 'test-key-2',
+        requestId: 'req-2',
+        origin: 'https://ats.run',
+        clientInfo: { ua: 'Test', url: 'https://ats.run' },
+      })
+    ).rejects.toThrow('Audit logger not initialized');
   });
 
   it('should handle malformed signature during verification', async () => {
@@ -422,5 +437,45 @@ describe('Audit Logger - Error Handling', () => {
 
     // Init should load last hash
     await expect(initAuditLogger()).resolves.toBeUndefined();
+  });
+});
+
+// ============================================================
+// Audit Public Key Tests
+// ============================================================
+
+describe('Audit Logger - Public Key Export', () => {
+  beforeEach(async () => {
+    globalThis.indexedDB = new IDBFactory();
+    await initDB();
+    resetAuditLogger();
+  });
+
+  afterEach(() => {
+    closeDB();
+  });
+
+  it('should return audit public key after initialization', async () => {
+    await initAuditLogger();
+    const publicKey = await getAuditPublicKey();
+
+    expect(publicKey).toBeTruthy();
+    expect(publicKey).toHaveProperty('kty');
+    expect(publicKey).toHaveProperty('crv');
+    expect(publicKey!.kty).toBe('EC');
+    expect(publicKey!.crv).toBe('P-256');
+  });
+
+  it('should return null if audit logger not initialized', async () => {
+    const publicKey = await getAuditPublicKey();
+    expect(publicKey).toBeNull();
+  });
+
+  it('should return same public key on multiple calls', async () => {
+    await initAuditLogger();
+    const publicKey1 = await getAuditPublicKey();
+    const publicKey2 = await getAuditPublicKey();
+
+    expect(publicKey1).toEqual(publicKey2);
   });
 });

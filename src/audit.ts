@@ -2,7 +2,7 @@
  * Audit Logger with Hash-Chained Entries
  *
  * Provides tamper-evident audit logging with:
- * - HMAC-SHA256 signatures for each entry
+ * - ES256 (ECDSA P-256) signatures for each entry
  * - Hash-chained entries (each entry references previous entry's hash)
  * - Verification of chain integrity
  * - Integration with IndexedDB storage
@@ -11,7 +11,8 @@
  * - Entries cannot be modified without breaking the chain
  * - Entries cannot be reordered without breaking the chain
  * - Entries cannot be deleted from middle without breaking the chain
- * - Signing key is non-extractable CryptoKey
+ * - Signing key is non-extractable CryptoKey (stored in IndexedDB)
+ * - Public key is exportable for independent verification
  *
  * @module src/audit
  */
@@ -20,6 +21,8 @@ import {
   putAuditEntry,
   getAllAuditEntries,
   getTailAuditEntries,
+  putMeta,
+  getMeta,
   type AuditEntry,
 } from './storage.js';
 
@@ -57,7 +60,8 @@ export interface ChainVerificationResult {
 // Module State
 // ============================================================
 
-let signingKey: CryptoKey | null = null;
+let privateKey: CryptoKey | null = null;
+let publicKey: CryptoKey | null = null;
 let lastHash: string | null = null;
 
 const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
@@ -69,23 +73,48 @@ const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000
 /**
  * Initialize audit logger
  *
- * Generates or retrieves the HMAC signing key used for audit entries.
+ * Generates or retrieves the ES256 signing keypair used for audit entries.
+ * - Private key is stored as non-extractable CryptoKey in IndexedDB
+ * - Public key is stored as JWK in IndexedDB for external verification
  * Safe to call multiple times (idempotent).
  */
 export async function initAuditLogger(): Promise<void> {
-  if (signingKey) {
-    return; // Already initialized
-  }
+  // Always load from storage to ensure we're using the correct keypair for this database instance
+  // (Workers may share module state but have different IndexedDB instances)
+  const storedPrivateKey = await getMeta<CryptoKey>('auditSigningKey');
+  const storedPublicKeyJwk = await getMeta<JsonWebKey>('auditPublicKey');
 
-  // Generate HMAC signing key (non-extractable)
-  signingKey = await crypto.subtle.generateKey(
-    {
-      name: 'HMAC',
-      hash: 'SHA-256',
-    },
-    false, // non-extractable
-    ['sign', 'verify']
-  );
+  if (storedPrivateKey && storedPublicKeyJwk) {
+    // Use existing keypair
+    privateKey = storedPrivateKey;
+    publicKey = await crypto.subtle.importKey(
+      'jwk',
+      storedPublicKeyJwk,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['verify']
+    );
+  } else {
+    // Generate new ES256 keypair
+    const keypair = await crypto.subtle.generateKey(
+      {
+        name: 'ECDSA',
+        namedCurve: 'P-256',
+      },
+      false, // private key non-extractable
+      ['sign', 'verify']
+    );
+
+    privateKey = keypair.privateKey;
+    publicKey = keypair.publicKey;
+
+    // Export and store public key JWK for external verification
+    const publicKeyJwk = await crypto.subtle.exportKey('jwk', publicKey);
+
+    // Store both keys in IndexedDB
+    await putMeta('auditSigningKey', privateKey);
+    await putMeta('auditPublicKey', publicKeyJwk);
+  }
 
   // Load last hash from existing chain
   const entries = await getTailAuditEntries(1);
@@ -98,7 +127,8 @@ export async function initAuditLogger(): Promise<void> {
  * Reset audit logger state (for testing)
  */
 export function resetAuditLogger(): void {
-  signingKey = null;
+  privateKey = null;
+  publicKey = null;
   lastHash = null;
 }
 
@@ -115,7 +145,7 @@ export function resetAuditLogger(): void {
  * @throws Error if audit logger not initialized
  */
 export async function logOperation(data: AuditOperation): Promise<void> {
-  if (!signingKey) {
+  if (!privateKey) {
     throw new Error('Audit logger not initialized');
   }
 
@@ -138,7 +168,7 @@ export async function logOperation(data: AuditOperation): Promise<void> {
   };
 
   // Sign the entry
-  const sig = await signEntry(unsignedEntry, signingKey);
+  const sig = await signEntry(unsignedEntry, privateKey);
 
   // Create final entry
   const entry: AuditEntry = {
@@ -168,9 +198,20 @@ export async function logOperation(data: AuditOperation): Promise<void> {
  * @returns Verification result with error details
  */
 export async function verifyAuditChain(): Promise<ChainVerificationResult> {
-  if (!signingKey) {
-    throw new Error('Audit logger not initialized');
+  // Load public key from storage (for independent verification)
+  const publicKeyJwk = await getMeta<JsonWebKey>('auditPublicKey');
+  /* c8 ignore next 3 - defensive: audit logger always initialized before verification */
+  if (!publicKeyJwk) {
+    throw new Error('Audit public key not found - audit logger may not be initialized');
   }
+
+  const verificationKey = await crypto.subtle.importKey(
+    'jwk',
+    publicKeyJwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify']
+  );
 
   const entries = await getAllAuditEntries();
   const errors: string[] = [];
@@ -186,7 +227,7 @@ export async function verifyAuditChain(): Promise<ChainVerificationResult> {
     const entry = entries[i]!;
 
     // Verify signature
-    const validSig = await verifyEntrySignature(entry, signingKey);
+    const validSig = await verifyEntrySignature(entry, verificationKey);
     if (!validSig) {
       errors.push(`Entry ${i}: Invalid signature (requestId=${entry.requestId})`);
       continue;
@@ -231,6 +272,18 @@ export async function getAuditLog(limit?: number): Promise<AuditLogEntry[]> {
   return await getAllAuditEntries();
 }
 
+/**
+ * Get the audit log public key for external verification
+ *
+ * This public key can be used by anyone to independently verify the audit chain.
+ * The key is exported in JWK format for easy use with standard crypto libraries.
+ *
+ * @returns Public key in JWK format, or null if audit logger not initialized
+ */
+export async function getAuditPublicKey(): Promise<JsonWebKey | null> {
+  return (await getMeta<JsonWebKey>('auditPublicKey')) || null;
+}
+
 // ============================================================
 // Cryptographic Utilities
 // ============================================================
@@ -269,7 +322,7 @@ async function computeEntryHash(entry: AuditEntry): Promise<string> {
 }
 
 /**
- * Sign an audit entry with HMAC-SHA256
+ * Sign an audit entry with ES256 (ECDSA P-256)
  */
 async function signEntry(
   entry: Omit<AuditEntry, 'sig'>,
@@ -290,12 +343,16 @@ async function signEntry(
   });
 
   const buffer = new TextEncoder().encode(data);
-  const sigBuffer = await crypto.subtle.sign('HMAC', key, buffer);
+  const sigBuffer = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    key,
+    buffer
+  );
   return arrayBufferToHex(sigBuffer);
 }
 
 /**
- * Verify an audit entry signature
+ * Verify an audit entry signature using ES256 (ECDSA P-256)
  */
 async function verifyEntrySignature(
   entry: AuditEntry,
@@ -319,7 +376,12 @@ async function verifyEntrySignature(
   const sigBuffer = hexToArrayBuffer(entry.sig);
 
   try {
-    return await crypto.subtle.verify('HMAC', key, sigBuffer, buffer);
+    return await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      key,
+      sigBuffer,
+      buffer
+    );
   } /* c8 ignore next 2 */ catch {
     return false;
   }

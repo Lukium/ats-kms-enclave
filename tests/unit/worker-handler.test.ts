@@ -961,3 +961,82 @@ describe('Worker RPC Handler - Unlock Methods', () => {
     expect(result.error).toBeDefined();
   });
 });
+
+describe('Worker RPC Handler - Audit Operations', () => {
+  beforeEach(async () => {
+    // Reset worker state and reinitialize
+    // (Global beforeEach already created fresh IDB and called setupPassphrase,
+    // but we need to ensure audit logger is properly initialized for these tests)
+    resetWorkerState();
+
+    // Reinitialize by calling setupPassphrase again
+    await handleMessage({
+      id: 'audit-setup',
+      method: 'setupPassphrase',
+      params: { passphrase: 'test-passphrase-12345' },
+    });
+  });
+
+  it('should get audit public key', async () => {
+    const request: RPCRequest = {
+      id: 'req-audit-1',
+      method: 'getAuditPublicKey',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeTruthy();
+    const publicKey = response.result as JsonWebKey;
+    expect(publicKey.kty).toBe('EC');
+    expect(publicKey.crv).toBe('P-256');
+  });
+
+  it('should verify audit chain', async () => {
+    // Generate some audit entries
+    const setupRequest: RPCRequest = {
+      id: 'req-setup',
+      method: 'setupPassphrase',
+      params: { passphrase: 'test-pass-12345' },
+    };
+    await handleMessage(setupRequest);
+
+    const vapidRequest: RPCRequest = {
+      id: 'req-vapid',
+      method: 'generateVAPID',
+    };
+    await handleMessage(vapidRequest);
+
+    // Verify the chain
+    const request: RPCRequest = {
+      id: 'req-audit-2',
+      method: 'verifyAuditChain',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeTruthy();
+    const result = response.result as { valid: boolean; verified: number; errors: string[] };
+    expect(result.valid).toBe(true);
+    expect(result.verified).toBeGreaterThan(0);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('should verify audit chain after initialization', async () => {
+    // Note: beforeEach calls setupPassphrase, which creates at least one audit entry
+    const request: RPCRequest = {
+      id: 'req-audit-3',
+      method: 'verifyAuditChain',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeTruthy();
+    const result = response.result as { valid: boolean; verified: number; errors: string[] };
+    expect(result.valid).toBe(true);
+    expect(result.verified).toBeGreaterThanOrEqual(1); // At least the setup entry
+    expect(result.errors).toEqual([]);
+  });
+});

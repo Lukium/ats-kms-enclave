@@ -10,7 +10,14 @@
 // ============================================================================
 
 import { initDB, wrapKey, unwrapKey, getWrappedKey } from './storage.js';
-import { initAuditLogger, logOperation, type AuditOperation } from './audit.js';
+import {
+  initAuditLogger,
+  logOperation,
+  getAuditPublicKey,
+  verifyAuditChain,
+  resetAuditLogger,
+  type AuditOperation,
+} from './audit.js';
 import {
   setupPassphrase,
   unlockWithPassphrase,
@@ -99,6 +106,7 @@ export function resetWorkerState(): void {
   isInitialized = false;
   wrappingKey = null;
   isUnlocked = false;
+  resetAuditLogger();
 }
 
 // ============================================================================
@@ -639,6 +647,22 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'isUnlockSetup': {
         const result = await isUnlockSetup();
+        return {
+          id: request.id,
+          result,
+        };
+      }
+
+      case 'getAuditPublicKey': {
+        const result = await getAuditPublicKey();
+        return {
+          id: request.id,
+          result,
+        };
+      }
+
+      case 'verifyAuditChain': {
+        const result = await verifyAuditChain();
         return {
           id: request.id,
           result,

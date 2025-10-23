@@ -20,6 +20,15 @@ interface RPCResponse {
   };
 }
 
+/**
+ * Chain verification result from audit log
+ */
+export interface ChainVerificationResult {
+  valid: boolean;
+  verified: number;
+  errors: string[];
+}
+
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -166,5 +175,35 @@ export class KMSClient {
 
   getPublicKey(kid: string): Promise<{ publicKey: string | null }> {
     return this.request<{ publicKey: string | null }>('getPublicKey', { kid });
+  }
+
+  // ============================================================================
+  // Audit Operations
+  // ============================================================================
+
+  /**
+   * Get the audit log public key for external verification
+   *
+   * This public key can be used by anyone to independently verify the audit chain.
+   * The key is exported in JWK format for easy use with standard crypto libraries.
+   *
+   * @returns Public key in JWK format, or null if audit logger not initialized
+   */
+  getAuditPublicKey(): Promise<JsonWebKey | null> {
+    return this.request<JsonWebKey | null>('getAuditPublicKey');
+  }
+
+  /**
+   * Verify the integrity of the entire audit chain
+   *
+   * Checks:
+   * - Each entry has a valid ES256 signature
+   * - Each entry's prevHash correctly references the previous entry
+   * - Chain is unbroken from genesis to latest entry
+   *
+   * @returns Verification result with error details
+   */
+  verifyAuditChain(): Promise<ChainVerificationResult> {
+    return this.request<ChainVerificationResult>('verifyAuditChain');
   }
 }

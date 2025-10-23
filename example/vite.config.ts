@@ -1,17 +1,30 @@
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
-  root: '.',
+  root: './example',
+  publicDir: false,
   build: {
     outDir: 'dist',
     emptyOutDir: true,
   },
   resolve: {
     alias: {
-      '@': '/src',
+      '@': path.resolve(__dirname, '../src'),
     },
   },
   worker: {
     format: 'es',
+    rollupOptions: {
+      output: {
+        entryFileNames: 'worker.js',
+      },
+    },
+  },
+  server: {
+    fs: {
+      // Allow serving files from parent directory (src/)
+      allow: ['..'],
+    },
   },
 });

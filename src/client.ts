@@ -33,7 +33,8 @@ export class KMSClient {
 
   constructor() {
     // Create Worker instance
-    this.worker = new Worker(new URL('@/worker.ts', import.meta.url), {
+    // Vite handles this specially with ?worker suffix
+    this.worker = new Worker(new URL('./worker.ts', import.meta.url), {
       type: 'module',
     });
 

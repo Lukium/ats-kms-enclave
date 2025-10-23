@@ -13,8 +13,8 @@
     "lint": "eslint . --ext .ts",
     "build:dev": "node build/esbuild.js --dev",
     "build:reproducible": "node build/esbuild.js --reproducible",
-    "demo": "vite example --config example/vite.config.ts",
-    "demo:build": "vite build example --config example/vite.config.ts"
+    "demo": "vite --config example/vite.config.ts",
+    "demo:build": "vite build --config example/vite.config.ts"
   },
   "keywords": [
     "cryptography",

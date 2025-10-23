@@ -327,3 +327,19 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
     };
   }
 }
+
+// ============================================================================
+// Worker Message Listener
+// ============================================================================
+
+/**
+ * Set up message listener for Worker context
+ */
+/* c8 ignore start - only runs in real Worker context, not in tests */
+if (typeof self !== 'undefined' && 'onmessage' in self) {
+  self.onmessage = async (event: MessageEvent): Promise<void> => {
+    const response = await handleMessage(event.data as RPCRequest);
+    self.postMessage(response);
+  };
+}
+/* c8 ignore stop */

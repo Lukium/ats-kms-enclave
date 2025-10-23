@@ -5,6 +5,9 @@ export default defineConfig({
     // Environment
     environment: 'happy-dom',
 
+    // Setup file
+    setupFiles: ['./tests/setup.ts'],
+
     // Coverage
     coverage: {
       provider: 'v8',

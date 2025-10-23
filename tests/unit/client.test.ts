@@ -20,7 +20,9 @@ interface JWTPayload {
 describe('Client RPC Bridge - Initialization', () => {
   let client: KMSClient;
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
     if (client) {
       client.destroy();
     }
@@ -49,8 +51,12 @@ describe('Client RPC Bridge - Worker Management', () => {
     client = new KMSClient();
   });
 
-  afterEach(() => {
-    client.destroy();
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (client && !(client as unknown as { destroyed: boolean }).destroyed) {
+      client.destroy();
+    }
   });
 
   it('should create a Worker instance internally', () => {
@@ -67,12 +73,41 @@ describe('Client RPC Bridge - Worker Management', () => {
     }).not.toThrow();
   });
 
+  it('should allow destroy to be called multiple times', () => {
+    // First destroy
+    client.destroy();
+
+    // Second destroy should not throw
+    expect(() => {
+      client.destroy();
+    }).not.toThrow();
+  });
+
   it('should not allow operations after destroy', async () => {
     client.destroy();
 
     await expect(async () => {
       await client.generateVAPID();
     }).rejects.toThrow('Client has been destroyed');
+  });
+
+  it('should reject pending requests when destroyed', async () => {
+    // Start a request
+    const promise = client.generateVAPID();
+
+    // Destroy immediately  (before worker responds)
+    client.destroy();
+
+    // Verify pending request was rejected
+    try {
+      await promise;
+      expect.fail('Should have rejected');
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      if (error instanceof Error) {
+        expect(error.message).toBe('Client destroyed');
+      }
+    }
   });
 });
 
@@ -83,7 +118,9 @@ describe('Client RPC Bridge - generateVAPID', () => {
     client = new KMSClient();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
     client.destroy();
   });
 
@@ -129,7 +166,9 @@ describe('Client RPC Bridge - signJWT', () => {
     kid = result.kid;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
     client.destroy();
   });
 
@@ -200,7 +239,9 @@ describe('Client RPC Bridge - getPublicKey', () => {
     publicKey = result.publicKey;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
     client.destroy();
   });
 
@@ -233,7 +274,9 @@ describe('Client RPC Bridge - Error Handling', () => {
     client = new KMSClient();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
     client.destroy();
   });
 
@@ -267,6 +310,24 @@ describe('Client RPC Bridge - Error Handling', () => {
       }
     }
   });
+
+  it('should handle worker onerror events', async () => {
+    // Start a request
+    const promise = client.generateVAPID();
+
+    // Simulate worker error
+    const worker = (client as unknown as { worker: Worker }).worker;
+    if (worker && worker.onerror) {
+      const errorEvent = new ErrorEvent('error', {
+        error: new Error('Worker crashed'),
+        message: 'Worker crashed',
+      });
+      worker.onerror(errorEvent);
+    }
+
+    // Request should be rejected
+    await expect(promise).rejects.toThrow('Worker error');
+  });
 });
 
 describe('Client RPC Bridge - Request Correlation', () => {
@@ -276,7 +337,9 @@ describe('Client RPC Bridge - Request Correlation', () => {
     client = new KMSClient();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Wait a bit for any pending async operations
+    await new Promise((resolve) => setTimeout(resolve, 10));
     client.destroy();
   });
 

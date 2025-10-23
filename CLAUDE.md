@@ -156,15 +156,21 @@ ats-kms/
 
 **Recommended: Use the Makefile**
 ```bash
-make pre-commit   # Runs test, typecheck, and lint in sequence
+make pre-commit   # Runs test-coverage, typecheck, and lint in sequence
 ```
 
 **Or run manually**:
 ```bash
-pnpm test         # All tests must pass
-pnpm typecheck    # TypeScript must compile without errors
-pnpm lint         # ESLint must pass without errors
+pnpm test:coverage # All tests must pass with 100% coverage
+pnpm typecheck     # TypeScript must compile without errors
+pnpm lint          # ESLint must pass without errors
 ```
+
+**Coverage Requirement**:
+- 100% code coverage is MANDATORY for all commits
+- Coverage is enforced automatically via `make pre-commit`
+- Must be 100% for: lines, branches, functions, and statements
+- Use `/* c8 ignore next */` only for defensive code that cannot be tested
 
 **Commit workflow**:
 1. Write/modify code following TDD
@@ -176,13 +182,14 @@ pnpm lint         # ESLint must pass without errors
 
 **Makefile targets**:
 ```bash
-make help         # Show all available commands
-make install      # Install dependencies
-make test         # Run tests only
-make typecheck    # Type check only
-make lint         # Lint only
-make pre-commit   # Run all checks (recommended)
-make clean        # Remove generated files
+make help           # Show all available commands
+make install        # Install dependencies
+make test           # Run tests only (no coverage enforcement)
+make test-coverage  # Run tests with 100% coverage enforcement
+make typecheck      # Type check only
+make lint           # Lint only
+make pre-commit     # Run all checks with coverage (MANDATORY before commits)
+make clean          # Remove generated files
 ```
 
 ### Testing

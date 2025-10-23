@@ -74,15 +74,21 @@ For a security-critical cryptographic system:
 
 **Recommended: Use the Makefile**
 ```bash
-make pre-commit   # Runs test, typecheck, and lint in sequence
+make pre-commit   # Runs test-coverage, typecheck, and lint in sequence
 ```
 
 **Manual execution** (if needed):
 ```bash
-pnpm test         # All tests must pass
-pnpm typecheck    # TypeScript must compile without errors
-pnpm lint         # ESLint must pass without errors
+pnpm test:coverage # All tests must pass with 100% coverage
+pnpm typecheck     # TypeScript must compile without errors
+pnpm lint          # ESLint must pass without errors
 ```
+
+**Coverage Requirement**:
+- 100% code coverage is MANDATORY for all commits
+- Coverage is enforced via `pnpm test:coverage` (which runs `vitest run --coverage`)
+- Coverage must be 100% for: lines, branches, functions, and statements
+- Use `/* c8 ignore next */` only for defensive code that cannot be tested
 
 **Commit workflow**:
 1. Write/modify code following TDD

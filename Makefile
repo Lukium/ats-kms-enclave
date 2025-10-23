@@ -7,13 +7,14 @@ help:
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "Targets:"
-	@echo "  help        Show this help message"
-	@echo "  install     Install dependencies"
-	@echo "  test        Run all tests"
-	@echo "  typecheck   Run TypeScript type checking"
-	@echo "  lint        Run ESLint"
-	@echo "  pre-commit  Run all pre-commit checks (test + typecheck + lint)"
-	@echo "  clean       Remove generated files"
+	@echo "  help           Show this help message"
+	@echo "  install        Install dependencies"
+	@echo "  test           Run all tests"
+	@echo "  test-coverage  Run tests with 100% coverage enforcement"
+	@echo "  typecheck      Run TypeScript type checking"
+	@echo "  lint           Run ESLint"
+	@echo "  pre-commit     Run all pre-commit checks (test-coverage + typecheck + lint)"
+	@echo "  clean          Remove generated files"
 	@echo ""
 	@echo "Pre-commit workflow:"
 	@echo "  1. make pre-commit"
@@ -30,6 +31,11 @@ test:
 	@echo "🧪 Running tests..."
 	pnpm test
 
+# Run tests with coverage
+test-coverage:
+	@echo "🎯 Running tests with coverage..."
+	pnpm test:coverage
+
 # Run TypeScript type checking
 typecheck:
 	@echo "🔍 Type checking..."
@@ -41,9 +47,10 @@ lint:
 	pnpm lint
 
 # Run all pre-commit checks
-pre-commit: test typecheck lint
+pre-commit: test-coverage typecheck lint
 	@echo ""
 	@echo "✅ All pre-commit checks passed!"
+	@echo "✅ 100% test coverage verified!"
 	@echo "Ready to commit 🚀"
 
 # Clean generated files

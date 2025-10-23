@@ -14,7 +14,8 @@ help:
 	@echo "  typecheck      Run TypeScript type checking"
 	@echo "  lint           Run ESLint"
 	@echo "  pre-commit     Run all pre-commit checks (test-coverage + typecheck + lint)"
-	@echo "  demo           Run Phase 0 demo in browser"
+	@echo "  demo           Run latest demo (currently Phase 0)"
+	@echo "  demo-phase-0   Run Phase 0 demo in browser"
 	@echo "  clean          Remove generated files"
 	@echo ""
 	@echo "Pre-commit workflow:"
@@ -54,8 +55,11 @@ pre-commit: test-coverage typecheck lint
 	@echo "✅ 100% test coverage verified!"
 	@echo "Ready to commit 🚀"
 
-# Run demo in browser
-demo:
+# Run latest demo (alias to current phase)
+demo: demo-phase-0
+
+# Run Phase 0 demo in browser
+demo-phase-0:
 	@echo "🚀 Starting Phase 0 demo..."
 	@echo "Opening http://localhost:5173"
 	pnpm demo

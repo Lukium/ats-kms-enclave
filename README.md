@@ -28,7 +28,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - ✅ ES256 JWT signing
 - ✅ Interactive demo
 
-**[Try the demo →](example/phase-0/README.md)** `make demo`
+**[Try the demo →](example/phase-0/README.md)** `make demo-phase-0`
 
 See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the implementation roadmap.
 
@@ -152,8 +152,9 @@ See the Phase 0 prototype in action:
 
 ```bash
 # Run interactive demo in browser
-make demo
-# or: pnpm demo
+make demo-phase-0
+# or: make demo (alias to latest phase)
+# or: pnpm demo:phase-0
 ```
 
 This opens an interactive demo at `http://localhost:5173` that demonstrates:

@@ -12,9 +12,11 @@ In-memory key storage, Worker-based isolation, basic VAPID/JWT operations.
 
 ```bash
 # Run Phase 0 demo
-make demo
+make demo-phase-0
 # or
-pnpm demo
+make demo  # (alias to latest)
+# or
+pnpm demo:phase-0
 ```
 
 **Features:**
@@ -53,6 +55,9 @@ Coming soon:
 make demo
 
 # Run specific phase
+make demo-phase-0
+
+# Or run from phase directory
 cd example/phase-0
 ../../node_modules/.bin/vite
 

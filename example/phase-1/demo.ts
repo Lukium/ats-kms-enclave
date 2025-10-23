@@ -354,6 +354,28 @@ function renderPublicKeyCard(): void {
           vapidPublicKey.substring(0, 60) + '...'
         )
       : renderCheck('pending', 'Base64url encoding: Pending', 'Will display after key generation'),
+
+    vapidPublicKey && pubKeyVerification
+      ? renderCheck(
+          'info',
+          `Raw bytes (hex preview, first 16 bytes)`,
+          (() => {
+            const bytes = b64uToBytes(vapidPublicKey);
+            const hexPreview = Array.from(bytes.slice(0, 16))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join(' ');
+            return `${hexPreview} ...`;
+          })()
+        )
+      : renderCheck('pending', 'Hex preview: Pending', 'Generate key first'),
+
+    vapidPublicKey
+      ? renderCheck(
+          'info',
+          `Import test`,
+          'Can import as CryptoKey for verification'
+        )
+      : renderCheck('pending', 'Import test: Pending', 'Generate key to test'),
   ].join('');
 
   const card = renderCard(
@@ -909,6 +931,45 @@ function renderOutput(): void {
     `);
   }
 
+  // Audit ES256 Keypair Card
+  if (state.auditPublicKey) {
+    parts.push(`
+      <div class="output-card">
+        <h4>🔐 Audit Log ES256 Keypair</h4>
+        <p class="explanation">
+          <strong>Purpose:</strong> Tamper-evident audit log signing
+        </p>
+        <div class="output-item">
+          <strong>Private Key:</strong>
+          <span>🔒 Non-extractable</span>
+          <span class="detail">Stored wrapped in IndexedDB, cannot be exported</span>
+        </div>
+        <div class="output-item">
+          <strong>Algorithm:</strong>
+          <span>ECDSA P-256 (ES256)</span>
+        </div>
+        <div class="output-item">
+          <strong>Usage:</strong>
+          <code>[sign]</code>
+          <span class="detail">Private key signs audit entries</span>
+        </div>
+        <div class="output-item">
+          <strong>Public Key (JWK):</strong>
+        </div>
+        <details open>
+          <summary>Show Public Key JWK</summary>
+          <pre>${JSON.stringify(state.auditPublicKey, null, 2)}</pre>
+          <button onclick="navigator.clipboard.writeText('${JSON.stringify(state.auditPublicKey)}')">📋 Copy Public Key</button>
+        </details>
+        <p class="explanation">
+          <strong>Why this matters:</strong> The audit log uses asymmetric signatures (ES256).
+          Anyone with the public key can verify the audit chain, but only the worker can sign new entries.
+          This enables independent third-party verification.
+        </p>
+      </div>
+    `);
+  }
+
   if (state.jwt && state.jwtParts) {
     const signatureBytes = b64uToBytes(state.jwtParts.signature);
 
@@ -964,15 +1025,19 @@ function renderAuditLog(): void {
 
   const rows = state.auditEntries
     .map(
-      (entry) => `
+      (entry) => {
+        const hash = state.auditEntryHashes.get(entry.id);
+        return `
     <tr>
       <td><code>${entry.op}</code></td>
       <td>${formatTimestamp(entry.timestamp)}</td>
-      <td><code>${entry.kid.substring(0, 20)}...</code></td>
+      <td><code>${entry.kid.substring(0, 16)}...</code></td>
       <td>${entry.origin || '-'}</td>
+      <td>${hash ? `<code title="${hash}">${hash.substring(0, 16)}...</code>` : '-'}</td>
       <td>${entry.details ? JSON.stringify(entry.details) : '-'}</td>
     </tr>
-  `
+  `;
+      }
     )
     .join('');
 
@@ -984,6 +1049,7 @@ function renderAuditLog(): void {
           <th>Timestamp</th>
           <th>Key ID</th>
           <th>Origin</th>
+          <th>Entry Hash</th>
           <th>Details</th>
         </tr>
       </thead>
@@ -1089,7 +1155,14 @@ async function loadAuditLog(): Promise<void> {
       details: entry.details,
     }));
 
-    console.log(`[Demo] Loaded ${state.auditEntries.length} audit entries`);
+    // Compute hashes for all entries (for display in audit log table)
+    state.auditEntryHashes.clear();
+    for (const entry of entries) {
+      const hash = await computeAuditEntryHash(entry);
+      state.auditEntryHashes.set(entry.id, hash);
+    }
+
+    console.log(`[Demo] Loaded ${state.auditEntries.length} audit entries with hashes`);
   } catch (error) {
     console.error('[Demo] Failed to load audit log:', error);
     state.auditEntries = [];

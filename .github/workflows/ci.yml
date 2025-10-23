@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Check coverage (MUST be 100%)
+        run: pnpm test:coverage
+
+      - name: Verify 100% coverage
+        run: |
+          # Extract coverage percentages
+          LINES=$(pnpm test:coverage | grep -oP 'Lines\s+:\s+\K[\d.]+')
+          BRANCHES=$(pnpm test:coverage | grep -oP 'Branches\s+:\s+\K[\d.]+')
+          FUNCTIONS=$(pnpm test:coverage | grep -oP 'Functions\s+:\s+\K[\d.]+')
+          STATEMENTS=$(pnpm test:coverage | grep -oP 'Statements\s+:\s+\K[\d.]+')
+
+          # Check if all are 100%
+          if [ "$LINES" != "100" ] || [ "$BRANCHES" != "100" ] || [ "$FUNCTIONS" != "100" ] || [ "$STATEMENTS" != "100" ]; then
+            echo "❌ Coverage is below 100%"
+            echo "Lines: $LINES%, Branches: $BRANCHES%, Functions: $FUNCTIONS%, Statements: $STATEMENTS%"
+            exit 1
+          fi
+
+          echo "✅ Coverage is 100%"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-${{ matrix.node-version }}
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linting
+        run: pnpm lint
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run type check
+        run: pnpm typecheck
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: dist/
+
+  reproducible-build:
+    name: Verify Reproducible Build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: First build
+        run: pnpm build:reproducible
+
+      - name: Save first build hash
+        run: |
+          HASH1=$(sha256sum dist/kms-*.mjs | cut -d' ' -f1)
+          echo "HASH1=$HASH1" >> $GITHUB_ENV
+
+      - name: Clean
+        run: rm -rf dist/
+
+      - name: Second build
+        run: pnpm build:reproducible
+
+      - name: Save second build hash
+        run: |
+          HASH2=$(sha256sum dist/kms-*.mjs | cut -d' ' -f1)
+          echo "HASH2=$HASH2" >> $GITHUB_ENV
+
+      - name: Compare hashes
+        run: |
+          if [ "$HASH1" != "$HASH2" ]; then
+            echo "❌ Builds are not reproducible"
+            echo "First build:  $HASH1"
+            echo "Second build: $HASH2"
+            exit 1
+          fi
+          echo "✅ Builds are reproducible: $HASH1"

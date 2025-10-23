@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
 import { handleMessage } from '@/worker';
+
+// Initialize IndexedDB before each test
+beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory();
+});
 
 // Type definitions for our RPC protocol
 interface RPCRequest {

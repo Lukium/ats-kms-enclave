@@ -17,6 +17,9 @@ export interface WrappedKey {
   wrappedKey: ArrayBuffer;
   wrapParams: WrapParams;
   wrappedAt: string; // ISO timestamp
+  publicKeyRaw?: ArrayBuffer; // Optional: raw public key bytes (for asymmetric keys)
+  alg?: string; // Optional: algorithm identifier (e.g., 'ES256')
+  purpose?: string; // Optional: key purpose (e.g., 'vapid', 'signal')
 }
 
 /**
@@ -36,7 +39,7 @@ export interface WrapParams {
 export interface AuditEntry {
   version: 1;
   timestamp: string; // ISO timestamp
-  op: 'setup' | 'unlock' | 'unwrap' | 'sign' | 'reset' | 'export_attempt';
+  op: 'setup' | 'unlock' | 'unwrap' | 'sign' | 'reset' | 'export_attempt' | 'generate_vapid';
   kid: string;
   requestId: string;
   origin: string;
@@ -423,7 +426,12 @@ export async function wrapKey(
   unwrapKey: CryptoKey,
   kid: string,
   salt: Uint8Array,
-  iterations: number
+  iterations: number,
+  options?: {
+    publicKeyRaw?: ArrayBuffer; // Already exported public key bytes
+    alg?: string;
+    purpose?: string;
+  }
 ): Promise<void> {
   // Generate random IV (12 bytes for AES-GCM)
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -449,6 +457,9 @@ export async function wrapKey(
       iterations,
     },
     wrappedAt: new Date().toISOString(),
+    ...(options?.publicKeyRaw && { publicKeyRaw: options.publicKeyRaw }),
+    ...(options?.alg && { alg: options.alg }),
+    ...(options?.purpose && { purpose: options.purpose }),
   };
 
   // Store in IndexedDB

@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
 import { KMSClient } from '@/client';
+
+// Initialize IndexedDB before each test
+beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory();
+});
 
 // Type definitions for our API
 interface JWTPayload {
@@ -313,7 +319,7 @@ describe('Client RPC Bridge - Error Handling', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       if (error instanceof Error) {
-        expect(error.message).toContain('No key found');
+        expect(error.message).toContain('Key not found');
       }
     }
   });

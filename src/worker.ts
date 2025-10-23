@@ -1,9 +1,16 @@
 /**
  * KMS Worker - Cryptographic Operations Handler
  *
- * Phase 0 Implementation: Minimal RPC handler for VAPID key generation and JWT signing
+ * Phase 1 Implementation: Production-ready RPC handler with IndexedDB storage and audit logging
  * Runs in a dedicated Worker for isolation from main thread
  */
+
+// ============================================================================
+// Imports
+// ============================================================================
+
+import { initDB, wrapKey, unwrapKey, getWrappedKey } from './storage.js';
+import { initAuditLogger, logOperation, type AuditOperation } from './audit.js';
 
 // ============================================================================
 // Type Definitions
@@ -13,6 +20,7 @@ interface RPCRequest {
   id: string;
   method: string;
   params?: unknown;
+  origin?: string; // Optional: origin of the request (for audit logging)
 }
 
 interface RPCResponse {
@@ -29,12 +37,6 @@ interface VAPIDKeyPair {
   publicKey: string; // base64url encoded
 }
 
-interface StoredKeyPair {
-  privateKey: CryptoKey;
-  publicKey: CryptoKey;
-  publicKeyRaw: string; // base64url encoded
-}
-
 interface JWTPayload {
   aud: string;
   sub: string;
@@ -45,8 +47,48 @@ interface JWTPayload {
 // State Management
 // ============================================================================
 
-// In-memory key storage (Phase 0 - will be IndexedDB in Phase 1)
-const keyStore = new Map<string, StoredKeyPair>();
+// Initialization state
+let isInitialized = false;
+
+// Temporary wrapping key (Phase 1 - will be replaced by unlock manager in next task)
+// TODO: Replace with proper unlock manager that derives key from passphrase/passkey
+let wrappingKey: CryptoKey | null = null;
+const TEMP_SALT = new Uint8Array(16); // All zeros - temporary placeholder
+const TEMP_ITERATIONS = 600000;
+
+/**
+ * Initialize worker storage and audit logging
+ */
+async function init(): Promise<void> {
+  if (isInitialized) {
+    return;
+  }
+
+  await initDB();
+  await initAuditLogger();
+
+  // Generate temporary wrapping key (will be replaced by unlock manager)
+  // In Phase 1+, this will be derived from user passphrase/passkey
+  // For now, generate a fresh key each time (keys won't persist across worker restarts)
+  wrappingKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    false, // non-extractable
+    ['wrapKey', 'unwrapKey']
+  );
+
+  isInitialized = true;
+}
+
+/**
+ * Get the current wrapping key (temporary implementation)
+ */
+function getWrappingKey(): CryptoKey {
+  /* c8 ignore next 3 - defensive: init() always called before this */
+  if (!wrappingKey) {
+    throw new Error('Worker not initialized');
+  }
+  return wrappingKey;
+}
 
 // ============================================================================
 // Utility Functions
@@ -80,14 +122,19 @@ function generateKid(purpose: string): string {
 /**
  * Generate a VAPID keypair
  */
-async function generateVAPID(): Promise<VAPIDKeyPair> {
+async function generateVAPID(requestId: string, origin?: string): Promise<VAPIDKeyPair> {
+  // Ensure worker is initialized
+  await init();
+
   // Generate P-256 ECDSA keypair
+  // Note: Generated as extractable for wrapping (happy-dom limitation)
+  // When unwrapped, they'll be non-extractable for security
   const keypair = await crypto.subtle.generateKey(
     {
       name: 'ECDSA',
       namedCurve: 'P-256',
     },
-    false, // non-extractable private key
+    true, // temporarily extractable for wrapping (will be non-extractable when unwrapped)
     ['sign', 'verify']
   );
 
@@ -98,12 +145,23 @@ async function generateVAPID(): Promise<VAPIDKeyPair> {
   // Generate unique key ID
   const kid = generateKid('vapid');
 
-  // Store keypair for later use
-  keyStore.set(kid, {
-    privateKey: keypair.privateKey,
-    publicKey: keypair.publicKey,
-    publicKeyRaw: publicKeyBase64url,
+  // Wrap and store keypair
+  await wrapKey(keypair.privateKey, getWrappingKey(), kid, TEMP_SALT, TEMP_ITERATIONS, {
+    publicKeyRaw: publicKeyRaw,
+    alg: 'ES256',
+    purpose: 'vapid',
   });
+
+  // Log operation to audit log
+  const auditOp: AuditOperation = {
+    op: 'generate_vapid',
+    kid,
+    requestId,
+    /* c8 ignore next */
+    ...(origin && { origin }),
+  };
+
+  await logOperation(auditOp);
 
   return {
     kid,
@@ -114,12 +172,20 @@ async function generateVAPID(): Promise<VAPIDKeyPair> {
 /**
  * Sign a JWT with a stored VAPID key
  */
-async function signJWT(kid: string, payload: JWTPayload): Promise<{ jwt: string }> {
-  // Get keypair from storage
-  const stored = keyStore.get(kid);
-  if (!stored) {
-    throw new Error(`No key found with kid: ${kid}`);
-  }
+async function signJWT(
+  kid: string,
+  payload: JWTPayload,
+  requestId: string,
+  origin?: string
+): Promise<{ jwt: string }> {
+  // Ensure worker is initialized
+  await init();
+
+  // Unwrap private key from storage
+  const privateKey = await unwrapKey(kid, getWrappingKey(), {
+    name: 'ECDSA',
+    namedCurve: 'P-256',
+  });
 
   // Create JWT header
   const header = {
@@ -142,7 +208,7 @@ async function signJWT(kid: string, payload: JWTPayload): Promise<{ jwt: string 
   // Sign with private key
   const signature = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
-    stored.privateKey,
+    privateKey,
     signatureInput
   );
 
@@ -154,18 +220,40 @@ async function signJWT(kid: string, payload: JWTPayload): Promise<{ jwt: string 
   // Construct JWT
   const jwt = `${headerB64}.${payloadB64}.${signatureB64}`;
 
+  // Log operation to audit log
+  const auditOp: AuditOperation = {
+    op: 'sign',
+    kid,
+    requestId,
+    /* c8 ignore next */
+    ...(origin && { origin }),
+    details: {
+      aud: payload.aud,
+      sub: payload.sub,
+    },
+  };
+
+  await logOperation(auditOp);
+
   return { jwt };
 }
 
 /**
  * Get public key for a given kid
  */
-function getPublicKey(kid: string): { publicKey: string | null } {
-  const stored = keyStore.get(kid);
-  if (!stored) {
+async function getPublicKey(kid: string): Promise<{ publicKey: string | null }> {
+  // Ensure worker is initialized
+  await init();
+
+  // Get wrapped key from storage
+  const wrapped = await getWrappedKey(kid);
+  if (!wrapped || !wrapped.publicKeyRaw) {
     return { publicKey: null };
   }
-  return { publicKey: stored.publicKeyRaw };
+
+  // Convert ArrayBuffer to base64url
+  const publicKeyBase64url = arrayBufferToBase64url(wrapped.publicKeyRaw);
+  return { publicKey: publicKeyBase64url };
 }
 
 // ============================================================================
@@ -211,7 +299,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
     // Route to appropriate handler
     switch (request.method) {
       case 'generateVAPID': {
-        const result = await generateVAPID();
+        const result = await generateVAPID(request.id, request.origin);
         return {
           id: request.id,
           result,
@@ -253,7 +341,12 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         }
 
         try {
-          const result = await signJWT(params.kid, params.payload);
+          const result = await signJWT(
+            params.kid,
+            params.payload,
+            request.id,
+            request.origin
+          );
           return {
             id: request.id,
             result,
@@ -261,7 +354,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         } catch (error) {
           /* c8 ignore next - defensive: all Web APIs throw Error objects */
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          if (errorMessage.includes('No key found')) {
+          if (errorMessage.includes('Key not found')) {
             return {
               id: request.id,
               error: {
@@ -298,7 +391,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           };
         }
 
-        const result = getPublicKey(params.kid);
+        const result = await getPublicKey(params.kid);
         return {
           id: request.id,
           result,

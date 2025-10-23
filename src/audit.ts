@@ -31,11 +31,11 @@ import {
  * Audit operation data (input for logging)
  */
 export interface AuditOperation {
-  op: 'setup' | 'unlock' | 'unwrap' | 'sign' | 'reset' | 'export_attempt';
+  op: 'setup' | 'unlock' | 'unwrap' | 'sign' | 'reset' | 'export_attempt' | 'generate_vapid';
   kid: string;
   requestId: string;
-  origin: string;
-  clientInfo: { ua: string; url: string };
+  origin?: string;
+  clientInfo?: { ua: string; url: string };
   details?: Record<string, unknown>;
 }
 
@@ -130,8 +130,8 @@ export async function logOperation(data: AuditOperation): Promise<void> {
     op: data.op,
     kid: data.kid,
     requestId: data.requestId,
-    origin: data.origin,
-    clientInfo: data.clientInfo,
+    origin: data.origin || 'unknown',
+    clientInfo: data.clientInfo || { ua: 'unknown', url: 'unknown' },
     prevHash,
     nonce,
     ...(data.details && { details: data.details }),

@@ -1,0 +1,74 @@
+# Security Headers for KMS Enclave (kms.ats.run)
+#
+# These headers are PRODUCTION-READY and will remain in Phase 2.
+# They enforce strict security policies for the KMS enclave.
+#
+# References:
+# - CSP: https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP
+# - COOP/COEP: https://web.dev/coop-coep/
+# - Permissions Policy: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy
+
+# KMS Enclave HTML (iframe entry point)
+/kms.html
+  # Content Security Policy - Strict isolation
+  # - default-src 'none': Block all by default
+  # - script-src 'self': Only load scripts from same origin
+  # - connect-src 'self': Only fetch from same origin (for self-verification)
+  # - worker-src 'self': Allow dedicated worker from same origin
+  # - frame-ancestors https://ats.run: Only embeddable in main PWA
+  Content-Security-Policy: default-src 'none'; script-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://ats.run; form-action 'none'
+
+  # Permissions Policy - Disable unnecessary browser features
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
+
+  # Cross-Origin Policies - Enable SharedArrayBuffer and isolate context
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
+
+  # Standard security headers
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+  # Cache for 5 minutes (will be content-addressed in Phase 2)
+  Cache-Control: public, max-age=300
+
+# KMS Manifest - Version and hash information
+/.well-known/kms-manifest.json
+  Content-Type: application/json; charset=utf-8
+
+  # CORS - Allow any origin to read manifest (for verification)
+  Access-Control-Allow-Origin: *
+
+  # Cache for 1 minute, must revalidate
+  Cache-Control: public, max-age=60, must-revalidate
+
+  # Standard security headers
+  X-Content-Type-Options: nosniff
+
+# Sigstore Transparency Log Attestations
+/sigstore/*
+  Content-Type: application/octet-stream
+
+  # CORS - Allow any origin to verify attestations
+  Access-Control-Allow-Origin: *
+
+  # Cache forever (content-addressed, immutable)
+  Cache-Control: public, max-age=31536000, immutable
+
+  # Standard security headers
+  X-Content-Type-Options: nosniff
+
+# Content-addressed JavaScript modules (Phase 2)
+# Pattern: /kms-{hash}.mjs
+/*.mjs
+  Content-Type: application/javascript; charset=utf-8
+
+  # No CORS needed (same-origin only via CSP)
+  Cross-Origin-Resource-Policy: same-origin
+
+  # Cache forever (content-addressed filename = immutable)
+  Cache-Control: public, max-age=31536000, immutable
+
+  # Standard security headers
+  X-Content-Type-Options: nosniff

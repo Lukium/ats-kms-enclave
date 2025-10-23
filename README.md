@@ -28,7 +28,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - ✅ ES256 JWT signing
 - ✅ Interactive demo
 
-**[Try the demo →](example/README.md)** `make demo`
+**[Try the demo →](example/phase-0/README.md)** `make demo`
 
 See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the implementation roadmap.
 
@@ -162,7 +162,7 @@ This opens an interactive demo at `http://localhost:5173` that demonstrates:
 - Public key retrieval
 - Complete workflow validation
 
-See [example/README.md](example/README.md) for more details.
+See [example/phase-0/README.md](example/phase-0/README.md) for more details.
 
 ### Development Workflow
 

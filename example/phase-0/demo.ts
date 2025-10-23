@@ -4,7 +4,7 @@
  * Demonstrates VAPID key generation, JWT signing, and public key retrieval.
  */
 
-import { KMSClient } from '../src/client';
+import { KMSClient } from '@/client';
 
 // Global state
 let client: KMSClient | null = null;

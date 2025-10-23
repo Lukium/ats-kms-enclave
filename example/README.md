@@ -1,113 +1,93 @@
-# ATS KMS Enclave - Phase 0 Demo
+# ATS KMS Enclave - Demos
 
-Interactive demonstration of the KMS enclave prototype showing VAPID key generation, JWT signing, and public key retrieval.
+Interactive demonstrations of the KMS enclave across different implementation phases.
 
-## Quick Start
+## Available Demos
 
-From the repository root:
+### Phase 0: Prototype ✅ Complete
+
+[**Phase 0 Demo →**](phase-0/README.md)
+
+In-memory key storage, Worker-based isolation, basic VAPID/JWT operations.
 
 ```bash
-# Run the demo (opens in browser)
+# Run Phase 0 demo
+make demo
+# or
 pnpm demo
 ```
 
-The demo will open at `http://localhost:5173`
+**Features:**
+- VAPID keypair generation
+- ES256 JWT signing
+- Public key retrieval
+- Complete workflow test
 
-## Features
+**Status:** ✅ 108 tests passing, 100% coverage
 
-The demo showcases all Phase 0 capabilities:
+---
 
-1. **Generate VAPID Keypair** - Creates a new P-256 ECDSA keypair for Web Push
-2. **Sign JWT Token** - Signs a JWT with the generated key using ES256 algorithm
-3. **Retrieve Public Key** - Retrieves the public key by its kid (key ID)
-4. **Complete Workflow Test** - Runs all operations in sequence to verify everything works
+### Phase 1: Production Enclave (Planned)
 
-## What's Happening Under the Hood
-
-- **Worker Isolation**: The cryptographic operations run in a Web Worker, isolated from the main thread
-- **In-Memory Storage**: Keys are stored in memory (Map) - Phase 1 will add IndexedDB persistence
-- **Non-Extractable Keys**: Private keys cannot be exported from WebCrypto (browser-enforced)
-- **RPC Communication**: Client communicates with Worker via postMessage with request/response correlation
-
-## Architecture
-
-```
-┌─────────────────┐          postMessage          ┌─────────────────┐
-│   Main Thread   │ ◄──────────────────────────► │   Web Worker    │
-│                 │                                │                 │
-│  KMSClient      │   { id, method, params }      │  handleMessage  │
-│  - generateVAPID│  ───────────────────────────► │  - generateVAPID│
-│  - signJWT      │                                │  - signJWT      │
-│  - getPublicKey │  ◄─────────────────────────── │  - getPublicKey │
-│                 │   { id, result/error }        │                 │
-└─────────────────┘                                └─────────────────┘
-                                                           │
-                                                           ▼
-                                                    ┌─────────────┐
-                                                    │  WebCrypto  │
-                                                    │   KeyStore  │
-                                                    └─────────────┘
-```
-
-## Testing
-
-The demo is backed by **108 tests** with **100% code coverage**:
-
-- 52 baseline WebCrypto tests
-- 29 Worker RPC handler tests
-- 27 Client RPC bridge tests
-
-Run tests:
-
-```bash
-# All tests
-pnpm test
-
-# With coverage
-pnpm test:coverage
-
-# Watch mode
-pnpm test:watch
-```
-
-## Building for Production
-
-```bash
-# Build optimized demo
-pnpm demo:build
-
-# Output will be in example/dist/
-```
-
-## Browser Requirements
-
-- **Chrome/Edge**: 120+ (recommended)
-- **Firefox**: 120+
-- **Safari**: 17+
-
-All browsers must support:
-- Web Workers
-- WebCrypto API (SubtleCrypto)
-- ES2020+ features
-
-## Phase 0 Limitations
-
-This is a prototype demonstration. Phase 0 limitations:
-
-- ❌ Keys are lost on page reload (in-memory only)
-- ❌ No persistence (IndexedDB will be added in Phase 1)
-- ❌ Single-user only (no multi-key management)
-- ❌ No signature format conversion (DER vs P-1363)
-- ❌ No reproducible build pipeline yet
-
-## Next Steps
-
-**Phase 1** will add:
-- IndexedDB persistence
+Coming soon:
+- IndexedDB key persistence
 - Better error handling
 - Single-file module build
 - Production-ready features
 
-## License
+---
 
-MIT - See LICENSE file for details
+### Phase 2: Verifiable Build (Planned)
+
+Coming soon:
+- Reproducible builds
+- SRI hash generation
+- Content-addressed artifacts
+
+---
+
+## Quick Start
+
+```bash
+# Run latest demo
+make demo
+
+# Run specific phase
+cd example/phase-0
+../../node_modules/.bin/vite
+
+# Build demo for production
+pnpm demo:build
+```
+
+## Demo Structure
+
+```
+example/
+├── README.md          # This file
+├── vite.config.ts     # Shared Vite config
+├── phase-0/          # Phase 0 demo
+│   ├── index.html
+│   ├── demo.ts
+│   └── README.md
+├── phase-1/          # (future)
+└── phase-2/          # (future)
+```
+
+## Browser Requirements
+
+All demos require:
+- **Chrome/Edge**: 120+
+- **Firefox**: 120+
+- **Safari**: 17+
+
+Features needed:
+- Web Workers
+- WebCrypto API
+- ES2020+ support
+
+## Development
+
+Demos use Vite for fast development and hot module reloading.
+
+Each phase demo is self-contained and can be run independently.

@@ -259,6 +259,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
             result,
           };
         } catch (error) {
+          /* c8 ignore next - defensive: all Web APIs throw Error objects */
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           if (errorMessage.includes('No key found')) {
             return {
@@ -315,6 +316,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
     }
   } catch (error) {
     // Catch any unexpected errors
+    /* c8 ignore next - defensive: all Web APIs throw Error objects */
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return {
       id: request.id,

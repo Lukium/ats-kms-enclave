@@ -81,6 +81,22 @@ describe('Worker RPC Handler - Message Processing', () => {
       expect(response.result).toBeUndefined();
     });
 
+    it('should handle null request', async () => {
+      const response = await handleMessage(null as unknown as RPCRequest) as RPCResponse;
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.code).toBe('INVALID_REQUEST');
+      expect(response.error?.message).toContain('must be an object');
+    });
+
+    it('should handle non-object request', async () => {
+      const response = await handleMessage('invalid' as unknown as RPCRequest) as RPCResponse;
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.code).toBe('INVALID_REQUEST');
+      expect(response.error?.message).toContain('must be an object');
+    });
+
     it('should handle invalid request format', async () => {
       const invalidRequest = {
         // Missing id field
@@ -398,34 +414,73 @@ describe('Worker RPC Handler - getPublicKey', () => {
 
     expect(result.publicKey).toBeNull();
   });
+
+  it('should require kid parameter in params', async () => {
+    const request: RPCRequest = {
+      id: 'req-304',
+      method: 'getPublicKey',
+      params: {
+        // params exists but kid is missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('kid');
+  });
+
+  it('should reject non-string kid parameter', async () => {
+    const request: RPCRequest = {
+      id: 'req-305',
+      method: 'getPublicKey',
+      params: {
+        kid: 123, // Invalid type
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+  });
 });
 
 describe('Worker RPC Handler - Error Handling', () => {
-  it('should catch and return crypto operation errors', async () => {
-    // This test will verify that if crypto.subtle throws, we catch it
-    // We'll need to implement this in a way that can fail
-    const request: RPCRequest = {
+  it('should handle circular reference in JWT payload', async () => {
+    // First generate a key
+    const generateRequest: RPCRequest = {
       id: 'req-400',
       method: 'generateVAPID',
     };
 
-    // If crypto operations fail, should return CRYPTO_ERROR
+    const generateResponse = await handleMessage(generateRequest) as RPCResponse;
+    const generateResult = generateResponse.result as VAPIDKeyPair;
+
+    // Create a payload with circular reference (will cause JSON.stringify to fail)
+    const circularPayload: Record<string, unknown> = {
+      aud: 'https://test.com',
+      sub: 'mailto:test@test.com',
+      exp: 123456,
+    };
+    circularPayload.self = circularPayload; // Circular reference
+
+    const request: RPCRequest = {
+      id: 'req-401',
+      method: 'signJWT',
+      params: { kid: generateResult.kid, payload: circularPayload },
+    };
+
     const response = await handleMessage(request) as RPCResponse;
 
-    // This should succeed normally, but structure is in place for error handling
-    expect(response.id).toBe('req-400');
-    // If it succeeded, no error
-    if (response.result) {
-      expect(response.error).toBeUndefined();
-    }
-    // If it failed, should have CRYPTO_ERROR
-    if (response.error) {
-      expect(response.error.code).toBe('CRYPTO_ERROR');
-    }
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('CRYPTO_ERROR');
+    expect(response.error?.message).toContain('Crypto operation failed');
   });
 
   it('should preserve request ID in error responses', async () => {
-    const requestId = 'req-401-unique-id';
+    const requestId = 'req-402-unique-id';
     const request: RPCRequest = {
       id: requestId,
       method: 'unknownMethod',
@@ -438,7 +493,7 @@ describe('Worker RPC Handler - Error Handling', () => {
 
   it('should include helpful error messages', async () => {
     const request: RPCRequest = {
-      id: 'req-402',
+      id: 'req-403',
       method: 'unknownMethod',
     };
 
@@ -448,5 +503,35 @@ describe('Worker RPC Handler - Error Handling', () => {
     expect(response.error?.message).toBeDefined();
     expect(response.error?.message.length).toBeGreaterThan(0);
     expect(response.error?.message).toContain('unknownMethod');
+  });
+
+  it('should preserve request ID even in generic error handler', async () => {
+    // Generate a key first
+    const generateRequest: RPCRequest = {
+      id: 'req-404',
+      method: 'generateVAPID',
+    };
+
+    const generateResponse = await handleMessage(generateRequest) as RPCResponse;
+    const generateResult = generateResponse.result as VAPIDKeyPair;
+
+    // Create a payload with circular reference
+    const circularPayload: Record<string, unknown> = {
+      aud: 'https://test.com',
+      sub: 'mailto:test@test.com',
+      exp: 123456,
+    };
+    circularPayload.self = circularPayload;
+
+    const request: RPCRequest = {
+      id: 'req-405-error-id',
+      method: 'signJWT',
+      params: { kid: generateResult.kid, payload: circularPayload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.id).toBe('req-405-error-id');
+    expect(response.error).toBeDefined();
   });
 });

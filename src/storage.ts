@@ -25,8 +25,8 @@ export interface WrappedKey {
 export interface WrapParams {
   alg: 'AES-GCM';
   keySize: 256;
-  salt: ArrayBuffer;
-  iv: ArrayBuffer;
+  salt: ArrayBufferLike;
+  iv: ArrayBufferLike;
   iterations: number;
 }
 
@@ -403,4 +403,88 @@ export async function getAllMeta(): Promise<
   Array<{ key: MetaKey; value: unknown }>
 > {
   return await getAll<{ key: MetaKey; value: unknown }>('meta');
+}
+
+// ============================================================================
+// Key Wrapping Operations
+// ============================================================================
+
+/**
+ * Wrap a CryptoKey with AES-GCM and store it
+ *
+ * @param key - The CryptoKey to wrap (e.g., ECDSA private key)
+ * @param unwrapKey - The AES-GCM key used for wrapping
+ * @param kid - Key identifier
+ * @param salt - Salt used in key derivation (16 bytes)
+ * @param iterations - PBKDF2 iterations
+ */
+export async function wrapKey(
+  key: CryptoKey,
+  unwrapKey: CryptoKey,
+  kid: string,
+  salt: Uint8Array,
+  iterations: number
+): Promise<void> {
+  // Generate random IV (12 bytes for AES-GCM)
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  // Wrap the key using AES-GCM
+  // Use 'pkcs8' format for private keys (cannot use 'raw' for ECDSA/RSA keys)
+  const wrappedKeyBytes = await crypto.subtle.wrapKey(
+    'pkcs8',
+    key,
+    unwrapKey,
+    { name: 'AES-GCM', iv }
+  );
+
+  // Create wrapped key object
+  const wrapped: WrappedKey = {
+    kid,
+    wrappedKey: wrappedKeyBytes,
+    wrapParams: {
+      alg: 'AES-GCM',
+      keySize: 256,
+      salt: salt.buffer,
+      iv: iv.buffer,
+      iterations,
+    },
+    wrappedAt: new Date().toISOString(),
+  };
+
+  // Store in IndexedDB
+  await putWrappedKey(wrapped);
+}
+
+/**
+ * Unwrap a stored key
+ *
+ * @param kid - Key identifier
+ * @param unwrapKey - The AES-GCM key used for unwrapping
+ * @param algorithm - The algorithm of the unwrapped key (e.g., { name: 'ECDSA', namedCurve: 'P-256' })
+ * @returns The unwrapped CryptoKey (non-extractable)
+ */
+export async function unwrapKey(
+  kid: string,
+  unwrapKey: CryptoKey,
+  algorithm: AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams | HmacImportParams | AesKeyAlgorithm
+): Promise<CryptoKey> {
+  // Retrieve wrapped key from storage
+  const wrapped = await getWrappedKey(kid);
+  if (!wrapped) {
+    throw new Error(`Key not found: ${kid}`);
+  }
+
+  // Unwrap the key using AES-GCM
+  // Use 'pkcs8' format for private keys (matches wrapKey format)
+  const key = await crypto.subtle.unwrapKey(
+    'pkcs8',
+    wrapped.wrappedKey,
+    unwrapKey,
+    { name: 'AES-GCM', iv: wrapped.wrapParams.iv as ArrayBuffer },
+    algorithm,
+    false, // non-extractable
+    ['sign'] // usage
+  );
+
+  return key;
 }

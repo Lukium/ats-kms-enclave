@@ -28,6 +28,8 @@ import {
   getMeta,
   deleteMeta,
   getAllMeta,
+  wrapKey,
+  unwrapKey,
   type WrappedKey,
   type WrapParams,
   type AuditEntry,
@@ -381,5 +383,272 @@ describe('Storage - Meta Store', () => {
     const all = await getAllMeta();
     expect(all).toHaveLength(2);
     expect(all.map((m) => m.key).sort()).toEqual(['chainHead', 'unlockMethod']);
+  });
+});
+
+// ============================================================
+// Key Wrapping Tests
+// ============================================================
+
+describe('Storage - Key Wrapping', () => {
+  let testUnwrapKey: CryptoKey;
+
+  beforeEach(async () => {
+    globalThis.indexedDB = new IDBFactory();
+    await initDB();
+
+    // Generate a test unwrap key (AES-GCM 256-bit)
+    testUnwrapKey = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      false, // non-extractable
+      ['wrapKey', 'unwrapKey']
+    );
+  });
+
+  afterEach(() => {
+    closeDB();
+  });
+
+  it('should wrap and store a key', async () => {
+    // Generate a test key to wrap (ECDSA P-256)
+    const keypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true, // extractable for testing
+      ['sign', 'verify']
+    );
+
+    const kid = 'test-key-1';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+
+    await wrapKey(keypair.privateKey, testUnwrapKey, kid, salt, 600000);
+
+    // Verify key was stored
+    const stored = await getWrappedKey(kid);
+    expect(stored).toBeDefined();
+    expect(stored?.kid).toBe(kid);
+    expect(stored?.wrappedKey).toBeInstanceOf(ArrayBuffer);
+    expect(stored?.wrapParams.alg).toBe('AES-GCM');
+    expect(stored?.wrapParams.keySize).toBe(256);
+    expect(stored?.wrapParams.iterations).toBe(600000);
+    expect(stored?.wrappedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('should generate unique IV for each wrap', async () => {
+    const keypair1 = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const keypair2 = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    await wrapKey(keypair1.privateKey, testUnwrapKey, 'key1', salt, 600000);
+    await wrapKey(keypair2.privateKey, testUnwrapKey, 'key2', salt, 600000);
+
+    const stored1 = await getWrappedKey('key1');
+    const stored2 = await getWrappedKey('key2');
+
+    // Compare as byte arrays, not ArrayBuffers
+    const iv1 = new Uint8Array(stored1!.wrapParams.iv);
+    const iv2 = new Uint8Array(stored2!.wrapParams.iv);
+    expect(Array.from(iv1)).not.toEqual(Array.from(iv2));
+  });
+
+  it('should unwrap a wrapped key', async () => {
+    // Generate and wrap a key
+    const originalKeypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const kid = 'test-key-2';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    await wrapKey(originalKeypair.privateKey, testUnwrapKey, kid, salt, 600000);
+
+    // Unwrap the key
+    const unwrapped = await unwrapKey(kid, testUnwrapKey, {
+      name: 'ECDSA',
+      namedCurve: 'P-256',
+    });
+
+    // Verify unwrapped key can be used for signing
+    expect(unwrapped).toBeDefined();
+    expect(unwrapped.type).toBe('private');
+    expect(unwrapped.algorithm.name).toBe('ECDSA');
+
+    // Test that unwrapped key can sign
+    const data = new TextEncoder().encode('test message');
+    await expect(
+      crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, unwrapped, data)
+    ).resolves.toBeInstanceOf(ArrayBuffer);
+  });
+
+  it('should unwrap key as non-extractable', async () => {
+    const originalKeypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const kid = 'test-key-3';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    await wrapKey(originalKeypair.privateKey, testUnwrapKey, kid, salt, 600000);
+
+    const unwrapped = await unwrapKey(kid, testUnwrapKey, {
+      name: 'ECDSA',
+      namedCurve: 'P-256',
+    });
+
+    // Verify key is non-extractable
+    expect(unwrapped.extractable).toBe(false);
+
+    // Attempt to export should fail
+    await expect(crypto.subtle.exportKey('pkcs8', unwrapped)).rejects.toThrow();
+  });
+
+  it('should throw error when unwrapping non-existent key', async () => {
+    await expect(
+      unwrapKey('non-existent-key', testUnwrapKey, {
+        name: 'ECDSA',
+        namedCurve: 'P-256',
+      })
+    ).rejects.toThrow('Key not found: non-existent-key');
+  });
+
+  it('should throw error when unwrapping with wrong key', async () => {
+    // Generate and wrap a key
+    const originalKeypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const kid = 'test-key-4';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    await wrapKey(originalKeypair.privateKey, testUnwrapKey, kid, salt, 600000);
+
+    // Generate a different unwrap key
+    const wrongUnwrapKey = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['wrapKey', 'unwrapKey']
+    );
+
+    // Attempt to unwrap with wrong key should fail
+    await expect(
+      unwrapKey(kid, wrongUnwrapKey, {
+        name: 'ECDSA',
+        namedCurve: 'P-256',
+      })
+    ).rejects.toThrow();
+  });
+
+  it('should preserve wrap parameters', async () => {
+    const keypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const kid = 'test-key-5';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iterations = 600000;
+
+    await wrapKey(keypair.privateKey, testUnwrapKey, kid, salt, iterations);
+
+    const stored = await getWrappedKey(kid);
+    expect(stored?.wrapParams.salt).toEqual(salt.buffer);
+    expect(stored?.wrapParams.iterations).toBe(iterations);
+    expect(stored?.wrapParams.iv).toBeInstanceOf(ArrayBuffer);
+    expect(new Uint8Array(stored!.wrapParams.iv).length).toBe(12);
+  });
+
+  it('should handle different key algorithms', async () => {
+    // Test with Ed25519 (for future Signal Protocol support)
+    // Note: Ed25519 support may vary by browser
+    try {
+      const keypair = await crypto.subtle.generateKey('Ed25519', true, [
+        'sign',
+        'verify',
+      ]);
+
+      const kid = 'test-ed25519-key';
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      await wrapKey(keypair.privateKey, testUnwrapKey, kid, salt, 600000);
+
+      const unwrapped = await unwrapKey(kid, testUnwrapKey, 'Ed25519');
+
+      expect(unwrapped.algorithm.name).toBe('Ed25519');
+      expect(unwrapped.type).toBe('private');
+    } catch (error) {
+      // Ed25519 not supported in this environment, skip test
+      if (
+        error instanceof Error &&
+        (error.message.includes('Unrecognized') ||
+          error.message.includes('not supported'))
+      ) {
+        expect(true).toBe(true); // Test passes if algorithm not supported
+      } else {
+        throw error;
+      }
+    }
+  });
+
+  it('should handle wrap/unwrap round-trip correctly', async () => {
+    // Generate test data
+    const testMessage = 'Test message for signing';
+    const testData = new TextEncoder().encode(testMessage);
+
+    // Generate original keypair
+    const originalKeypair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+
+    // Sign with original key
+    const originalSignature = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      originalKeypair.privateKey,
+      testData
+    );
+
+    // Wrap and unwrap
+    const kid = 'test-key-6';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    await wrapKey(originalKeypair.privateKey, testUnwrapKey, kid, salt, 600000);
+    const unwrapped = await unwrapKey(kid, testUnwrapKey, {
+      name: 'ECDSA',
+      namedCurve: 'P-256',
+    });
+
+    // Sign with unwrapped key
+    const unwrappedSignature = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      unwrapped,
+      testData
+    );
+
+    // Verify both signatures are valid with original public key
+    const isOriginalValid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      originalKeypair.publicKey,
+      originalSignature,
+      testData
+    );
+    const isUnwrappedValid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      originalKeypair.publicKey,
+      unwrappedSignature,
+      testData
+    );
+
+    expect(isOriginalValid).toBe(true);
+    expect(isUnwrappedValid).toBe(true);
   });
 });

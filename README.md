@@ -36,7 +36,7 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-23 16:57:26 UTC*
+*Last updated: 2025-10-23 17:03:41 UTC*
 
 **Test Results:**
 - Test Files: 7 passed (7)
@@ -47,10 +47,10 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 1233    │     100│      100 │     100│     100 │
+All files           │ 1317    │     100│      100 │     100│     100 │
  audit.ts           │ 347     │     100│      100 │     100│     100 │ 
  client.ts          │ 133     │     100│      100 │     100│     100 │ 
- storage.ts         │ 407     │     100│      100 │     100│     100 │ 
+ storage.ts         │ 491     │     100│      100 │     100│     100 │ 
  worker.ts          │ 346     │     100│      100 │     100│     100 │ 
 ```
 <!-- END AUTO-GENERATED -->

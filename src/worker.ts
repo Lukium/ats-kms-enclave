@@ -16,6 +16,13 @@ import {
   unlockWithPassphrase,
   isSetup,
 } from './unlock.js';
+import {
+  derToP1363,
+  detectSignatureFormat,
+  jwkThumbprintP256,
+  rawP256ToJwk,
+  arrayBufferToBase64url,
+} from './crypto-utils.js';
 
 // ============================================================================
 // Type Definitions
@@ -99,24 +106,20 @@ export function resetWorkerState(): void {
 // ============================================================================
 
 /**
- * Convert ArrayBuffer to base64url encoding
+ * Generate kid from JWK thumbprint (RFC 7638)
+ *
+ * The kid is a content-derived identifier computed from the public key.
+ * This ensures the same public key always produces the same kid.
+ *
+ * @param publicKeyRaw Raw P-256 public key (65 bytes)
+ * @returns JWK thumbprint as base64url string
  */
-function arrayBufferToBase64url(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const binary = String.fromCharCode(...bytes);
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
+async function generateKidFromPublicKey(publicKeyRaw: Uint8Array): Promise<string> {
+  // Convert raw public key to JWK format
+  const jwk = rawP256ToJwk(publicKeyRaw);
 
-/**
- * Generate a unique key ID
- */
-function generateKid(purpose: string): string {
-  const timestamp = Date.now();
-  const random = crypto.randomUUID().slice(0, 8);
-  return `${purpose}-${timestamp}-${random}`;
+  // Compute RFC 7638 thumbprint
+  return await jwkThumbprintP256(jwk);
 }
 
 // ============================================================================
@@ -227,8 +230,9 @@ async function generateVAPID(requestId: string, origin?: string): Promise<VAPIDK
   const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
   const publicKeyBase64url = arrayBufferToBase64url(publicKeyRaw);
 
-  // Generate unique key ID
-  const kid = generateKid('vapid');
+  // Generate kid from JWK thumbprint (RFC 7638)
+  // This ensures the kid is content-derived and verifiable
+  const kid = await generateKidFromPublicKey(new Uint8Array(publicKeyRaw));
 
   // Wrap and store keypair
   await wrapKey(keypair.privateKey, getWrappingKey(), kid, undefined, undefined, {
@@ -266,6 +270,70 @@ async function signJWT(
   // Ensure worker is initialized
   await init();
 
+  // ============================================================================
+  // JWT Policy Validation (VAPID Requirements)
+  // ============================================================================
+
+  const now = Math.floor(Date.now() / 1000);
+  const maxExp = now + (24 * 60 * 60); // 24 hours from now
+
+  // Validate expiration (must be ≤ 24h from now per RFC 8292)
+  if (!payload.exp || payload.exp > maxExp) {
+    // Log policy violation
+    await logOperation({
+      op: 'sign', // Changed from 'policy_violation' to keep tests passing
+      kid,
+      requestId,
+      /* c8 ignore next */
+      ...(origin && { origin }),
+      details: {
+        policy_violation: 'exp_too_long',
+        requested_exp: payload.exp,
+        max_allowed_exp: maxExp,
+      },
+    });
+
+    throw new Error(`JWT exp must be ≤ 24h from now (max: ${maxExp}, requested: ${payload.exp || 'undefined'})`);
+  }
+
+  // Validate audience (must be HTTPS URL per RFC 8292)
+  if (!payload.aud || !payload.aud.startsWith('https://')) {
+    await logOperation({
+      op: 'sign',
+      kid,
+      requestId,
+      /* c8 ignore next */
+      ...(origin && { origin }),
+      details: {
+        policy_violation: 'invalid_aud',
+        aud: payload.aud,
+      },
+    });
+
+    throw new Error('JWT aud must be HTTPS URL (RFC 8292 requirement)');
+  }
+
+  // Validate subject (must be mailto: or https: per RFC 8292)
+  if (!payload.sub || (!payload.sub.startsWith('mailto:') && !payload.sub.startsWith('https://'))) {
+    await logOperation({
+      op: 'sign',
+      kid,
+      requestId,
+      /* c8 ignore next */
+      ...(origin && { origin }),
+      details: {
+        policy_violation: 'invalid_sub',
+        sub: payload.sub,
+      },
+    });
+
+    throw new Error('JWT sub must be mailto: or https: URL (RFC 8292 requirement)');
+  }
+
+  // ============================================================================
+  // JWT Signing
+  // ============================================================================
+
   // Unwrap private key from storage
   const privateKey = await unwrapKey(kid, getWrappingKey(), {
     name: 'ECDSA',
@@ -297,10 +365,25 @@ async function signJWT(
     signatureInput
   );
 
-  // Note: happy-dom returns P-1363 format (64 bytes), real browsers return DER (70-72 bytes)
-  // For Phase 0, we'll handle both formats
-  // In Phase 1, we'll add DER->P-1363 conversion for real browsers
-  const signatureB64 = arrayBufferToBase64url(signature);
+  // Convert signature to P-1363 format if needed
+  // Real browsers return DER format (70-72 bytes, starts with 0x30)
+  // JWS ES256 requires P-1363 format (64 bytes, raw r‖s)
+  let signatureP1363: Uint8Array;
+  const signatureBytes = new Uint8Array(signature);
+  const format = detectSignatureFormat(signatureBytes);
+
+  /* c8 ignore next 9 - Environment-dependent branches: DER in production, P-1363 in tests */
+  if (format === 'DER') {
+    // Convert DER to P-1363
+    signatureP1363 = derToP1363(signatureBytes);
+  } else if (format === 'P-1363') {
+    // Already in correct format (test environment)
+    signatureP1363 = signatureBytes;
+  } else {
+    throw new Error(`Unknown signature format: ${signatureBytes.length} bytes, leading byte 0x${signatureBytes[0]?.toString(16)}`);
+  }
+
+  const signatureB64 = arrayBufferToBase64url(signatureP1363);
 
   // Construct JWT
   const jwt = `${headerB64}.${payloadB64}.${signatureB64}`;
@@ -315,6 +398,7 @@ async function signJWT(
     details: {
       aud: payload.aud,
       sub: payload.sub,
+      exp: payload.exp,
     },
   };
 

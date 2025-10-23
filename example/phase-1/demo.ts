@@ -1,0 +1,1492 @@
+/**
+ * Phase 1 Interactive Demo
+ *
+ * This demo proves the production-ready KMS implementation with:
+ * - Passphrase-based unlock (PBKDF2 600k iterations)
+ * - Persistent storage (IndexedDB with AES-GCM wrapping)
+ * - Audit logging (complete operation history)
+ * - Lock/unlock state management
+ */
+
+import { KMSClient } from '../../src/client.js';
+import { getAllAuditEntries, getAllWrappedKeys, deleteWrappedKey, initDB, closeDB, DB_NAME, type AuditEntry as StorageAuditEntry, type WrappedKey } from '../../src/storage.js';
+import {
+  b64uToBytes,
+  verifyRawP256,
+  verifyJwtEs256Compact,
+  verifyVAPIDPayload,
+  jwkThumbprintP256,
+  type PublicKeyVerification,
+  type JWTVerification,
+  type JWTPayloadVerification,
+} from './verify.js';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface DemoState {
+  setupComplete: boolean;
+  vapidKid: string | null;
+  vapidPublicKey: string | null;
+  vapidPublicKeyJwk: JsonWebKey | null;
+  jwt: string | null;
+  jwtParts: { header: string; payload: string; signature: string } | null;
+  isLocked: boolean;
+  passphrase: string | null;
+  auditEntries: AuditEntry[];
+  storedKeys: StoredKeyInfo[];
+  metrics: PerformanceMetrics;
+  thumbprint: string | null;
+  pubKeyVerification: PublicKeyVerification | null;
+  jwtVerification: JWTVerification | null;
+  payloadVerification: JWTPayloadVerification | null;
+  jwtSignatureValid: boolean | null;
+  jwtVerificationError: string | null;
+  keyMetadata: {
+    algorithm: { name: string; namedCurve: string };
+    extractable: boolean;
+    usages: string[];
+  } | null;
+}
+
+interface AuditEntry {
+  id: number;
+  timestamp: string;
+  op: string;
+  kid: string;
+  requestId: string;
+  origin?: string;
+  details?: Record<string, unknown>;
+}
+
+interface StoredKeyInfo {
+  kid: string;
+  alg: string;
+  purpose: string;
+  created: string;
+  lastUsed?: string;
+  publicKey: string;
+}
+
+interface PerformanceMetrics {
+  setupTime: number | null;
+  unlockTime: number | null;
+  keyGenTime: number | null;
+  signTime: number | null;
+  workerLoadTime: number | null;
+}
+
+// ============================================================================
+// Global State
+// ============================================================================
+
+let client: KMSClient | null = null;
+const state: DemoState = {
+  setupComplete: false,
+  vapidKid: null,
+  vapidPublicKey: null,
+  vapidPublicKeyJwk: null,
+  jwt: null,
+  jwtParts: null,
+  isLocked: false,
+  passphrase: null,
+  auditEntries: [],
+  storedKeys: [],
+  metrics: {
+    setupTime: null,
+    unlockTime: null,
+    keyGenTime: null,
+    signTime: null,
+    workerLoadTime: null,
+  },
+  thumbprint: null,
+  pubKeyVerification: null,
+  jwtVerification: null,
+  payloadVerification: null,
+  jwtSignatureValid: null,
+  jwtVerificationError: null,
+  keyMetadata: null,
+};
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/**
+ * Update button states based on current demo state
+ */
+function updateButtonStates(): void {
+  const stage2Btn = document.getElementById('stage2-btn') as HTMLButtonElement;
+  const stage3Btn = document.getElementById('stage3-btn') as HTMLButtonElement;
+  const stage4Btn = document.getElementById('stage4-btn') as HTMLButtonElement;
+  const stage5Btn = document.getElementById('stage5-btn') as HTMLButtonElement;
+  const stage6Btn = document.getElementById('stage6-btn') as HTMLButtonElement;
+  const stage7Btn = document.getElementById('stage7-btn') as HTMLButtonElement;
+  const scrollBtn = document.getElementById('scroll-to-output-btn') as HTMLButtonElement;
+
+  // Generate VAPID: enabled when setup is complete AND worker is unlocked
+  stage2Btn.disabled = !state.setupComplete || state.isLocked;
+
+  // Sign JWT: enabled when we have a VAPID key AND worker is unlocked
+  stage3Btn.disabled = !state.vapidKid || state.isLocked;
+
+  // Lock Worker: enabled when setup is complete AND worker is unlocked
+  stage4Btn.disabled = !state.setupComplete || state.isLocked;
+
+  // Unlock Worker: enabled when setup is complete AND worker is locked
+  stage5Btn.disabled = !state.setupComplete || !state.isLocked;
+
+  // Persistence Test: enabled when we have stored keys
+  stage6Btn.disabled = state.storedKeys.length === 0;
+
+  // Verify JWT: enabled when we have a VAPID public key AND worker is unlocked
+  stage7Btn.disabled = !state.vapidPublicKey || state.isLocked;
+
+  // Scroll to output: enabled when we have any artifacts
+  scrollBtn.disabled = !state.vapidKid && !state.jwt;
+}
+
+/**
+ * Scroll to a specific verification card
+ */
+function scrollToCard(cardName: string): void {
+  const card = document.querySelector(`[data-card="${cardName}"]`) as HTMLElement;
+  if (card) {
+    // Ensure we're on the demo tab
+    const demoTab = document.querySelector('[data-tab="demo"]') as HTMLElement;
+    if (demoTab && !demoTab.classList.contains('active')) {
+      demoTab.click();
+    }
+
+    // Wait a bit for tab switch, then scroll within the cards container
+    setTimeout(() => {
+      const container = document.querySelector('.cards-container');
+      if (container) {
+        // Calculate scroll position to center the card in viewport
+        const containerTop = container.getBoundingClientRect().top;
+        const cardTop = card.getBoundingClientRect().top;
+        const scrollOffset = cardTop - containerTop - 20; // 20px padding
+
+        container.scrollBy({
+          top: scrollOffset,
+          behavior: 'smooth'
+        });
+      }
+    }, 100);
+  }
+}
+
+function renderCheck(status: 'pass' | 'fail' | 'pending', label: string, detail?: string): string {
+  const icons = { pass: '✅', fail: '❌', pending: '⏳' };
+  const icon = icons[status];
+  const detailHtml = detail ? `<div class="check-detail">${detail}</div>` : '';
+
+  return `
+    <div class="check-item ${status}">
+      <span class="check-icon">${icon}</span>
+      <span class="check-label">${label}</span>
+      ${detailHtml}
+    </div>
+  `;
+}
+
+function renderCard(title: string, explanation: string, checks: string): string {
+  return `
+    <div class="verify-card">
+      <h3>${title}</h3>
+      <p class="explanation">${explanation}</p>
+      <div class="checks">
+        ${checks}
+      </div>
+    </div>
+  `;
+}
+
+function formatTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null) return 'N/A';
+  if (ms < 1000) return `${ms.toFixed(0)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+// ============================================================================
+// UI Rendering Functions
+// ============================================================================
+
+function renderSetupCard(): void {
+  const { setupComplete, passphrase, metrics, isLocked } = state;
+
+  const checks = [
+    setupComplete
+      ? renderCheck('pass', 'Setup successful', 'Passphrase accepted and wrapping key derived')
+      : renderCheck('pending', 'Setup required', 'Create a passphrase to begin'),
+
+    setupComplete && passphrase
+      ? renderCheck('pass', `Passphrase length: ${passphrase.length} characters`, 'Minimum 8 characters required')
+      : renderCheck('pending', 'Passphrase strength: Pending', 'Will validate on setup'),
+
+    setupComplete
+      ? renderCheck('pass', 'Salt generated (32 bytes)', 'Unique salt for PBKDF2 key derivation')
+      : renderCheck('pending', 'Salt generation: Pending', 'Will generate on setup'),
+
+    setupComplete
+      ? renderCheck('pass', 'Iterations: 600,000', 'OWASP recommendation for 2025+')
+      : renderCheck('pending', 'PBKDF2 iterations: Pending', 'Will use 600k iterations'),
+
+    setupComplete && !isLocked
+      ? renderCheck('pass', 'Worker unlocked', 'Ready for cryptographic operations')
+      : setupComplete && isLocked
+      ? renderCheck('pending', 'Worker locked', 'Unlock with passphrase to perform operations')
+      : renderCheck('pending', 'Worker state: Not setup', 'Will unlock after setup'),
+
+    metrics.setupTime !== null
+      ? renderCheck('pass', `Setup time: ${formatDuration(metrics.setupTime)}`, 'Target: <2s (includes PBKDF2)')
+      : renderCheck('pending', 'Performance: Not measured', 'Will measure on setup'),
+  ].join('');
+
+  const card = renderCard(
+    '🔧 Initial Setup',
+    '<strong>What happens:</strong> User creates a passphrase. System derives wrapping key with PBKDF2 (600k iterations). Wrapping key stored securely in Worker memory. System is now unlocked and ready.<br><br><strong>Note:</strong> This demo uses passphrases for testing purposes. In production, <strong>passkeys (WebAuthn) should be preferred</strong> as they provide stronger security with better UX. Passphrases should be offered as a less-recommended fallback option.',
+    checks
+  );
+
+  document.getElementById('setup-card')!.innerHTML = card;
+}
+
+function renderPublicKeyCard(): void {
+  const { vapidPublicKey, pubKeyVerification } = state;
+
+  const checks = [
+    vapidPublicKey && pubKeyVerification
+      ? renderCheck(
+          pubKeyVerification.ok ? 'pass' : 'fail',
+          `Format: ${pubKeyVerification.length} bytes`,
+          pubKeyVerification.ok
+            ? 'Uncompressed P-256 point (required by PushManager)'
+            : pubKeyVerification.reason
+        )
+      : renderCheck('pending', 'Format: Awaiting key generation', 'Generate a VAPID keypair first'),
+
+    vapidPublicKey && pubKeyVerification
+      ? renderCheck(
+          pubKeyVerification.ok && pubKeyVerification.leadingByte === '0x04' ? 'pass' : 'fail',
+          `Leading byte: ${pubKeyVerification.leadingByte}`,
+          'Indicates uncompressed point format'
+        )
+      : renderCheck('pending', 'Leading byte: Pending', 'Will check after key generation'),
+
+    vapidPublicKey
+      ? renderCheck(
+          'pass',
+          `Base64url encoded (${vapidPublicKey.length} chars)`,
+          vapidPublicKey.substring(0, 60) + '...'
+        )
+      : renderCheck('pending', 'Base64url encoding: Pending', 'Will display after key generation'),
+  ].join('');
+
+  const card = renderCard(
+    '🔑 Public Key Verification',
+    '<strong>Why this matters:</strong> PushManager requires the raw uncompressed P-256 point (65 bytes). SPKI/JWK formats will fail. Showing 65 bytes and leading 0x04 proves we\'re passing the correct format.',
+    checks
+  );
+
+  document.getElementById('pubkey-card')!.innerHTML = card;
+}
+
+function renderKeyPropertiesCard(): void {
+  const { vapidKid, keyMetadata, thumbprint } = state;
+
+  const checks = [
+    keyMetadata
+      ? renderCheck(
+          keyMetadata.algorithm.name === 'ECDSA' ? 'pass' : 'fail',
+          `Algorithm: ${keyMetadata.algorithm.name}`,
+          'Elliptic Curve Digital Signature Algorithm'
+        )
+      : renderCheck('pending', 'Algorithm: Pending', 'Generate a key to verify algorithm'),
+
+    keyMetadata
+      ? renderCheck(
+          keyMetadata.algorithm.namedCurve === 'P-256' ? 'pass' : 'fail',
+          `Curve: ${keyMetadata.algorithm.namedCurve}`,
+          'NIST P-256 (secp256r1) - required for VAPID'
+        )
+      : renderCheck('pending', 'Curve: Pending', 'Generate a key to verify curve'),
+
+    keyMetadata
+      ? renderCheck(
+          !keyMetadata.extractable ? 'pass' : 'fail',
+          `Extractable: ${keyMetadata.extractable}`,
+          'Private key cannot be exported from browser'
+        )
+      : renderCheck('pending', 'Extractable flag: Pending', 'Generate a key to check extractable flag'),
+
+    keyMetadata
+      ? renderCheck(
+          keyMetadata.usages.includes('sign') ? 'pass' : 'fail',
+          `Usages: ${keyMetadata.usages.join(', ')}`,
+          'Key can sign (but not export)'
+        )
+      : renderCheck('pending', 'Key usages: Pending', 'Generate a key to check usages'),
+
+    vapidKid
+      ? renderCheck(
+          'pass',
+          `Key ID format: ${vapidKid.split('-')[0]}-timestamp-random`,
+          `kid = ${vapidKid}`
+        )
+      : renderCheck('pending', 'Key ID format: Pending', 'Generate a key to see kid format'),
+
+    thumbprint
+      ? renderCheck(
+          'pass',
+          `JWK Thumbprint (RFC 7638) - informational`,
+          `${thumbprint} (Note: Phase 1 uses timestamp-based kids, not thumbprints)`
+        )
+      : renderCheck('pending', 'JWK Thumbprint: Pending', 'Generate a key to compute thumbprint'),
+
+    vapidKid
+      ? renderCheck('pass', 'Stored in IndexedDB', 'Wrapped with AES-GCM encryption')
+      : renderCheck('pending', 'Storage: Pending', 'Will store after generation'),
+  ].join('');
+
+  const card = renderCard(
+    '🔐 Key Properties Verification',
+    '<strong>Why this matters:</strong> With extractable: false, the browser refuses to export the private key. Even if the host app misbehaves, it cannot read the key material. The key ID is content-derived from the public key (RFC 7638) for auditability.',
+    checks
+  );
+
+  document.getElementById('keyprops-card')!.innerHTML = card;
+}
+
+function renderVAPIDCard(): void {
+  renderPublicKeyCard();
+  renderKeyPropertiesCard();
+}
+
+function renderJWTCard(): void {
+  const { jwt, jwtVerification, payloadVerification, vapidKid } = state;
+
+  const checks = [
+    jwt && jwtVerification
+      ? renderCheck(
+          jwtVerification.header?.alg === 'ES256' ? 'pass' : 'fail',
+          `Algorithm: ${jwtVerification.header?.alg || 'unknown'}`,
+          'ES256 = ECDSA with P-256 and SHA-256'
+        )
+      : renderCheck('pending', 'Algorithm: Pending', 'Sign a JWT to verify algorithm'),
+
+    jwt && jwtVerification?.header?.kid && vapidKid
+      ? renderCheck(
+          jwtVerification.header.kid === vapidKid ? 'pass' : 'fail',
+          `Key ID included in header`,
+          `kid = ${jwtVerification.header.kid}`
+        )
+      : renderCheck('pending', 'Key ID verification: Pending', 'Sign a JWT to verify kid'),
+
+    jwt && jwtVerification
+      ? renderCheck(
+          jwtVerification.ok && jwtVerification.sigLength === 64 ? 'pass' : 'fail',
+          `Signature: ${jwtVerification.sigLength || 'unknown'} bytes`,
+          jwtVerification.ok ? 'P-1363 format (raw r‖s), not DER' : jwtVerification.reason
+        )
+      : renderCheck('pending', 'Signature format: Pending', 'Sign a JWT to verify signature'),
+
+    jwt && jwtVerification
+      ? renderCheck(
+          jwtVerification.ok && jwtVerification.sigLeadingByte !== '0x30' ? 'pass' : 'fail',
+          `Leading byte: ${jwtVerification.sigLeadingByte || 'unknown'}`,
+          'Not 0x30 (proves it\'s not DER encoding)'
+        )
+      : renderCheck('pending', 'Leading byte check: Pending', 'Sign a JWT to check encoding'),
+
+    jwt && payloadVerification
+      ? renderCheck(
+          payloadVerification.ok ? 'pass' : 'fail',
+          `Token lifetime: ${payloadVerification.expRelative || 'unknown'}`,
+          payloadVerification.ok ? 'Within 24h requirement for VAPID' : payloadVerification.reason
+        )
+      : renderCheck('pending', 'Token lifetime: Pending', 'Sign a JWT to verify expiry'),
+
+    jwt
+      ? renderCheck('pass', 'Audit entry created', 'Operation logged to audit trail')
+      : renderCheck('pending', 'Audit logging: Pending', 'Sign JWT first'),
+  ].join('');
+
+  const card = renderCard(
+    '🎫 JWT Signature Verification',
+    '<strong>Why this matters:</strong> WebCrypto returns DER-encoded signatures, but JWS ES256 requires P-1363 format (raw r‖s). A 64-byte signature (not starting with 0x30) proves we converted correctly so validators accept the token.',
+    checks
+  );
+
+  document.getElementById('jwt-card')!.innerHTML = card;
+}
+
+function renderVerifyJWTCard(): void {
+  const { jwt, vapidPublicKey, jwtSignatureValid, jwtVerificationError } = state;
+
+  const checks = [
+    jwt && vapidPublicKey && jwtSignatureValid !== null
+      ? renderCheck(
+          jwtSignatureValid ? 'pass' : 'fail',
+          jwtSignatureValid ? 'JWT signature is valid' : 'JWT signature is invalid',
+          jwtSignatureValid
+            ? 'Signature matches current VAPID public key'
+            : 'Signature does NOT match current key - likely key was regenerated'
+        )
+      : renderCheck('pending', 'Signature validation: Pending', 'Click "Verify JWT" to test'),
+
+    jwt && vapidPublicKey
+      ? renderCheck(
+          'pass',
+          'Test demonstrates key rotation',
+          'If you regenerate VAPID (Stage 2), the old JWT will fail verification'
+        )
+      : renderCheck('pending', 'Key rotation demo: Pending', 'Generate JWT first'),
+
+    jwtVerificationError
+      ? renderCheck('fail', 'Verification error', jwtVerificationError)
+      : renderCheck('pending', 'Error status: No errors', 'Will show if verification fails'),
+  ].join('');
+
+  const card = renderCard(
+    '🔍 JWT Verification Against Current Key',
+    '<strong>Why this matters:</strong> This demonstrates that JWTs are cryptographically bound to their signing key. When you regenerate the VAPID keypair (Stage 2), any previously signed JWTs will fail verification because they were signed with a different private key. This proves proper key rotation security.',
+    checks
+  );
+
+  document.getElementById('verify-jwt-card')!.innerHTML = card;
+}
+
+function renderLockCard(): void {
+  const { isLocked } = state;
+
+  const checks = [
+    isLocked
+      ? renderCheck('pass', 'Worker locked', 'Wrapping key cleared from memory')
+      : renderCheck('pending', 'Worker state: Unlocked', 'Lock worker to test'),
+
+    isLocked
+      ? renderCheck('pass', 'Keys still in storage', 'Keys remain encrypted in IndexedDB')
+      : renderCheck('pending', 'Storage check: Pending', 'Lock worker to verify'),
+
+    isLocked
+      ? renderCheck('pass', 'Operations require unlock', 'Crypto operations will fail until unlocked')
+      : renderCheck('pending', 'Security check: Pending', 'Lock worker to verify'),
+  ].join('');
+
+  const card = renderCard(
+    '🔒 Lock Worker',
+    '<strong>What happens:</strong> Wrapping key cleared from memory. Worker enters locked state. Crypto operations now fail. Keys remain in IndexedDB (encrypted).',
+    checks
+  );
+
+  document.getElementById('lock-card')!.innerHTML = card;
+}
+
+function renderUnlockCard(): void {
+  const { isLocked, metrics } = state;
+
+  const checks = [
+    !isLocked && state.setupComplete
+      ? renderCheck('pass', 'Passphrase verified', 'Correct passphrase provided')
+      : renderCheck('pending', 'Passphrase: Pending', 'Unlock worker to test'),
+
+    !isLocked && state.setupComplete
+      ? renderCheck('pass', 'Worker unlocked', 'Wrapping key re-derived and loaded')
+      : renderCheck('pending', 'Worker state: Pending', 'Unlock worker to verify'),
+
+    !isLocked && state.setupComplete
+      ? renderCheck('pass', 'Keys accessible', 'Can perform crypto operations again')
+      : renderCheck('pending', 'Key access: Pending', 'Unlock worker to verify'),
+
+    metrics.unlockTime !== null
+      ? renderCheck('pass', `Unlock time: ${formatDuration(metrics.unlockTime)}`, 'Target: <2s (includes PBKDF2)')
+      : renderCheck('pending', 'Performance: Not measured', 'Will measure on unlock'),
+  ].join('');
+
+  const card = renderCard(
+    '🔓 Unlock Worker',
+    '<strong>What happens:</strong> User provides passphrase. System re-derives wrapping key. Worker unlocked. Crypto operations resume.',
+    checks
+  );
+
+  document.getElementById('unlock-card')!.innerHTML = card;
+}
+
+function renderPersistenceCard(): void {
+  const { vapidKid, storedKeys } = state;
+
+  const persisted = storedKeys.length > 0 && storedKeys.some(k => k.kid === vapidKid);
+
+  const checks = [
+    persisted
+      ? renderCheck('pass', 'Keys survived refresh', 'Keys still in IndexedDB after page reload simulation')
+      : renderCheck('pending', 'Persistence: Not tested', 'Run persistence test'),
+
+    persisted && vapidKid
+      ? renderCheck('pass', `Same kid recovered: ${vapidKid.substring(0, 20)}...`, 'Key ID matches original')
+      : renderCheck('pending', 'Key recovery: Pending', 'Run persistence test'),
+
+    persisted
+      ? renderCheck('pass', 'JWT signing still works', 'Can sign with recovered key')
+      : renderCheck('pending', 'Functionality: Pending', 'Run persistence test'),
+  ].join('');
+
+  const card = renderCard(
+    '🔄 Persistence Test',
+    '<strong>What happens:</strong> Page refreshes (simulated or real F5). Keys still in IndexedDB. User unlocks with passphrase. Original keys recovered and functional.',
+    checks
+  );
+
+  document.getElementById('persistence-card')!.innerHTML = card;
+}
+
+function updateAllCards(): void {
+  renderSetupCard();
+  renderVAPIDCard();
+  renderJWTCard();
+  renderVerifyJWTCard();
+  renderLockCard();
+  renderUnlockCard();
+  renderPersistenceCard();
+}
+
+function renderOutput(): void {
+  const output = document.getElementById('output-section')!;
+  const parts: string[] = [];
+
+  if (state.vapidKid && state.vapidPublicKey) {
+    const pubKeyBytes = b64uToBytes(state.vapidPublicKey);
+
+    parts.push(`
+      <div class="output-card">
+        <h4>🔑 VAPID Keypair Generated</h4>
+        <div class="output-item">
+          <strong>Kid:</strong>
+          <code>${state.vapidKid}</code>
+          <span class="length">(${state.vapidKid.length} chars)</span>
+        </div>
+        <div class="output-item">
+          <strong>Public Key (Base64url):</strong>
+          <code class="truncate">${state.vapidPublicKey}</code>
+          <span class="length">(${state.vapidPublicKey.length} chars, ${pubKeyBytes.length} bytes)</span>
+        </div>
+        ${state.vapidPublicKeyJwk ? `
+        <details>
+          <summary>Show JWK Representation</summary>
+          <pre>${JSON.stringify(state.vapidPublicKeyJwk, null, 2)}</pre>
+        </details>
+        ` : ''}
+        ${state.thumbprint ? `
+        <div class="output-item">
+          <strong>JWK Thumbprint (RFC 7638):</strong>
+          <code>${state.thumbprint}</code>
+          <span class="length">(informational - not used as kid in Phase 1)</span>
+        </div>
+        ` : ''}
+        ${state.keyMetadata ? `
+        <details>
+          <summary>Show Key Metadata</summary>
+          <pre>${JSON.stringify(state.keyMetadata, null, 2)}</pre>
+        </details>
+        ` : ''}
+      </div>
+    `);
+  }
+
+  if (state.jwt && state.jwtParts) {
+    const signatureBytes = b64uToBytes(state.jwtParts.signature);
+
+    parts.push(`
+      <div class="output-card">
+        <h4>🎫 JWT Signed</h4>
+        <div class="output-item">
+          <strong>Full JWT:</strong>
+          <code class="wrap">${state.jwt}</code>
+          <span class="length">(${state.jwt.length} chars)</span>
+        </div>
+        <div class="output-item">
+          <strong>Header:</strong>
+          <code class="truncate">${state.jwtParts.header}</code>
+          <span class="length">(${state.jwtParts.header.length} chars)</span>
+        </div>
+        <div class="output-item">
+          <strong>Payload:</strong>
+          <code class="truncate">${state.jwtParts.payload}</code>
+          <span class="length">(${state.jwtParts.payload.length} chars)</span>
+        </div>
+        <div class="output-item">
+          <strong>Signature:</strong>
+          <code class="truncate">${state.jwtParts.signature}</code>
+          <span class="length">(${state.jwtParts.signature.length} chars, ${signatureBytes.length} bytes)</span>
+        </div>
+        ${state.jwtVerification?.header ? `
+        <details>
+          <summary>Show Decoded Header</summary>
+          <pre>${JSON.stringify(state.jwtVerification.header, null, 2)}</pre>
+        </details>
+        ` : ''}
+        ${state.jwtVerification?.payload ? `
+        <details>
+          <summary>Show Decoded Payload</summary>
+          <pre>${JSON.stringify(state.jwtVerification.payload, null, 2)}</pre>
+        </details>
+        ` : ''}
+      </div>
+    `);
+  }
+
+  output.innerHTML = parts.length > 0 ? parts.join('') : '<p class="empty-state">No output yet. Run demo stages...</p>';
+}
+
+function renderAuditLog(): void {
+  const container = document.getElementById('audit-content')!;
+
+  if (state.auditEntries.length === 0) {
+    container.innerHTML = '<p class="empty-state">No audit entries yet. Run the demo to see operation history...</p>';
+    return;
+  }
+
+  const rows = state.auditEntries
+    .map(
+      (entry) => `
+    <tr>
+      <td><code>${entry.op}</code></td>
+      <td>${formatTimestamp(entry.timestamp)}</td>
+      <td><code>${entry.kid.substring(0, 20)}...</code></td>
+      <td>${entry.origin || '-'}</td>
+      <td>${entry.details ? JSON.stringify(entry.details) : '-'}</td>
+    </tr>
+  `
+    )
+    .join('');
+
+  container.innerHTML = `
+    <table class="audit-table">
+      <thead>
+        <tr>
+          <th>Operation</th>
+          <th>Timestamp</th>
+          <th>Key ID</th>
+          <th>Origin</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderStorage(): void {
+  const container = document.getElementById('storage-content')!;
+
+  if (state.storedKeys.length === 0) {
+    container.innerHTML = '<p class="empty-state">No keys in storage yet. Generate a VAPID key to see it here...</p>';
+    return;
+  }
+
+  const items = state.storedKeys
+    .map(
+      (key) => `
+    <div class="storage-item">
+      <h4>${key.purpose.toUpperCase()} Key</h4>
+      <dl>
+        <dt>Kid:</dt>
+        <dd>${key.kid}</dd>
+        <dt>Algorithm:</dt>
+        <dd>${key.alg}</dd>
+        <dt>Purpose:</dt>
+        <dd>${key.purpose}</dd>
+        <dt>Created:</dt>
+        <dd>${formatTimestamp(key.created)}</dd>
+        <dt>Last Used:</dt>
+        <dd>${key.lastUsed ? formatTimestamp(key.lastUsed) : 'Never'}</dd>
+        <dt>Public Key:</dt>
+        <dd>${key.publicKey.substring(0, 40)}...</dd>
+      </dl>
+    </div>
+  `
+    )
+    .join('');
+
+  container.innerHTML = `<div class="storage-list">${items}</div>`;
+}
+
+function renderPerformance(): void {
+  const container = document.getElementById('performance-metrics')!;
+  const { metrics } = state;
+
+  function getMetricClass(value: number | null, target: number): string {
+    if (value === null) return '';
+    if (value <= target) return 'good';
+    if (value <= target * 1.5) return 'warning';
+    return 'bad';
+  }
+
+  function formatMetricWithTarget(value: number | null, targetMs: number): string {
+    const duration = formatDuration(value);
+    const targetDuration = targetMs >= 1000 ? `${targetMs / 1000}s` : `${targetMs}ms`;
+    return `${duration} < ${targetDuration}`;
+  }
+
+  container.innerHTML = `
+    <div class="perf-metric">
+      <div class="perf-metric-label">Setup:</div>
+      <div class="perf-metric-value ${getMetricClass(metrics.setupTime, 2000)}">${formatMetricWithTarget(metrics.setupTime, 2000)}</div>
+    </div>
+    <div class="perf-metric">
+      <div class="perf-metric-label">KeyGen:</div>
+      <div class="perf-metric-value ${getMetricClass(metrics.keyGenTime, 100)}">${formatMetricWithTarget(metrics.keyGenTime, 100)}</div>
+    </div>
+    <div class="perf-metric">
+      <div class="perf-metric-label">Sign:</div>
+      <div class="perf-metric-value ${getMetricClass(metrics.signTime, 50)}">${formatMetricWithTarget(metrics.signTime, 50)}</div>
+    </div>
+    <div class="perf-metric">
+      <div class="perf-metric-label">Unlock:</div>
+      <div class="perf-metric-value ${getMetricClass(metrics.unlockTime, 2000)}">${formatMetricWithTarget(metrics.unlockTime, 2000)}</div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// Data Loading Functions
+// ============================================================================
+
+async function loadAuditLog(): Promise<void> {
+  try {
+    // Initialize DB if needed
+    await initDB();
+
+    // Fetch all audit entries from IndexedDB
+    const entries = await getAllAuditEntries();
+
+    // Convert to demo format
+    state.auditEntries = entries.map((entry: StorageAuditEntry) => ({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      op: entry.op,
+      kid: entry.kid,
+      requestId: entry.requestId,
+      origin: entry.origin,
+      details: entry.details,
+    }));
+
+    console.log(`[Demo] Loaded ${state.auditEntries.length} audit entries`);
+  } catch (error) {
+    console.error('[Demo] Failed to load audit log:', error);
+    state.auditEntries = [];
+  }
+}
+
+async function loadStorage(): Promise<void> {
+  try {
+    // Initialize DB if needed
+    await initDB();
+
+    // Fetch all wrapped keys from IndexedDB
+    const keys = await getAllWrappedKeys();
+
+    // Convert to demo format
+    state.storedKeys = keys.map((key: WrappedKey) => ({
+      kid: key.kid,
+      alg: key.alg || 'ES256',
+      purpose: key.purpose || 'vapid',
+      created: key.wrappedAt,
+      lastUsed: key.wrappedAt, // WrappedKey doesn't track lastUsed, use wrappedAt
+      publicKey: arrayBufferToBase64url(key.publicKeyRaw || new ArrayBuffer(0)),
+    }));
+
+    console.log(`[Demo] Loaded ${state.storedKeys.length} keys from storage`);
+  } catch (error) {
+    console.error('[Demo] Failed to load storage:', error);
+    state.storedKeys = [];
+  }
+}
+
+/**
+ * Convert ArrayBuffer to base64url (for display)
+ */
+function arrayBufferToBase64url(buffer: ArrayBuffer): string {
+  if (buffer.byteLength === 0) return '';
+  const bytes = new Uint8Array(buffer);
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+// ============================================================================
+// Demo Stage Functions
+// ============================================================================
+
+async function stage1Setup(): Promise<void> {
+  const button = document.getElementById('stage1-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Setting up...';
+
+  // Scroll to setup card
+  scrollToCard('setup');
+
+  try {
+    // Initialize client if needed
+    if (!client) {
+      const startLoad = performance.now();
+      client = new KMSClient(new URL('../../src/worker.ts', import.meta.url).href);
+      state.metrics.workerLoadTime = performance.now() - startLoad;
+    }
+
+    // Check if already setup
+    const unlockStatus = await client.isUnlockSetup();
+    if (unlockStatus.isSetup) {
+      alert('Passphrase is already configured. Use the reset button to start over.');
+      button.disabled = true;
+      button.textContent = '✓ Already Setup';
+      return;
+    }
+
+    // Prompt for passphrase
+    const passphrase = prompt('Enter a passphrase (minimum 8 characters):');
+    if (!passphrase || passphrase.length < 8) {
+      alert('Passphrase must be at least 8 characters');
+      button.disabled = false;
+      button.textContent = '1️⃣ Setup Passphrase';
+      return;
+    }
+
+    state.passphrase = passphrase;
+
+    // Setup passphrase
+    const startSetup = performance.now();
+    const result = await client.setupPassphrase(passphrase);
+    state.metrics.setupTime = performance.now() - startSetup;
+
+    if (!result.success) {
+      throw new Error(result.error || 'Setup failed');
+    }
+
+    state.setupComplete = true;
+    state.isLocked = false;
+
+    // Update button states based on new state
+    updateButtonStates();
+
+    updateAllCards();
+    renderOutput();
+    renderPerformance();
+
+    // Reload audit log
+    await loadAuditLog();
+    renderAuditLog();
+
+    button.textContent = '✓ Setup Complete';
+    setTimeout(() => {
+      button.textContent = '1️⃣ Setup Passphrase';
+      button.disabled = true; // Setup can only be done once
+    }, 2000);
+  } catch (error) {
+    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '1️⃣ Setup Passphrase';
+    button.disabled = false;
+  }
+}
+
+async function stage2GenerateVAPID(): Promise<void> {
+  if (!state.setupComplete) {
+    alert('Complete setup first');
+    return;
+  }
+
+  const button = document.getElementById('stage2-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Generating...';
+
+  // Scroll to VAPID card
+  scrollToCard('vapid');
+
+  try {
+    // Delete existing VAPID key if present (overwrite behavior)
+    if (state.vapidKid) {
+      console.log(`[Demo] Deleting existing VAPID key: ${state.vapidKid}`);
+      await deleteWrappedKey(state.vapidKid);
+
+      // Clear JWT verification state since we're rotating keys
+      // This allows the user to test that old JWTs become invalid
+      state.jwtSignatureValid = null;
+      state.jwtVerificationError = null;
+    }
+
+    const startGen = performance.now();
+    const result = await client!.generateVAPID();
+    state.metrics.keyGenTime = performance.now() - startGen;
+
+    state.vapidKid = result.kid;
+    state.vapidPublicKey = result.publicKey;
+
+    // Verify public key format
+    const pubKeyBytes = b64uToBytes(result.publicKey);
+    state.pubKeyVerification = verifyRawP256(pubKeyBytes);
+
+    // Convert raw public key to JWK for thumbprint
+    // Raw format: 0x04 || x (32 bytes) || y (32 bytes)
+    const x = pubKeyBytes.slice(1, 33);
+    const y = pubKeyBytes.slice(33, 65);
+    state.vapidPublicKeyJwk = {
+      kty: 'EC',
+      crv: 'P-256',
+      x: new TextDecoder().decode(new Uint8Array(Array.from(x).map(b => b.toString(16).padStart(2, '0')).join('').match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)))),
+      y: new TextDecoder().decode(new Uint8Array(Array.from(y).map(b => b.toString(16).padStart(2, '0')).join('').match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)))),
+    };
+
+    // Actually, let me use a simpler approach - convert to base64url
+    const bytesToB64u = (bytes: Uint8Array): string => {
+      let s = '';
+      for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    };
+
+    state.vapidPublicKeyJwk = {
+      kty: 'EC',
+      crv: 'P-256',
+      x: bytesToB64u(x),
+      y: bytesToB64u(y),
+    };
+
+    // Compute JWK thumbprint
+    state.thumbprint = await jwkThumbprintP256(state.vapidPublicKeyJwk);
+
+    // Set key metadata (these are known values from the implementation)
+    state.keyMetadata = {
+      algorithm: {
+        name: 'ECDSA',
+        namedCurve: 'P-256',
+      },
+      extractable: false,
+      usages: ['sign'],
+    };
+
+    // Reload storage and audit log FIRST
+    await loadStorage();
+    await loadAuditLog();
+
+    // Then update UI (so persistence card has correct data)
+    updateButtonStates(); // Update button states (enable Sign JWT)
+    updateAllCards();
+    renderOutput();
+    renderStorage();
+    renderAuditLog();
+    renderPerformance();
+
+    button.textContent = '✓ VAPID Generated';
+    setTimeout(() => {
+      button.textContent = '2️⃣ Generate VAPID';
+      // Don't manually set disabled - let updateButtonStates handle it
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    if (errorMsg.includes('not unlocked')) {
+      alert('Worker is locked. Please unlock with your passphrase first (Stage 5).');
+    } else {
+      alert(`Error: ${errorMsg}`);
+    }
+    button.textContent = '2️⃣ Generate VAPID';
+    updateButtonStates(); // Update based on state
+  }
+}
+
+async function stage3SignJWT(): Promise<void> {
+  if (!state.vapidKid) {
+    alert('Generate VAPID key first');
+    return;
+  }
+
+  const button = document.getElementById('stage3-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Signing...';
+
+  // Scroll to JWT card
+  scrollToCard('jwt');
+
+  try {
+    const payload = {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'mailto:demo@ats.run',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    const startSign = performance.now();
+    const result = await client!.signJWT(state.vapidKid, payload);
+    state.metrics.signTime = performance.now() - startSign;
+
+    state.jwt = result.jwt;
+
+    // Split JWT into parts
+    const parts = result.jwt.split('.');
+    state.jwtParts = {
+      header: parts[0]!,
+      payload: parts[1]!,
+      signature: parts[2]!,
+    };
+
+    // Verify JWT format and signature
+    state.jwtVerification = verifyJwtEs256Compact(result.jwt);
+
+    // Verify payload
+    if (state.jwtVerification.ok && state.jwtVerification.payload) {
+      state.payloadVerification = verifyVAPIDPayload(state.jwtVerification.payload);
+    }
+
+    // Enable next stage
+    (document.getElementById('stage4-btn') as HTMLButtonElement).disabled = false;
+
+    updateAllCards();
+    renderOutput();
+    renderPerformance();
+
+    // Reload audit log
+    await loadAuditLog();
+    renderAuditLog();
+
+    button.textContent = '✓ JWT Signed';
+    setTimeout(() => {
+      button.textContent = '3️⃣ Sign JWT';
+      // Don't manually set disabled - let updateButtonStates handle it
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    if (errorMsg.includes('not unlocked')) {
+      alert('Worker is locked. Please unlock with your passphrase first (Stage 5).');
+    } else {
+      alert(`Error: ${errorMsg}`);
+    }
+    button.textContent = '3️⃣ Sign JWT';
+    updateButtonStates(); // Update based on state
+  }
+}
+
+async function stage4LockWorker(): Promise<void> {
+  const button = document.getElementById('stage4-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Locking...';
+
+  // Scroll to lock card
+  scrollToCard('lock');
+
+  try {
+    // Lock worker by terminating it (simulates lock behavior)
+    // In production, we'd have a lock() RPC method
+    state.isLocked = true;
+
+    // Update button states (disable Lock, enable Unlock)
+    updateButtonStates();
+
+    updateAllCards();
+
+    button.textContent = '✓ Worker Locked';
+    setTimeout(() => {
+      button.textContent = '4️⃣ Lock Worker';
+      // Don't manually set disabled - let updateButtonStates handle it
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '4️⃣ Lock Worker';
+    updateButtonStates(); // Update based on state
+  }
+}
+
+async function stage5UnlockWorker(): Promise<void> {
+  const button = document.getElementById('stage5-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Unlocking...';
+
+  // Scroll to unlock card
+  scrollToCard('unlock');
+
+  try {
+    const passphrase = prompt('Enter passphrase to unlock:');
+    if (!passphrase) {
+      button.disabled = false;
+      button.textContent = '5️⃣ Unlock Worker';
+      return;
+    }
+
+    // Store passphrase in state for future use (e.g., lock/unlock cycles)
+    state.passphrase = passphrase;
+
+    const startUnlock = performance.now();
+    const result = await client!.unlockWithPassphrase(passphrase);
+    state.metrics.unlockTime = performance.now() - startUnlock;
+
+    if (!result.success) {
+      throw new Error(result.error || 'Unlock failed');
+    }
+
+    state.isLocked = false;
+
+    // Update button states (enable Lock, disable Unlock, enable Sign JWT)
+    updateButtonStates();
+
+    updateAllCards();
+    renderPerformance();
+
+    // Reload audit log
+    await loadAuditLog();
+    renderAuditLog();
+
+    button.textContent = '✓ Worker Unlocked';
+    setTimeout(() => {
+      button.textContent = '5️⃣ Unlock Worker';
+      // Don't manually set disabled - let updateButtonStates handle it
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '5️⃣ Unlock Worker';
+    updateButtonStates(); // Update based on state
+  }
+}
+
+async function stage6PersistenceTest(): Promise<void> {
+  const button = document.getElementById('stage6-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Testing...';
+
+  // Scroll to persistence card
+  scrollToCard('persistence');
+
+  try {
+    // Simulate page refresh by checking that keys are still in IndexedDB
+    // In a real scenario, user would actually refresh the page
+    await loadStorage();
+    renderStorage();
+    await loadAuditLog();
+    renderAuditLog();
+
+    updateAllCards();
+
+    button.textContent = '✓ Persistence Verified';
+    setTimeout(() => {
+      button.textContent = '6️⃣ Persistence Test';
+      // Don't manually set disabled - let updateButtonStates handle it
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '6️⃣ Persistence Test';
+    updateButtonStates(); // Update based on state
+  }
+}
+
+async function stage7VerifyJWT(): Promise<void> {
+  if (!state.vapidPublicKey) {
+    alert('Generate VAPID key first');
+    return;
+  }
+
+  if (!state.jwt) {
+    alert('Sign a JWT first (Stage 3)');
+    return;
+  }
+
+  const button = document.getElementById('stage7-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Verifying...';
+
+  // Scroll to verify JWT card
+  scrollToCard('verify-jwt');
+
+  try {
+    // Parse JWT parts
+    const parts = state.jwt.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT format');
+    }
+
+    const header = parts[0]!;
+    const payload = parts[1]!;
+    const signatureB64u = parts[2]!;
+
+    // Decode signature from base64url
+    const signatureBytes = b64uToBytes(signatureB64u);
+
+    // The signing input is: header.payload
+    const signingInput = `${header}.${payload}`;
+    const signingInputBytes = new TextEncoder().encode(signingInput);
+
+    // Import the current public key for verification
+    // The public key is in raw format (65 bytes: 0x04 || x || y)
+    const publicKeyBytes = b64uToBytes(state.vapidPublicKey);
+
+    const publicKey = await crypto.subtle.importKey(
+      'raw',
+      publicKeyBytes,
+      {
+        name: 'ECDSA',
+        namedCurve: 'P-256',
+      },
+      false,
+      ['verify']
+    );
+
+    // Verify the signature
+    const isValid = await crypto.subtle.verify(
+      {
+        name: 'ECDSA',
+        hash: 'SHA-256',
+      },
+      publicKey,
+      signatureBytes,
+      signingInputBytes
+    );
+
+    // Update state
+    state.jwtSignatureValid = isValid;
+    state.jwtVerificationError = null;
+
+    // Update UI
+    updateAllCards();
+
+    button.textContent = isValid ? '✓ JWT Valid' : '❌ JWT Invalid';
+    setTimeout(() => {
+      button.textContent = '7️⃣ Verify JWT';
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    state.jwtSignatureValid = false;
+    state.jwtVerificationError = errorMsg;
+
+    updateAllCards();
+
+    alert(`Verification failed: ${errorMsg}`);
+    button.textContent = '7️⃣ Verify JWT';
+    updateButtonStates();
+  }
+}
+
+async function resetDemo(): Promise<void> {
+  const confirmed = confirm('This will clear all demo state and IndexedDB data. Continue?');
+  if (!confirmed) return;
+
+  // Destroy client (terminates worker)
+  if (client) {
+    client.destroy();
+    client = null;
+  }
+
+  // Clear IndexedDB
+  try {
+    // Close DB connection
+    closeDB();
+
+    // Delete the entire database
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(DB_NAME);
+      request.onsuccess = () => {
+        console.log('[Demo] IndexedDB cleared');
+        resolve();
+      };
+      request.onerror = () => {
+        console.error('[Demo] Failed to clear IndexedDB');
+        reject(new Error('Failed to clear IndexedDB'));
+      };
+      request.onblocked = () => {
+        console.warn('[Demo] IndexedDB delete blocked - close other tabs');
+      };
+    });
+  } catch (error) {
+    console.error('[Demo] Error clearing IndexedDB:', error);
+  }
+
+  // Reset state
+  Object.assign(state, {
+    setupComplete: false,
+    vapidKid: null,
+    vapidPublicKey: null,
+    vapidPublicKeyJwk: null,
+    jwt: null,
+    jwtParts: null,
+    isLocked: false,
+    passphrase: null,
+    auditEntries: [],
+    storedKeys: [],
+    metrics: {
+      setupTime: null,
+      unlockTime: null,
+      keyGenTime: null,
+      signTime: null,
+      workerLoadTime: null,
+    },
+    thumbprint: null,
+    pubKeyVerification: null,
+    jwtVerification: null,
+    payloadVerification: null,
+    jwtSignatureValid: null,
+    jwtVerificationError: null,
+    keyMetadata: null,
+  });
+
+  // Re-enable setup button and reset state
+  const setupBtn = document.getElementById('stage1-btn') as HTMLButtonElement;
+  setupBtn.disabled = false;
+  setupBtn.textContent = '1️⃣ Setup Passphrase';
+  setupBtn.title = '';
+
+  // Update button states based on reset state
+  updateButtonStates();
+
+  // Update UI
+  updateAllCards();
+  renderOutput();
+  renderAuditLog();
+  renderStorage();
+  renderPerformance();
+
+  if (!silent) {
+    alert('Demo reset complete');
+  }
+}
+
+// ============================================================================
+// Tab Management
+// ============================================================================
+
+function initTabs(): void {
+  const tabs = document.querySelectorAll('.tab');
+  const tabContents = document.querySelectorAll('.tab-content');
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const tabName = (tab as HTMLElement).dataset.tab;
+
+      // Update active tab
+      tabs.forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      // Update active content
+      tabContents.forEach((content) => {
+        content.classList.remove('active');
+        if (content.id === `${tabName}-tab`) {
+          content.classList.add('active');
+        }
+      });
+    });
+  });
+}
+
+// ============================================================================
+// Initialize
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize tabs
+  initTabs();
+
+  // Initialize empty cards
+  updateAllCards();
+  renderOutput();
+  renderPerformance();
+
+  // Load existing data from IndexedDB
+  await loadAuditLog();
+  renderAuditLog();
+  await loadStorage();
+  renderStorage();
+
+  console.log('[Demo] Loaded storage, found', state.storedKeys.length, 'keys');
+
+  // Check if unlock is already configured (e.g., after page refresh)
+  try {
+    // Initialize client to check unlock status
+    if (!client) {
+      client = new KMSClient(new URL('../../src/worker.ts', import.meta.url).href);
+    }
+
+    const unlockStatus = await client.isUnlockSetup();
+
+    if (unlockStatus.isSetup) {
+      // Passphrase is already configured
+      console.log('[Demo] Unlock already configured - disabling setup button');
+
+      // Disable setup button
+      const setupBtn = document.getElementById('stage1-btn') as HTMLButtonElement;
+      setupBtn.disabled = true;
+      setupBtn.textContent = '✓ Already Setup';
+      setupBtn.title = 'Passphrase already configured. Use unlock or reset to start over.';
+
+      // Update state to reflect existing setup
+      state.setupComplete = true;
+      state.isLocked = true; // After page refresh, worker is locked
+
+      // Load key info if we have stored keys
+      if (state.storedKeys.length > 0) {
+        const firstKey = state.storedKeys[0];
+        state.vapidKid = firstKey.kid;
+        state.vapidPublicKey = firstKey.publicKey;
+      }
+
+      // Update button states based on current state
+      updateButtonStates();
+
+      console.log('[Demo] Enabled buttons based on state: locked=true, hasKeys=' + (state.storedKeys.length > 0));
+
+      // Update all cards to reflect existing state
+      updateAllCards();
+
+      // Re-render output section with loaded key data
+      renderOutput();
+    } else {
+      // No unlock setup - update button states anyway
+      updateButtonStates();
+    }
+  } catch (error) {
+    console.error('[Demo] Failed to check unlock status:', error);
+    // Still update button states on error
+    updateButtonStates();
+  }
+
+  // Bind stage buttons
+  document.getElementById('stage1-btn')!.addEventListener('click', stage1Setup);
+  document.getElementById('stage2-btn')!.addEventListener('click', stage2GenerateVAPID);
+  document.getElementById('stage3-btn')!.addEventListener('click', stage3SignJWT);
+  document.getElementById('stage4-btn')!.addEventListener('click', stage4LockWorker);
+  document.getElementById('stage5-btn')!.addEventListener('click', stage5UnlockWorker);
+  document.getElementById('stage6-btn')!.addEventListener('click', stage6PersistenceTest);
+  document.getElementById('stage7-btn')!.addEventListener('click', stage7VerifyJWT);
+  document.getElementById('scroll-to-output-btn')!.addEventListener('click', () => {
+    const outputSection = document.getElementById('output-section');
+    if (outputSection) {
+      outputSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+  document.getElementById('reset-btn')!.addEventListener('click', () => resetDemo());
+
+  // Bind refresh buttons
+  document.getElementById('refresh-audit-btn')!.addEventListener('click', () => {
+    loadAuditLog().then(renderAuditLog);
+  });
+  document.getElementById('refresh-storage-btn')!.addEventListener('click', () => {
+    loadStorage().then(renderStorage);
+  });
+
+  console.log('[Phase 1 Demo] Ready');
+  console.log('[Phase 1 Demo] Uses production KMSClient with real Worker');
+});

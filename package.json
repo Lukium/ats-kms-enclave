@@ -16,9 +16,10 @@
     "build": "node build/esbuild.js --dev",
     "build:dev": "node build/esbuild.js --dev",
     "build:reproducible": "node build/esbuild.js --reproducible",
-    "demo": "vite --config example/vite.config.ts",
+    "demo": "vite --config example/vite.config.phase-1.ts",
     "demo:build": "vite build --config example/vite.config.ts",
     "demo:phase-0": "vite --config example/vite.config.ts",
+    "demo:phase-1": "vite --config example/vite.config.phase-1.ts",
     "demo:enhanced": "vite --config example/vite.config.ts --open /index-enhanced.html"
   },
   "keywords": [

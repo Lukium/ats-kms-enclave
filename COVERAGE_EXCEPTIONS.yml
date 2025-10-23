@@ -73,30 +73,46 @@ src/storage.ts:
     reason: "IndexedDB request onerror handler - cannot be reliably triggered without mocking IDB internals"
 
 src/worker.ts:
-  - line: 153
+  - line: 156
     pattern: "/* c8 ignore next */"
     reason: "Optional origin parameter spread - cannot test both branches simultaneously"
 
-  - line: 188
+  - line: 191
     pattern: "/* c8 ignore next */"
     reason: "Optional origin parameter spread - cannot test both branches simultaneously"
 
-  - line: 245
+  - line: 249
     pattern: "/* c8 ignore next */"
     reason: "Optional origin parameter spread - cannot test both branches simultaneously"
 
-  - line: 313
+  - line: 287
     pattern: "/* c8 ignore next */"
     reason: "Optional origin parameter spread - cannot test both branches simultaneously"
 
-  - line: 440
+  - line: 305
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 322
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 375
+    pattern: "/* c8 ignore next 8 - Environment-dependent branches: DER in production, P-1363 in tests */"
+    reason: "Signature format handling - production browsers return DER, test environment returns P-1363. All branches tested: DER conversion in crypto-utils.test.ts, P-1363 passthrough tested in worker tests, unknown format is defensive"
+
+  - line: 389
+    pattern: "/* c8 ignore next */"
+    reason: "Optional origin parameter spread - cannot test both branches simultaneously"
+
+  - line: 521
     pattern: "/* c8 ignore next - defensive: all Web APIs throw Error objects */"
     reason: "Defensive instanceof check - all Web Crypto APIs throw Error objects, else branch unreachable"
 
-  - line: 575
+  - line: 656
     pattern: "/* c8 ignore next - defensive: all Web APIs throw Error objects */"
     reason: "Defensive instanceof check - all Web Crypto APIs throw Error objects, else branch unreachable"
 
-  - line: 594
+  - line: 675
     pattern: "/* c8 ignore next 7 - only runs in real Worker context, not in tests */"
     reason: "Worker message listener setup - only executes in real Worker context, tests call handleMessage directly"

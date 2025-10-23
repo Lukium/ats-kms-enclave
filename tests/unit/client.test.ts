@@ -167,9 +167,12 @@ describe('Client RPC Bridge - generateVAPID', () => {
     expect(result1.kid).not.toBe(result2.kid);
   });
 
-  it('should have kid with vapid prefix', async () => {
+  it('should have kid as JWK thumbprint (RFC 7638)', async () => {
     const result = await client.generateVAPID();
-    expect(result.kid.startsWith('vapid-')).toBe(true);
+    // JWK thumbprint is base64url-encoded SHA-256 hash (43 characters)
+    expect(result.kid).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // Should NOT have the old timestamp format
+    expect(result.kid.startsWith('vapid-')).toBe(false);
   });
 });
 

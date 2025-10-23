@@ -176,7 +176,7 @@ describe('Worker RPC Handler - generateVAPID', () => {
     expect(result1.kid).not.toBe(result2.kid);
   });
 
-  it('should generate kid with vapid prefix', async () => {
+  it('should generate kid as JWK thumbprint (RFC 7638)', async () => {
     const request: RPCRequest = {
       id: 'req-103',
       method: 'generateVAPID',
@@ -185,7 +185,10 @@ describe('Worker RPC Handler - generateVAPID', () => {
     const response = await handleMessage(request) as RPCResponse;
     const result = response.result as VAPIDKeyPair;
 
-    expect(result.kid.startsWith('vapid-')).toBe(true);
+    // JWK thumbprint is base64url-encoded SHA-256 hash (43 characters)
+    expect(result.kid).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // Should NOT have the old timestamp format
+    expect(result.kid.startsWith('vapid-')).toBe(false);
   });
 
   it('should generate base64url-encoded public key', async () => {
@@ -376,6 +379,142 @@ describe('Worker RPC Handler - signJWT', () => {
     expect(header.kid).toBe(kid);
     expect(header.alg).toBe('ES256');
     expect(header.typ).toBe('JWT');
+  });
+
+  // JWT Policy Validation Tests (RFC 8292)
+  it('should reject JWT with exp > 24h', async () => {
+    const payload: JWTPayload = {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'mailto:notifications@ats.run',
+      exp: Math.floor(Date.now() / 1000) + (25 * 60 * 60), // 25 hours (exceeds 24h limit)
+    };
+
+    const request: RPCRequest = {
+      id: 'req-207',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain('JWT exp must be ≤ 24h from now');
+  });
+
+  it('should reject JWT with missing exp', async () => {
+    const payload = {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'mailto:notifications@ats.run',
+      // Missing exp
+    } as JWTPayload;
+
+    const request: RPCRequest = {
+      id: 'req-208',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain('JWT exp must be ≤ 24h from now');
+  });
+
+  it('should reject JWT with non-HTTPS aud', async () => {
+    const payload: JWTPayload = {
+      aud: 'http://insecure.example.com', // HTTP instead of HTTPS
+      sub: 'mailto:notifications@ats.run',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    const request: RPCRequest = {
+      id: 'req-209',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain('JWT aud must be HTTPS URL');
+  });
+
+  it('should reject JWT with missing aud', async () => {
+    const payload = {
+      sub: 'mailto:notifications@ats.run',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      // Missing aud
+    } as JWTPayload;
+
+    const request: RPCRequest = {
+      id: 'req-210',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain('JWT aud must be HTTPS URL');
+  });
+
+  it('should reject JWT with invalid sub format', async () => {
+    const payload: JWTPayload = {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'invalid-format', // Must be mailto: or https:
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    const request: RPCRequest = {
+      id: 'req-211',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain('JWT sub must be mailto: or https: URL');
+  });
+
+  it('should reject JWT with missing sub', async () => {
+    const payload = {
+      aud: 'https://fcm.googleapis.com',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      // Missing sub
+    } as JWTPayload;
+
+    const request: RPCRequest = {
+      id: 'req-212',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.message).toContain('JWT sub must be mailto: or https: URL');
+  });
+
+  it('should accept JWT with https: sub (alternative to mailto:)', async () => {
+    const payload: JWTPayload = {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'https://ats.run/contact', // https: is also valid
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    const request: RPCRequest = {
+      id: 'req-213',
+      method: 'signJWT',
+      params: { kid, payload },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { jwt: string };
+    expect(result.jwt).toBeDefined();
   });
 });
 

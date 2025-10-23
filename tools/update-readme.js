@@ -143,32 +143,77 @@ function countTestFiles() {
 }
 
 /**
- * Get test stats from coverage data and file count
+ * Get test stats by running vitest and parsing output
  */
-function getTestStats() {
-  const coverage = parseCoverage();
-  const testFileCount = countTestFiles();
+async function getTestStats() {
+  const { execSync } = await import('child_process');
 
-  // Try to get test count from coverage data (it includes all statements)
-  // This is an approximation - actual test count would need vitest output parsing
-  // For now, use a heuristic based on test files
-  const estimatedTests = testFileCount * 22; // Rough average based on current tests
+  try {
+    // Run vitest with JSON reporter
+    const output = execSync('pnpm vitest run --reporter=json --reporter=default', {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
 
-  return {
-    testFiles: `${testFileCount} passed (${testFileCount})`,
-    tests: process.env.TESTS || `${estimatedTests} passed (${estimatedTests})`,
-    duration: process.env.DURATION || '~1s',
-  };
+    // Parse the JSON output (last line should be JSON)
+    const lines = output.split('\n').filter(line => line.trim());
+    const jsonLine = lines.find(line => line.startsWith('{') && line.includes('"testResults"'));
+
+    if (jsonLine) {
+      const result = JSON.parse(jsonLine);
+      // Use testResults.length for file count (numTotalTestSuites counts describe blocks)
+      const numTestFiles = result.testResults?.length || 0;
+      const numTests = result.numTotalTests || 0;
+      const duration = result.startTime && result.endTime
+        ? `${Math.round((result.endTime - result.startTime) / 1000)}s`
+        : '~1s';
+
+      return {
+        testFiles: `${numTestFiles} passed (${numTestFiles})`,
+        tests: `${numTests} passed (${numTests})`,
+        duration,
+      };
+    }
+
+    // Fallback: parse standard output for summary line
+    // Example: "Test Files  7 passed (7)"
+    const testFileMatch = output.match(/Test Files\s+(\d+)\s+passed/);
+    const testMatch = output.match(/Tests\s+(\d+)\s+passed/);
+
+    if (testFileMatch && testMatch) {
+      const numTestFiles = parseInt(testFileMatch[1], 10);
+      const numTests = parseInt(testMatch[1], 10);
+
+      return {
+        testFiles: `${numTestFiles} passed (${numTestFiles})`,
+        tests: `${numTests} passed (${numTests})`,
+        duration: '~1s',
+      };
+    }
+
+    throw new Error('Could not parse vitest output');
+  } catch (error) {
+    console.error('Failed to run tests:', error.message);
+
+    // Fallback to file counting
+    const testFileCount = countTestFiles();
+    return {
+      testFiles: `${testFileCount} files`,
+      tests: 'Unknown',
+      duration: 'Unknown',
+    };
+  }
 }
 
 /**
  * Update README.md with new stats
  */
-function updateReadme() {
+async function updateReadme() {
   const readmePath = join(rootDir, 'README.md');
   const readme = readFileSync(readmePath, 'utf-8');
 
-  const stats = getTestStats();
+  const stats = await getTestStats();
   const coverageTable = buildCoverageTable();
 
   if (!stats || !coverageTable) {
@@ -237,4 +282,4 @@ if (total.lines.pct !== 100 || total.statements.pct !== 100 ||
   process.exit(1);
 }
 
-updateReadme();
+await updateReadme();

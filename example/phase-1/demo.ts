@@ -48,6 +48,18 @@ interface DemoState {
     extractable: boolean;
     usages: string[];
   } | null;
+  // Phase 1 additions
+  auditPublicKey: JsonWebKey | null;
+  auditVerification: {
+    valid: boolean;
+    verified: number;
+    errors: string[];
+  } | null;
+  tamperTestResult: {
+    beforeValid: boolean;
+    afterValid: boolean;
+    errors: string[];
+  } | null;
 }
 
 interface AuditEntry {
@@ -107,6 +119,10 @@ const state: DemoState = {
   jwtSignatureValid: null,
   jwtVerificationError: null,
   keyMetadata: null,
+  // Phase 1 additions
+  auditPublicKey: null,
+  auditVerification: null,
+  tamperTestResult: null,
 };
 
 // ============================================================================
@@ -123,6 +139,8 @@ function updateButtonStates(): void {
   const stage5Btn = document.getElementById('stage5-btn') as HTMLButtonElement;
   const stage6Btn = document.getElementById('stage6-btn') as HTMLButtonElement;
   const stage7Btn = document.getElementById('stage7-btn') as HTMLButtonElement;
+  const stage8Btn = document.getElementById('stage8-btn') as HTMLButtonElement;
+  const stage9Btn = document.getElementById('stage9-btn') as HTMLButtonElement;
   const scrollBtn = document.getElementById('scroll-to-output-btn') as HTMLButtonElement;
 
   // Generate VAPID: enabled when setup is complete AND worker is unlocked
@@ -142,6 +160,12 @@ function updateButtonStates(): void {
 
   // Verify JWT: enabled when we have a VAPID public key AND worker is unlocked
   stage7Btn.disabled = !state.vapidPublicKey || state.isLocked;
+
+  // Verify Audit Chain: enabled when setup is complete AND worker is unlocked
+  stage8Btn.disabled = !state.setupComplete || state.isLocked;
+
+  // Tamper Detection: enabled when audit verification has been performed
+  stage9Btn.disabled = !state.auditVerification;
 
   // Scroll to output: enabled when we have any artifacts
   scrollBtn.disabled = !state.vapidKid && !state.jwt;
@@ -553,11 +577,154 @@ function renderPersistenceCard(): void {
   document.getElementById('persistence-card')!.innerHTML = card;
 }
 
+function renderAuditPublicKeyCard(): void {
+  const checks = [
+    state.auditPublicKey
+      ? renderCheck('pass', 'Public Key Exported', `ES256 (P-256) public key available for verification`)
+      : renderCheck('pending', 'Public Key: Pending', 'Initialize worker to generate audit keypair'),
+    state.auditPublicKey && state.auditPublicKey.kty === 'EC'
+      ? renderCheck('pass', 'Key Type', `${state.auditPublicKey.kty} (Elliptic Curve)`)
+      : renderCheck('pending', 'Key Type: Pending'),
+    state.auditPublicKey && state.auditPublicKey.crv === 'P-256'
+      ? renderCheck('pass', 'Curve', `${state.auditPublicKey.crv} (NIST P-256)`)
+      : renderCheck('pending', 'Curve: Pending'),
+    state.auditPublicKey && state.auditPublicKey.x && state.auditPublicKey.y
+      ? renderCheck('pass', 'Coordinates', `x: ${state.auditPublicKey.x.substring(0, 16)}..., y: ${state.auditPublicKey.y.substring(0, 16)}...`)
+      : renderCheck('pending', 'Coordinates: Pending'),
+  ].join('');
+
+  const card = renderCard(
+    '🔐 Audit Log Public Key',
+    '<strong>What this is:</strong> The ES256 public key used to verify audit log signatures. Anyone can use this key to independently verify the integrity of the audit chain without access to the private key.',
+    checks
+  );
+
+  document.getElementById('audit-pubkey-card')!.innerHTML = card;
+}
+
+function renderAuditVerificationCard(): void {
+  const checks = [
+    state.auditVerification
+      ? state.auditVerification.valid
+        ? renderCheck('pass', 'Chain Integrity', 'All signatures valid, chain unbroken')
+        : renderCheck('fail', 'Chain Integrity', `${state.auditVerification.errors.length} errors found`)
+      : renderCheck('pending', 'Chain Integrity: Pending', 'Run verification test'),
+    state.auditVerification
+      ? renderCheck(
+          state.auditVerification.valid ? 'pass' : 'fail',
+          'Entries Verified',
+          `${state.auditVerification.verified} entries checked`
+        )
+      : renderCheck('pending', 'Entries: Pending'),
+    state.auditVerification && state.auditVerification.errors.length > 0
+      ? renderCheck('fail', 'Verification Errors', state.auditVerification.errors.slice(0, 3).join(', '))
+      : state.auditVerification
+      ? renderCheck('pass', 'No Errors', 'Chain verified successfully')
+      : renderCheck('pending', 'Errors: Pending'),
+  ].join('');
+
+  const card = renderCard(
+    '✅ Audit Chain Verification',
+    '<strong>What this proves:</strong> Independent verification of the audit log using ES256 signatures. Each entry is signed with the private key and can be verified with the public key. The chain ensures entries cannot be modified, reordered, or deleted.',
+    checks
+  );
+
+  document.getElementById('audit-verify-card')!.innerHTML = card;
+}
+
+function renderTamperDetectionCard(): void {
+  const checks = [
+    state.tamperTestResult
+      ? renderCheck(
+          state.tamperTestResult.beforeValid ? 'pass' : 'fail',
+          'Before Tamper',
+          state.tamperTestResult.beforeValid ? 'Chain valid' : 'Chain invalid'
+        )
+      : renderCheck('pending', 'Before Tamper: Pending', 'Run tamper test'),
+    state.tamperTestResult
+      ? renderCheck(
+          !state.tamperTestResult.afterValid ? 'pass' : 'fail',
+          'After Tamper',
+          !state.tamperTestResult.afterValid ? 'Tampering detected ✅' : 'Tampering not detected ❌'
+        )
+      : renderCheck('pending', 'After Tamper: Pending'),
+    state.tamperTestResult && state.tamperTestResult.errors.length > 0
+      ? renderCheck('pass', 'Detection Result', `${state.tamperTestResult.errors.length} tampering errors detected`)
+      : state.tamperTestResult
+      ? renderCheck('fail', 'Detection Result', 'No tampering detected (unexpected)')
+      : renderCheck('pending', 'Detection: Pending'),
+  ].join('');
+
+  const card = renderCard(
+    '🔍 Tamper Detection Test',
+    '<strong>What this proves:</strong> Demonstrates that the audit log detects tampering. We modify an entry in IndexedDB directly and verify that the chain verification fails. This proves the hash-chain and signatures work as intended.',
+    checks
+  );
+
+  document.getElementById('tamper-card')!.innerHTML = card;
+}
+
+function renderJWTPolicyCard(): void {
+  if (!state.jwt || !state.jwtParts) {
+    document.getElementById('jwt-policy-card')!.innerHTML = renderCard(
+      '🎫 JWT Policy Validation',
+      '<strong>What this checks:</strong> RFC 8292 (VAPID) compliance. The worker enforces: exp ≤ 24h, aud must be HTTPS, sub must be mailto: or https:. This prevents security issues like overly-long token expiration.',
+      renderCheck('pending', 'Policy Check: Pending', 'Sign a JWT to validate policy')
+    );
+    return;
+  }
+
+  // Decode payload
+  const payloadJson = JSON.parse(atob(state.jwtParts.payload.replace(/-/g, '+').replace(/_/g, '/')));
+  const exp = payloadJson.exp as number;
+  const aud = payloadJson.aud as string;
+  const sub = payloadJson.sub as string;
+
+  const now = Math.floor(Date.now() / 1000);
+  const maxExp = now + 24 * 60 * 60;
+  const remaining = exp - now;
+  const hours = Math.floor(remaining / 3600);
+  const minutes = Math.floor((remaining % 3600) / 60);
+
+  const checks = [
+    renderCheck(
+      exp <= maxExp ? 'pass' : 'fail',
+      'Expiration (exp)',
+      `Unix: ${exp}, Remaining: ${hours}h ${minutes}m, Status: ${exp <= maxExp ? '✅ Within 24h limit' : '❌ Exceeds 24h'}`
+    ),
+    renderCheck(
+      aud.startsWith('https://') ? 'pass' : 'fail',
+      'Audience (aud)',
+      `${aud}, Format: ${aud.startsWith('https://') ? '✅ HTTPS URL' : '❌ Must be HTTPS'}`
+    ),
+    renderCheck(
+      sub.startsWith('mailto:') || sub.startsWith('https://') ? 'pass' : 'fail',
+      'Subject (sub)',
+      `${sub}, Format: ${sub.startsWith('mailto:') || sub.startsWith('https://') ? '✅ Valid' : '❌ Must be mailto: or https:'}`
+    ),
+    (exp <= maxExp && aud.startsWith('https://') && (sub.startsWith('mailto:') || sub.startsWith('https://')))
+      ? renderCheck('pass', 'Policy Compliance', 'All VAPID requirements met')
+      : renderCheck('fail', 'Policy Compliance', 'One or more requirements failed'),
+  ].join('');
+
+  const card = renderCard(
+    '🎫 JWT Policy Validation (RFC 8292)',
+    '<strong>Why this matters:</strong> VAPID (RFC 8292) requires exp ≤ 24h, and specific formats for aud/sub. The worker enforces these policies before signing to prevent security issues.',
+    checks
+  );
+
+  document.getElementById('jwt-policy-card')!.innerHTML = card;
+}
+
 function updateAllCards(): void {
   renderSetupCard();
   renderVAPIDCard();
   renderJWTCard();
+  renderJWTPolicyCard();
   renderVerifyJWTCard();
+  renderAuditPublicKeyCard();
+  renderAuditVerificationCard();
+  renderTamperDetectionCard();
   renderLockCard();
   renderUnlockCard();
   renderPersistenceCard();
@@ -1282,6 +1449,117 @@ async function stage7VerifyJWT(): Promise<void> {
   }
 }
 
+async function stage8VerifyAuditChain(): Promise<void> {
+  const button = document.getElementById('stage8-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Verifying...';
+
+  // Scroll to audit verification card
+  scrollToCard('audit-verify');
+
+  try {
+    if (!client) {
+      throw new Error('Client not initialized');
+    }
+
+    // Get audit public key
+    state.auditPublicKey = await client.getAuditPublicKey();
+
+    // Verify audit chain
+    const result = await client.verifyAuditChain();
+    state.auditVerification = result;
+
+    updateAllCards();
+
+    button.textContent = result.valid ? '✓ Chain Verified' : '⚠ Chain Invalid';
+    setTimeout(() => {
+      button.textContent = '8️⃣ Verify Audit Chain';
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '8️⃣ Verify Audit Chain';
+    updateButtonStates();
+  }
+}
+
+async function stage9TamperDetection(): Promise<void> {
+  const button = document.getElementById('stage9-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Testing...';
+
+  // Scroll to tamper detection card
+  scrollToCard('tamper');
+
+  try {
+    if (!client) {
+      throw new Error('Client not initialized');
+    }
+
+    // First, verify the chain is valid before tampering
+    const beforeResult = await client.verifyAuditChain();
+
+    // Now tamper with an entry in IndexedDB
+    await initDB();
+    const entries = await getAllAuditEntries();
+    if (entries.length === 0) {
+      throw new Error('No audit entries to tamper with');
+    }
+
+    // Tamper with the second-to-last entry (modify its operation field)
+    const targetEntry = entries[entries.length - 2];
+    if (targetEntry) {
+      // Modify the entry (this will break the signature)
+      const tamperedEntry = { ...targetEntry, op: 'TAMPERED' };
+
+      // Get direct access to IndexedDB to modify the entry
+      const db = indexedDB;
+      const openRequest = db.open(DB_NAME);
+
+      await new Promise<void>((resolve, reject) => {
+        openRequest.onsuccess = () => {
+          const database = openRequest.result;
+          const transaction = database.transaction('audit', 'readwrite');
+          const store = transaction.objectStore('audit');
+
+          // Delete old entry and add tampered one
+          const deleteRequest = store.delete(IDBKeyRange.only(entries.length - 1));
+          deleteRequest.onsuccess = () => {
+            const addRequest = store.add(tamperedEntry);
+            addRequest.onsuccess = () => {
+              resolve();
+            };
+            addRequest.onerror = () => reject(new Error('Failed to add tampered entry'));
+          };
+          deleteRequest.onerror = () => reject(new Error('Failed to delete entry'));
+        };
+        openRequest.onerror = () => reject(new Error('Failed to open database'));
+      });
+    }
+
+    // Verify the chain again after tampering
+    const afterResult = await client.verifyAuditChain();
+
+    state.tamperTestResult = {
+      beforeValid: beforeResult.valid,
+      afterValid: afterResult.valid,
+      errors: afterResult.errors,
+    };
+
+    updateAllCards();
+
+    button.textContent = !afterResult.valid ? '✓ Tampering Detected' : '⚠ Test Failed';
+    setTimeout(() => {
+      button.textContent = '9️⃣ Tamper Detection';
+      updateButtonStates();
+    }, 2000);
+  } catch (error) {
+    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '9️⃣ Tamper Detection';
+    updateButtonStates();
+  }
+}
+
 async function resetDemo(): Promise<void> {
   const confirmed = confirm('This will clear all demo state and IndexedDB data. Continue?');
   if (!confirmed) return;
@@ -1471,6 +1749,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('stage5-btn')!.addEventListener('click', stage5UnlockWorker);
   document.getElementById('stage6-btn')!.addEventListener('click', stage6PersistenceTest);
   document.getElementById('stage7-btn')!.addEventListener('click', stage7VerifyJWT);
+  document.getElementById('stage8-btn')!.addEventListener('click', stage8VerifyAuditChain);
+  document.getElementById('stage9-btn')!.addEventListener('click', stage9TamperDetection);
   document.getElementById('scroll-to-output-btn')!.addEventListener('click', () => {
     const outputSection = document.getElementById('output-section');
     if (outputSection) {

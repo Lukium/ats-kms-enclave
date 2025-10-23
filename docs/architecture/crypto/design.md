@@ -64,6 +64,17 @@ Comprehensive production-ready implementation guide (~1440 lines) including:
 - Security headers (CSP, CORS, Permissions-Policy)
 - Implementation checklist
 
+### [07. Audit Logging and Unlock](./design/07-audit-logging-and-unlock.md) 🔒 **NEW - Phase 1**
+Local-only tamper-evident audit logging with explicit unlock mechanisms:
+- **Unlock mechanisms**: Passkey (WebAuthn) or passphrase (PBKDF2)
+- **Audit log**: Hash-chained, signed entries for all key operations
+- **Tamper detection**: Signature verification + chain continuity checks
+- **PWA integration**: Security dashboard displays audit log
+- **First-time setup**: User must configure unlock before using KMS
+- **Operations logged**: Setup, unlock, unwrap, sign, reset, export attempts
+- **Retention**: Last 500 entries or 30 days
+- **No server required**: Entirely local for everyday users
+
 ## Quick Start
 
 ### For Understanding
@@ -74,7 +85,8 @@ Comprehensive production-ready implementation guide (~1440 lines) including:
 ### For Implementation
 1. Study [Component Design](./design/03-component-design.md)
 2. Follow [Implementation Guide](./design/06-implementation-guide.md) step-by-step
-3. Set up [Build Pipeline](./design/04-build-pipeline.md)
+3. Implement [Audit Logging and Unlock](./design/07-audit-logging-and-unlock.md) (Phase 1)
+4. Set up [Build Pipeline](./design/04-build-pipeline.md)
 
 ### Critical Implementation Warnings
 

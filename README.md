@@ -19,7 +19,16 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 
 ## Current Status
 
-**Phase**: Architecture design complete, implementation not yet started
+**Phase 0: Prototype** ✅ **COMPLETE**
+
+- ✅ 108 tests passing (100% coverage)
+- ✅ Worker-based RPC handler
+- ✅ Client-side bridge implementation
+- ✅ VAPID key generation
+- ✅ ES256 JWT signing
+- ✅ Interactive demo
+
+**[Try the demo →](example/README.md)** `make demo`
 
 See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the implementation roadmap.
 
@@ -136,6 +145,24 @@ make lint
 # See all available commands
 make help
 ```
+
+### Try the Demo
+
+See the Phase 0 prototype in action:
+
+```bash
+# Run interactive demo in browser
+make demo
+# or: pnpm demo
+```
+
+This opens an interactive demo at `http://localhost:5173` that demonstrates:
+- VAPID keypair generation
+- JWT token signing
+- Public key retrieval
+- Complete workflow validation
+
+See [example/README.md](example/README.md) for more details.
 
 ### Development Workflow
 

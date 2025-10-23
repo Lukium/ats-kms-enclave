@@ -10,9 +10,11 @@
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ext .ts --ignore-pattern 'node_modules' --ignore-pattern 'dist'",
+    "lint": "eslint . --ext .ts",
     "build:dev": "node build/esbuild.js --dev",
-    "build:reproducible": "node build/esbuild.js --reproducible"
+    "build:reproducible": "node build/esbuild.js --reproducible",
+    "demo": "vite example --config example/vite.config.ts",
+    "demo:build": "vite build example --config example/vite.config.ts"
   },
   "keywords": [
     "cryptography",
@@ -39,6 +41,7 @@
     "eslint": "^8.56.0",
     "happy-dom": "^12.10.3",
     "typescript": "^5.3.3",
+    "vite": "^7.1.12",
     "vitest": "^1.1.1"
   },
   "engines": {

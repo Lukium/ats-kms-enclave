@@ -68,6 +68,128 @@ For a security-critical cryptographic system:
 - Test quality is as important as implementation quality
 - Reviewers verify TDD process was followed
 
+### Pre-Commit Requirements
+
+**MANDATORY**: Before attempting any commit, all quality checks MUST pass without errors.
+
+**Recommended: Use the Makefile**
+```bash
+make pre-commit   # Runs test, typecheck, and lint in sequence
+```
+
+**Manual execution** (if needed):
+```bash
+pnpm test         # All tests must pass
+pnpm typecheck    # TypeScript must compile without errors
+pnpm lint         # ESLint must pass without errors
+```
+
+**Commit workflow**:
+1. Write/modify code following TDD
+2. Run: `make pre-commit`
+3. Fix any errors
+4. Only then attempt `git commit`
+
+**Rationale**:
+- Prevents broken code from entering version control
+- Ensures consistent code quality
+- Catches type errors and linting issues early
+- Maintains 100% test coverage requirement
+- Makes code review faster and more focused
+
+**Note**: These checks are also enforced in CI, but running them locally before commit saves time and prevents failed CI builds.
+
+### Commit Message Guidelines
+
+**Commit messages should be comprehensive and well-structured.**
+
+**Format**:
+```
+<type>: <short summary> (50 chars or less)
+
+<detailed description explaining what and why>
+
+- Key change 1
+- Key change 2
+- Key change 3
+
+<optional footer with references, breaking changes, etc.>
+```
+
+**Types**:
+- `feat:` - New feature
+- `fix:` - Bug fix
+- `docs:` - Documentation changes
+- `test:` - Adding or updating tests
+- `refactor:` - Code refactoring without behavior change
+- `chore:` - Build process, dependencies, tooling
+- `perf:` - Performance improvements
+
+**Best Practices**:
+
+1. **Write comprehensive messages**
+   - Explain WHAT changed and WHY
+   - Include context for future developers
+   - Reference related issues or decisions
+   - Don't just repeat the code diff
+
+2. **Group related files appropriately**
+   - **Together**: Files that implement a single feature/fix
+   - **Together**: Tests and their implementation
+   - **Together**: Documentation updates with code changes
+   - **Separate**: Unrelated changes (e.g., separate features)
+   - **Separate**: Refactoring from new features
+
+3. **When to group files**:
+   - ✅ Test file + implementation file for same feature
+   - ✅ Multiple files that together implement one feature
+   - ✅ Configuration file + code that uses it
+   - ✅ Documentation + code it documents
+   - ❌ Two unrelated bug fixes
+   - ❌ New feature + refactoring of old code
+
+**Examples**:
+
+**Good commit message** (grouped appropriately):
+```
+feat: Add VAPID key generation to KMS worker
+
+Implement P-256 ECDSA key generation with non-extractable private keys
+for VAPID authentication. This is Phase 0 of the KMS implementation.
+
+- Add generateVAPIDKeypair() function in worker.ts
+- Add comprehensive tests for key generation and signing
+- Add RPC protocol tests for key generation method
+- Document DER vs P-1363 signature format differences
+
+Tests include verification of:
+- Non-extractable private keys
+- Correct algorithm parameters (P-256, ES256)
+- Signature generation and verification
+- Performance requirements (<100ms key gen)
+
+Phase 0 deliverable: Proof of concept for browser crypto operations
+```
+
+**Bad commit message** (too brief):
+```
+fix stuff
+```
+
+**Good file grouping**:
+- Commit 1: `worker.ts` + `worker.test.ts` (feature + tests)
+- Commit 2: `rpc.ts` + `rpc.test.ts` (related feature + tests)
+
+**Bad file grouping**:
+- Commit 1: `worker.ts` + `rpc.ts` + `storage.ts` (unrelated features)
+- Commit 2: All tests together separately from implementation
+
+**Atomic Commits**:
+- Each commit should be a complete, working change
+- All tests should pass at every commit
+- If reverting is needed, revert should be clean
+- Makes git bisect and code review easier
+
 ## Dependencies
 
 This document depends on:

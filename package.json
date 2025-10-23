@@ -1,0 +1,63 @@
+{
+  "name": "@ats/kms-enclave",
+  "version": "0.0.0",
+  "description": "Browser-based verifiable Key Management System (KMS) enclave for AllTheServices",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts --ignore-pattern 'node_modules' --ignore-pattern 'dist'",
+    "build:dev": "node build/esbuild.js --dev",
+    "build:reproducible": "node build/esbuild.js --reproducible"
+  },
+  "keywords": [
+    "cryptography",
+    "web-crypto",
+    "pwa",
+    "security",
+    "verifiable-builds",
+    "reproducible-builds",
+    "subresource-integrity"
+  ],
+  "author": "AllTheServices",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lukium/ats-kms-enclave.git"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "@vitest/coverage-v8": "^1.1.1",
+    "@vitest/ui": "^1.1.1",
+    "esbuild": "^0.19.11",
+    "eslint": "^8.56.0",
+    "happy-dom": "^12.10.3",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "c8": {
+    "all": true,
+    "lines": 100,
+    "functions": 100,
+    "branches": 100,
+    "statements": 100,
+    "exclude": [
+      "node_modules/**",
+      "tests/**",
+      "build/**",
+      "dist/**",
+      "**/*.d.ts"
+    ]
+  }
+}

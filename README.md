@@ -113,23 +113,37 @@ See [Implementation Plan](docs/architecture/crypto/plan.md) for full TDD require
 
 ### Getting Started
 
-**Note**: Implementation has not yet started. The repository currently contains architecture documentation only.
-
-When implementation begins:
-
 ```bash
 # Install dependencies
-pnpm install
+make install
+# or: pnpm install
 
-# Run tests (TDD - write these first!)
-pnpm test
+# Before committing (MANDATORY)
+make pre-commit
 
-# Development build
-pnpm build:dev
+# Run tests
+make test
+# or: pnpm test
 
-# Reproducible build
-pnpm build:reproducible
+# Type check
+make typecheck
+# or: pnpm typecheck
+
+# Lint
+make lint
+# or: pnpm lint
+
+# See all available commands
+make help
 ```
+
+### Development Workflow
+
+1. Write tests first (TDD)
+2. Implement code to pass tests
+3. Run `make pre-commit` before committing
+4. Fix any errors
+5. Commit only when all checks pass
 
 ## Repository Structure
 

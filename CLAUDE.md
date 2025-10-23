@@ -148,58 +148,139 @@ ats-kms/
     └── e2e/                      # Browser compatibility tests
 ```
 
-## Development Commands (To Be Implemented)
+## Development Commands
 
-### Building
+### Pre-Commit Requirements (MANDATORY)
+
+**CRITICAL**: Before ANY commit, all quality checks MUST pass without errors.
+
+**Recommended: Use the Makefile**
 ```bash
-# Development build (not reproducible)
-npm run build:dev
+make pre-commit   # Runs test, typecheck, and lint in sequence
+```
 
-# Reproducible build (deterministic output)
-npm run build:reproducible
+**Or run manually**:
+```bash
+pnpm test         # All tests must pass
+pnpm typecheck    # TypeScript must compile without errors
+pnpm lint         # ESLint must pass without errors
+```
 
-# Generate content-addressed artifacts
-npm run build:release
+**Commit workflow**:
+1. Write/modify code following TDD
+2. Run `make pre-commit`
+3. Fix any errors
+4. Only then attempt `git commit`
+
+**Never skip these checks**. They prevent broken code from entering version control and ensure consistent quality.
+
+**Makefile targets**:
+```bash
+make help         # Show all available commands
+make install      # Install dependencies
+make test         # Run tests only
+make typecheck    # Type check only
+make lint         # Lint only
+make pre-commit   # Run all checks (recommended)
+make clean        # Remove generated files
 ```
 
 ### Testing
 ```bash
 # Run all tests
-npm test
+pnpm test
 
-# Unit tests only
-npm run test:unit
+# Run tests in watch mode
+pnpm test:watch
 
-# Integration tests (requires browser)
-npm run test:integration
+# Run tests with coverage report
+pnpm test:coverage
 
-# Browser compatibility tests
-npm run test:browsers
-
-# Performance benchmarks
-npm run test:perf
+# Run tests with UI
+pnpm test:ui
 ```
 
-### Verification
+### Type Checking and Linting
 ```bash
-# Verify reproducible build
-npm run verify:build
+# Type check without emitting files
+pnpm typecheck
 
-# Check SRI hashes
-npm run verify:sri
-
-# Verify Sigstore signature
-npm run verify:signature
+# Lint all TypeScript files
+pnpm lint
 ```
 
-### Development Server
+### Building (To Be Implemented)
 ```bash
-# Start dev server with hot reload
-npm run dev
+# Development build (not reproducible)
+pnpm build:dev
 
-# Serve production build locally
-npm run serve:prod
+# Reproducible build (deterministic output)
+pnpm build:reproducible
 ```
+
+## Commit Guidelines
+
+### Commit Message Format
+
+**Write comprehensive, well-structured commit messages.**
+
+```
+<type>: <short summary> (50 chars or less)
+
+<detailed description explaining what and why>
+
+- Key change 1
+- Key change 2
+- Key change 3
+
+<optional footer>
+```
+
+**Types**: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`
+
+### File Grouping Rules
+
+**Group together** (single commit):
+- ✅ Test file + implementation file for same feature
+- ✅ Multiple files that together implement one feature
+- ✅ Configuration + code that uses it
+- ✅ Documentation + code it documents
+
+**Keep separate** (different commits):
+- ❌ Two unrelated bug fixes
+- ❌ New feature + refactoring of old code
+- ❌ Multiple independent features
+
+### Atomic Commits
+
+- Each commit = one complete, working change
+- All tests must pass at every commit
+- Should be revertable cleanly
+- Makes code review and git bisect easier
+
+### Example Good Commit
+
+```
+feat: Add VAPID key generation to KMS worker
+
+Implement P-256 ECDSA key generation with non-extractable private keys
+for VAPID authentication. This is Phase 0 of the KMS implementation.
+
+- Add generateVAPIDKeypair() function in worker.ts
+- Add comprehensive tests for key generation and signing
+- Add RPC protocol tests for key generation method
+- Document DER vs P-1363 signature format differences
+
+Tests include verification of:
+- Non-extractable private keys
+- Correct algorithm parameters (P-256, ES256)
+- Signature generation and verification
+- Performance requirements (<100ms key gen)
+
+Phase 0 deliverable: Proof of concept for browser crypto operations
+```
+
+**See [plan.md](docs/architecture/crypto/plan.md#commit-message-guidelines) for full guidelines.**
 
 ## Implementation Phases
 

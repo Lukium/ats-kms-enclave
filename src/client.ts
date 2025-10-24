@@ -161,6 +161,56 @@ export class KMSClient {
     return this.request<{ isSetup: boolean }>('isUnlockSetup');
   }
 
+  /**
+   * Setup passkey with PRF extension (recommended)
+   */
+  setupPasskeyPRF(
+    rpId: string,
+    rpName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>('setupPasskeyPRF', {
+      rpId,
+      rpName,
+    });
+  }
+
+  /**
+   * Unlock with passkey using PRF extension
+   */
+  unlockWithPasskeyPRF(
+    rpId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>(
+      'unlockWithPasskeyPRF',
+      { rpId }
+    );
+  }
+
+  /**
+   * Setup passkey in gate-only mode (fallback)
+   */
+  setupPasskeyGate(
+    rpId: string,
+    rpName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
+      rpId,
+      rpName,
+    });
+  }
+
+  /**
+   * Unlock with passkey in gate-only mode (fallback)
+   */
+  unlockWithPasskeyGate(
+    rpId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>(
+      'unlockWithPasskeyGate',
+      { rpId }
+    );
+  }
+
   // ============================================================================
   // Crypto Operations (require unlock)
   // ============================================================================

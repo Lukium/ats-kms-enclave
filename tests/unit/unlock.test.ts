@@ -5,6 +5,9 @@
  * Tests written BEFORE implementation following TDD methodology.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import { describe, it, expect, beforeEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
@@ -18,6 +21,9 @@ import {
 beforeEach(async () => {
   globalThis.indexedDB = new IDBFactory();
   await resetUnlock();
+  // Reset WebAuthn mocks
+  delete (globalThis as any).navigator;
+  delete (globalThis as any).PublicKeyCredential;
 });
 
 describe('Unlock Manager - Setup', () => {
@@ -278,6 +284,24 @@ describe('Unlock Manager - Error Handling', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBe('INVALID_PASSPHRASE');
+    }
+  });
+
+  it('should fail to unlock with passphrase if passkey method was used', async () => {
+    // Manually setup a passkey config (simulating passkey setup)
+    const { putMeta } = await import('@/storage');
+    await putMeta('unlockSalt', {
+      method: 'passkey-prf' as const,
+      credentialId: new ArrayBuffer(16),
+      appSalt: new ArrayBuffer(32),
+      wrappedKEK: new ArrayBuffer(44),
+      wrapIV: new ArrayBuffer(12),
+    });
+
+    const result = await unlockWithPassphrase('test-password-12345');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe('NOT_SETUP');
     }
   });
 });

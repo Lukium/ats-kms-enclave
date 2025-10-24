@@ -7,7 +7,14 @@
  * Tests written BEFORE implementation following TDD methodology.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+/* eslint-disable @typescript-eslint/require-await */
+/* eslint-disable no-console */
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { handleMessage, resetWorkerState } from '@/worker';
 
@@ -331,6 +338,28 @@ describe('Worker RPC Handler - signJWT', () => {
     expect(parts).toHaveLength(3);
   });
 
+  it('should successfully sign JWT without origin parameter', async () => {
+    const payload: JWTPayload = {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'mailto:notifications@ats.run',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    const request: RPCRequest = {
+      id: 'req-205a',
+      method: 'signJWT',
+      params: { kid, payload },
+      // Explicitly no origin to cover branch
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+    const result = response.result as { jwt: string };
+
+    expect(result).toBeDefined();
+    expect(result.jwt).toBeDefined();
+    expect(typeof result.jwt).toBe('string');
+  });
+
   it('should return error for non-existent kid', async () => {
     const payload: JWTPayload = {
       aud: 'https://fcm.googleapis.com',
@@ -393,6 +422,7 @@ describe('Worker RPC Handler - signJWT', () => {
       id: 'req-207',
       method: 'signJWT',
       params: { kid, payload },
+      // Explicitly no origin to cover validation branch without origin
     };
 
     const response = await handleMessage(request) as RPCResponse;
@@ -431,6 +461,7 @@ describe('Worker RPC Handler - signJWT', () => {
       id: 'req-209',
       method: 'signJWT',
       params: { kid, payload },
+      // Explicitly no origin to cover validation branch without origin
     };
 
     const response = await handleMessage(request) as RPCResponse;
@@ -469,6 +500,7 @@ describe('Worker RPC Handler - signJWT', () => {
       id: 'req-211',
       method: 'signJWT',
       params: { kid, payload },
+      // Explicitly no origin - to cover branch where origin is undefined
     };
 
     const response = await handleMessage(request) as RPCResponse;
@@ -962,6 +994,309 @@ describe('Worker RPC Handler - Unlock Methods', () => {
   });
 });
 
+describe('Worker RPC Handler - Passkey Methods', () => {
+  beforeEach(async () => {
+    // Set up WebAuthn mocks for passkey tests
+    (globalThis as any).navigator = {
+      credentials: {
+        create: async () => ({
+          id: 'test-credential-id',
+          rawId: new Uint8Array(32).buffer,
+          type: 'public-key',
+          response: {
+            clientDataJSON: new Uint8Array(),
+            attestationObject: new Uint8Array(),
+          },
+          getClientExtensionResults: () => ({
+            prf: { enabled: true },
+          }),
+        }),
+        get: async () => ({
+          id: 'test-credential-id',
+          rawId: new Uint8Array(32).buffer,
+          type: 'public-key',
+          response: {
+            clientDataJSON: new Uint8Array(),
+            authenticatorData: new Uint8Array(),
+            signature: new Uint8Array(64),
+            userHandle: null,
+          },
+          getClientExtensionResults: () => ({
+            prf: {
+              results: {
+                first: crypto.getRandomValues(new Uint8Array(32)).buffer,
+              },
+            },
+          }),
+        }),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+  });
+
+  // setupPasskeyPRF tests
+  it('should require params for setupPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-600',
+      method: 'setupPasskeyPRF',
+      // Missing params
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('params');
+  });
+
+  it('should require rpId parameter for setupPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-601',
+      method: 'setupPasskeyPRF',
+      params: {
+        rpName: 'Test App',
+        // rpId missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  it('should require rpName parameter for setupPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-602',
+      method: 'setupPasskeyPRF',
+      params: {
+        rpId: 'localhost',
+        // rpName missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpName');
+  });
+
+  it('should reject non-string rpId for setupPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-603',
+      method: 'setupPasskeyPRF',
+      params: {
+        rpId: 123,
+        rpName: 'Test App',
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  it('should reject non-string rpName for setupPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-604',
+      method: 'setupPasskeyPRF',
+      params: {
+        rpId: 'localhost',
+        rpName: 123,
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpName');
+  });
+
+  // unlockWithPasskeyPRF tests
+  it('should require params for unlockWithPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-605',
+      method: 'unlockWithPasskeyPRF',
+      // Missing params
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('params');
+  });
+
+  it('should require rpId parameter for unlockWithPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-606',
+      method: 'unlockWithPasskeyPRF',
+      params: {
+        // rpId missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  it('should reject non-string rpId for unlockWithPasskeyPRF', async () => {
+    const request: RPCRequest = {
+      id: 'req-607',
+      method: 'unlockWithPasskeyPRF',
+      params: {
+        rpId: 123,
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  // setupPasskeyGate tests
+  it('should require params for setupPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-608',
+      method: 'setupPasskeyGate',
+      // Missing params
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('params');
+  });
+
+  it('should require rpId parameter for setupPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-609',
+      method: 'setupPasskeyGate',
+      params: {
+        rpName: 'Test App',
+        // rpId missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  it('should require rpName parameter for setupPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-610',
+      method: 'setupPasskeyGate',
+      params: {
+        rpId: 'localhost',
+        // rpName missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpName');
+  });
+
+  it('should reject non-string rpId for setupPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-611',
+      method: 'setupPasskeyGate',
+      params: {
+        rpId: 123,
+        rpName: 'Test App',
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  it('should reject non-string rpName for setupPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-612',
+      method: 'setupPasskeyGate',
+      params: {
+        rpId: 'localhost',
+        rpName: 123,
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpName');
+  });
+
+  // unlockWithPasskeyGate tests
+  it('should require params for unlockWithPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-613',
+      method: 'unlockWithPasskeyGate',
+      // Missing params
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('params');
+  });
+
+  it('should require rpId parameter for unlockWithPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-614',
+      method: 'unlockWithPasskeyGate',
+      params: {
+        // rpId missing
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+
+  it('should reject non-string rpId for unlockWithPasskeyGate', async () => {
+    const request: RPCRequest = {
+      id: 'req-615',
+      method: 'unlockWithPasskeyGate',
+      params: {
+        rpId: 123,
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeDefined();
+    expect(response.error?.code).toBe('INVALID_PARAMS');
+    expect(response.error?.message).toContain('rpId');
+  });
+});
+
 describe('Worker RPC Handler - Audit Operations', () => {
   beforeEach(async () => {
     // Reset worker state and reinitialize
@@ -1038,5 +1373,381 @@ describe('Worker RPC Handler - Audit Operations', () => {
     expect(result.valid).toBe(true);
     expect(result.verified).toBeGreaterThanOrEqual(1); // At least the setup entry
     expect(result.errors).toEqual([]);
+  });
+});
+
+describe('Worker RPC Handler - Passkey Success Paths', () => {
+  beforeEach(async () => {
+    // Reset worker state for fresh passkey tests
+    resetWorkerState();
+    globalThis.indexedDB = new IDBFactory();
+  });
+
+  // Helper to create mock WebAuthn credential
+  function createMockCredential(id: Uint8Array, prfEnabled = true) {
+    const credential = {
+      id: btoa(String.fromCharCode(...id)),
+      rawId: id.buffer,
+      type: 'public-key',
+      response: {
+        clientDataJSON: new Uint8Array(),
+        attestationObject: new Uint8Array(),
+      },
+    } as any;
+
+    credential.getClientExtensionResults = () => ({
+      prf: prfEnabled ? { enabled: true } : { enabled: false },
+    });
+
+    return credential as PublicKeyCredential;
+  }
+
+  // Helper to create mock WebAuthn assertion
+  function createMockAssertion(credentialId: ArrayBuffer, prfOutput?: Uint8Array) {
+    const assertion = {
+      id: btoa(String.fromCharCode(...new Uint8Array(credentialId))),
+      rawId: credentialId,
+      type: 'public-key',
+      response: {
+        clientDataJSON: new Uint8Array(),
+        authenticatorData: new Uint8Array(),
+        signature: new Uint8Array(64),
+        userHandle: null,
+      },
+    } as any;
+
+    assertion.getClientExtensionResults = () => ({
+      prf: prfOutput
+        ? {
+            results: {
+              first: prfOutput.buffer,
+            },
+          }
+        : undefined,
+    });
+
+    return assertion as PublicKeyCredential;
+  }
+
+  it('should successfully setup passkey with PRF', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32));
+
+    // Mock WebAuthn API
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, true)),
+        get: vi.fn().mockResolvedValue(createMockAssertion(credentialId.buffer, prfOutput)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    const request: RPCRequest = {
+      id: 'req-passkey-prf-setup',
+      method: 'setupPasskeyPRF',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should successfully unlock with passkey PRF', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32));
+
+    // Mock WebAuthn API
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, true)),
+        get: vi.fn().mockResolvedValue(createMockAssertion(credentialId.buffer, prfOutput)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    // First setup
+    await handleMessage({
+      id: 'setup',
+      method: 'setupPasskeyPRF',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+    });
+
+    // Then unlock
+    const request: RPCRequest = {
+      id: 'req-passkey-prf-unlock',
+      method: 'unlockWithPasskeyPRF',
+      params: { rpId: 'localhost' },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should successfully setup passkey in gate mode', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+
+    // Mock WebAuthn API
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, false)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    const request: RPCRequest = {
+      id: 'req-passkey-gate-setup',
+      method: 'setupPasskeyGate',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should successfully unlock with passkey gate', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+
+    // Mock WebAuthn API
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, false)),
+        get: vi.fn().mockResolvedValue(createMockAssertion(credentialId.buffer)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    // First setup
+    await handleMessage({
+      id: 'setup',
+      method: 'setupPasskeyGate',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+    });
+
+    // Then unlock
+    const request: RPCRequest = {
+      id: 'req-passkey-gate-unlock',
+      method: 'unlockWithPasskeyGate',
+      params: { rpId: 'localhost' },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should handle origin parameter in setupPassphrase', async () => {
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'setupPassphrase',
+      params: { passphrase: 'test-pass-12345' },
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should handle origin parameter in unlockWithPassphrase', async () => {
+    // Setup first
+    await handleMessage({
+      id: 'setup',
+      method: 'setupPassphrase',
+      params: { passphrase: 'test-pass-12345' },
+    });
+
+    // Unlock with origin
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'unlockWithPassphrase',
+      params: { passphrase: 'test-pass-12345' },
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should handle origin parameter in generateVAPID', async () => {
+    // Setup first
+    await handleMessage({
+      id: 'setup',
+      method: 'setupPassphrase',
+      params: { passphrase: 'test-pass-12345' },
+    });
+
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'generateVAPID',
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+  });
+
+  it('should handle origin parameter in passkey PRF setup', async () => {
+    // Need fresh state - resetWorkerState was already called in beforeEach
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32));
+
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, true)),
+        get: vi.fn().mockResolvedValue(createMockAssertion(credentialId.buffer, prfOutput)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'setupPasskeyPRF',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean; error?: string };
+    if (!result.success) {
+      console.log('Setup failed with error:', result.error);
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('should handle origin parameter in passkey PRF unlock', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32));
+
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, true)),
+        get: vi.fn().mockResolvedValue(createMockAssertion(credentialId.buffer, prfOutput)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    // Setup first
+    await handleMessage({
+      id: 'setup',
+      method: 'setupPasskeyPRF',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+    });
+
+    // Unlock with origin
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'unlockWithPasskeyPRF',
+      params: { rpId: 'localhost' },
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should handle origin parameter in passkey gate setup', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, false)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'setupPasskeyGate',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  it('should handle origin parameter in passkey gate unlock', async () => {
+    const credentialId = crypto.getRandomValues(new Uint8Array(32));
+
+    (globalThis as any).navigator = {
+      credentials: {
+        create: vi.fn().mockResolvedValue(createMockCredential(credentialId, false)),
+        get: vi.fn().mockResolvedValue(createMockAssertion(credentialId.buffer)),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    // Setup first
+    await handleMessage({
+      id: 'setup',
+      method: 'setupPasskeyGate',
+      params: { rpId: 'localhost', rpName: 'Test App' },
+    });
+
+    // Unlock with origin
+    const request: RPCRequest = {
+      id: 'req-with-origin',
+      method: 'unlockWithPasskeyGate',
+      params: { rpId: 'localhost' },
+      origin: 'https://example.com',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = response.result as { success: boolean };
+    expect(result.success).toBe(true);
   });
 });

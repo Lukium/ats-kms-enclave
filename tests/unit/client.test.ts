@@ -7,6 +7,11 @@
  * Tests written BEFORE implementation following TDD methodology.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+/* eslint-disable @typescript-eslint/require-await */
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { KMSClient } from '@/client';
@@ -496,6 +501,87 @@ describe('Client RPC Bridge - Unlock Methods', () => {
     const result = await client.isUnlockSetup();
     expect(result).toHaveProperty('isSetup');
     expect(typeof result.isSetup).toBe('boolean');
+  });
+
+  // Passkey methods
+  it('should have setupPasskeyPRF method', () => {
+    expect(typeof client.setupPasskeyPRF).toBe('function');
+  });
+
+  it('should have unlockWithPasskeyPRF method', () => {
+    expect(typeof client.unlockWithPasskeyPRF).toBe('function');
+  });
+
+  it('should have setupPasskeyGate method', () => {
+    expect(typeof client.setupPasskeyGate).toBe('function');
+  });
+
+  it('should have unlockWithPasskeyGate method', () => {
+    expect(typeof client.unlockWithPasskeyGate).toBe('function');
+  });
+
+  it('should return promise for setupPasskeyPRF', async () => {
+    // Set up WebAuthn mocks
+    (globalThis as any).navigator = {
+      credentials: {
+        create: async () => ({
+          id: 'test-id',
+          rawId: new Uint8Array(32).buffer,
+          type: 'public-key',
+          response: {
+            clientDataJSON: new Uint8Array(),
+            attestationObject: new Uint8Array(),
+          },
+          getClientExtensionResults: () => ({
+            prf: { enabled: true },
+          }),
+        }),
+        get: async () => ({
+          id: 'test-id',
+          rawId: new Uint8Array(32).buffer,
+          type: 'public-key',
+          response: {
+            clientDataJSON: new Uint8Array(),
+            authenticatorData: new Uint8Array(),
+            signature: new Uint8Array(64),
+            userHandle: null,
+          },
+          getClientExtensionResults: () => ({
+            prf: {
+              results: {
+                first: crypto.getRandomValues(new Uint8Array(32)).buffer,
+              },
+            },
+          }),
+        }),
+      },
+    };
+    (globalThis as any).window = {
+      PublicKeyCredential: class {},
+    };
+
+    const result = client.setupPasskeyPRF('localhost', 'Test App');
+    expect(result).toBeInstanceOf(Promise);
+    await result; // Must await to prevent unhandled rejection
+  });
+
+  it('should return promise for unlockWithPasskeyPRF', async () => {
+    const result = client.unlockWithPasskeyPRF('localhost');
+    expect(result).toBeInstanceOf(Promise);
+    // Will fail since not setup, but we just want to test it returns a promise
+    await result.catch(() => {}); // Catch to prevent unhandled rejection
+  });
+
+  it('should return promise for setupPasskeyGate', async () => {
+    const result = client.setupPasskeyGate('localhost', 'Test App');
+    expect(result).toBeInstanceOf(Promise);
+    await result.catch(() => {}); // Catch to prevent unhandled rejection
+  });
+
+  it('should return promise for unlockWithPasskeyGate', async () => {
+    const result = client.unlockWithPasskeyGate('localhost');
+    expect(result).toBeInstanceOf(Promise);
+    await result.catch(() => {}); // Catch to prevent unhandled rejection
   });
 });
 

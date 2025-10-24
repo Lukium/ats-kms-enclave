@@ -2,10 +2,11 @@
 /**
  * Build script for ATS KMS Enclave
  *
- * Phase 0: Minimal placeholder build
- * Future phases will implement deterministic builds with content-addressed filenames
+ * Phase 1: Single-file module build
+ * Phase 2: Deterministic builds with content-addressed filenames
  */
 
+import * as esbuild from 'esbuild';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +19,7 @@ const isDev = args.includes('--dev');
 const isReproducible = args.includes('--reproducible');
 
 console.log('📦 Building ATS KMS Enclave...');
-console.log(`   Mode: ${isDev ? 'development' : isReproducible ? 'reproducible' : 'unknown'}`);
+console.log(`   Mode: ${isDev ? 'development' : isReproducible ? 'reproducible' : 'production'}`);
 
 // Create dist directory
 const distDir = path.join(__dirname, '../dist');
@@ -26,27 +27,55 @@ if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
-// Phase 0: Just create a placeholder file
-const placeholder = `/**
- * ATS KMS Enclave - Phase 0 Build Artifact
- *
- * This is a placeholder for Phase 0.
- * Real builds will be implemented in Phase 2 (Verifiable Builds).
- *
- * Build mode: ${isDev ? 'development' : isReproducible ? 'reproducible' : 'unknown'}
- * Build time: ${new Date().toISOString()}
- */
+// Build configuration
+const buildConfig = {
+  entryPoints: [path.join(__dirname, '../src/worker.ts')],
+  bundle: true,
+  outfile: path.join(distDir, 'worker.js'),
+  format: 'esm',
+  target: 'es2020',
+  minify: !isDev,
+  sourcemap: isDev,
+  platform: 'browser',
+  treeShaking: true,
+  legalComments: 'none',
+  charset: 'utf8',
+  logLevel: 'info',
+};
 
-console.log('ATS KMS Enclave - Phase 0');
-console.log('Real build artifacts coming in Phase 2');
-`;
+// Phase 2 will add:
+// - SOURCE_DATE_EPOCH for deterministic timestamps
+// - Content-addressed filenames (worker-[hash].js)
+// - SRI hash generation
+// - Manifest generation
 
-fs.writeFileSync(path.join(distDir, 'kms.js'), placeholder);
+async function build() {
+  try {
+    console.log('');
+    console.log('🔨 Bundling worker...');
 
-console.log('✅ Build complete');
-console.log(`   Output: dist/kms.js`);
-console.log('');
-console.log('⚠️  Note: Phase 0 uses in-browser development via Vite');
-console.log('   Real builds with deterministic artifacts coming in Phase 2');
+    const result = await esbuild.build(buildConfig);
 
-process.exit(0);
+    // Get output file size
+    const stats = fs.statSync(path.join(distDir, 'worker.js'));
+    const sizeKB = (stats.size / 1024).toFixed(2);
+
+    console.log('');
+    console.log('✅ Build complete');
+    console.log(`   Output: dist/worker.js (${sizeKB} KB)`);
+    console.log('');
+
+    if (isReproducible) {
+      console.log('⚠️  Note: Reproducible builds coming in Phase 2');
+      console.log('   (deterministic timestamps, content-addressed filenames, SRI hashes)');
+      console.log('');
+    }
+
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Build failed:', error);
+    process.exit(1);
+  }
+}
+
+build();

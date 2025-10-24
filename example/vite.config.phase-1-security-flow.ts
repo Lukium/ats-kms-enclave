@@ -5,7 +5,7 @@ import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  root: path.resolve(__dirname, './phase-1'),
+  root: path.resolve(__dirname, './phase-1/security-flow'),
   publicDir: false,
   build: {
     outDir: 'dist',

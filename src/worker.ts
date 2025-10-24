@@ -855,7 +855,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         // Return passkey configuration from storage
         // (client can't access worker's IndexedDB directly)
         try {
-          const config = await getMeta<unknown>('unlockSalt');
+          const config = await getMeta<unknown>('passkeyConfig');
           if (!config) {
             // eslint-disable-next-line no-console
             console.log('[Worker] getPasskeyConfig: No config found in storage');

@@ -23,7 +23,9 @@ export type UnlockResult =
       error:
         | 'INVALID_PASSPHRASE'
         | 'PASSPHRASE_TOO_SHORT'
-        | 'ALREADY_SETUP'
+        | 'ALREADY_SETUP' // Deprecated: use method-specific errors
+        | 'PASSPHRASE_ALREADY_SETUP'
+        | 'PASSKEY_ALREADY_SETUP'
         | 'NOT_SETUP'
         | 'INCORRECT_PASSPHRASE'
         | 'PASSKEY_NOT_AVAILABLE'
@@ -59,11 +61,6 @@ type UnlockPasskeyGateConfig = {
   wrappedKEK: ArrayBuffer;
   wrapIV: ArrayBuffer;
 };
-
-type UnlockConfig =
-  | UnlockPassphraseConfig
-  | UnlockPasskeyPRFConfig
-  | UnlockPasskeyGateConfig;
 
 // ============================================================================
 // Constants
@@ -110,11 +107,30 @@ async function ensureInitialized(): Promise<void> {
 // ============================================================================
 
 /**
- * Check if unlock is configured
+ * Check if any unlock method is configured
  */
 export async function isSetup(): Promise<boolean> {
   await ensureInitialized();
-  const config = await getMeta<UnlockConfig>('unlockSalt');
+  const passphraseConfig = await getMeta<UnlockPassphraseConfig>('passphraseConfig');
+  const passkeyConfig = await getMeta<UnlockPasskeyPRFConfig | UnlockPasskeyGateConfig>('passkeyConfig');
+  return passphraseConfig !== undefined || passkeyConfig !== undefined;
+}
+
+/**
+ * Check if passphrase unlock is configured
+ */
+export async function isPassphraseSetup(): Promise<boolean> {
+  await ensureInitialized();
+  const config = await getMeta<UnlockPassphraseConfig>('passphraseConfig');
+  return config !== undefined;
+}
+
+/**
+ * Check if passkey unlock is configured
+ */
+export async function isPasskeySetup(): Promise<boolean> {
+  await ensureInitialized();
+  const config = await getMeta<UnlockPasskeyPRFConfig | UnlockPasskeyGateConfig>('passkeyConfig');
   return config !== undefined;
 }
 
@@ -135,9 +151,9 @@ export async function setupPassphrase(passphrase: string): Promise<UnlockResult>
     return { success: false, error: validation.error };
   }
 
-  // Check if already setup
-  if (await isSetup()) {
-    return { success: false, error: 'ALREADY_SETUP' };
+  // Check if passphrase already setup
+  if (await isPassphraseSetup()) {
+    return { success: false, error: 'PASSPHRASE_ALREADY_SETUP' };
   }
 
   // Generate random salt
@@ -153,14 +169,14 @@ export async function setupPassphrase(passphrase: string): Promise<UnlockResult>
   const verificationHash = result.verificationHash;
 
   // Store unlock configuration
-  const config: UnlockConfig = {
+  const config: UnlockPassphraseConfig = {
     method: 'passphrase',
     salt: salt.buffer,
     iterations: PBKDF2_ITERATIONS,
     verificationHash,
   };
 
-  await putMeta('unlockSalt', config);
+  await putMeta('passphraseConfig', config);
 
   return { success: true, key };
 }
@@ -184,13 +200,9 @@ export async function unlockWithPassphrase(
     return { success: false, error: validation.error };
   }
 
-  // Check if setup
-  const config = await getMeta<UnlockConfig>('unlockSalt');
+  // Check if passphrase is setup
+  const config = await getMeta<UnlockPassphraseConfig>('passphraseConfig');
   if (!config) {
-    return { success: false, error: 'NOT_SETUP' };
-  }
-
-  if (config.method !== 'passphrase') {
     return { success: false, error: 'NOT_SETUP' };
   }
 
@@ -242,9 +254,9 @@ export async function setupPasskeyPRF(
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
-  // Check if already setup
-  if (await isSetup()) {
-    return { success: false, error: 'ALREADY_SETUP' };
+  // Check if passkey already setup
+  if (await isPasskeySetup()) {
+    return { success: false, error: 'PASSKEY_ALREADY_SETUP' };
   }
 
   /* c8 ignore start - defensive: client.ts always provides valid credentialId from WebAuthn (tested by Playwright) */
@@ -280,7 +292,7 @@ export async function setupPasskeyPRF(
     );
 
     // Store unlock configuration
-    await putMeta<UnlockPasskeyPRFConfig>('unlockSalt', {
+    await putMeta<UnlockPasskeyPRFConfig>('passkeyConfig', {
       method: 'passkey-prf',
       credentialId: credentialId,
       appSalt: appSalt.buffer,
@@ -322,13 +334,9 @@ export async function unlockWithPasskeyPRF(
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
-  // Check if setup
-  const config = await getMeta<UnlockConfig>('unlockSalt');
-  if (!config) {
-    return { success: false, error: 'NOT_SETUP' };
-  }
-
-  if (config.method !== 'passkey-prf') {
+  // Check if passkey is setup
+  const config = await getMeta<UnlockPasskeyPRFConfig | UnlockPasskeyGateConfig>('passkeyConfig');
+  if (!config || config.method !== 'passkey-prf') {
     return { success: false, error: 'NOT_SETUP' };
   }
 
@@ -397,9 +405,9 @@ export async function setupPasskeyGate(
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
-  // Check if already setup
-  if (await isSetup()) {
-    return { success: false, error: 'ALREADY_SETUP' };
+  // Check if passkey already setup
+  if (await isPasskeySetup()) {
+    return { success: false, error: 'PASSKEY_ALREADY_SETUP' };
   }
 
   /* c8 ignore start - defensive: client.ts always provides valid credentialId from WebAuthn (tested by Playwright) */
@@ -440,7 +448,7 @@ export async function setupPasskeyGate(
       credentialIdType: Object.prototype.toString.call(credentialId),
     });
 
-    await putMeta<UnlockPasskeyGateConfig>('unlockSalt', {
+    await putMeta<UnlockPasskeyGateConfig>('passkeyConfig', {
       method: 'passkey-gate',
       credentialId: credentialId,
       appSalt: appSalt.buffer,
@@ -481,13 +489,9 @@ export async function setupPasskeyGate(
 export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
   await ensureInitialized();
 
-  // Check if setup
-  const config = await getMeta<UnlockConfig>('unlockSalt');
-  if (!config) {
-    return { success: false, error: 'NOT_SETUP' };
-  }
-
-  if (config.method !== 'passkey-gate') {
+  // Check if passkey is setup
+  const config = await getMeta<UnlockPasskeyPRFConfig | UnlockPasskeyGateConfig>('passkeyConfig');
+  if (!config || config.method !== 'passkey-gate') {
     return { success: false, error: 'NOT_SETUP' };
   }
 

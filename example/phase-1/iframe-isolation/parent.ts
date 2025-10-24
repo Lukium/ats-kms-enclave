@@ -40,7 +40,7 @@ async function initKMSUser(): Promise<void> {
     if (status.isSetup) {
       // Check setup method
       const config = await kmsUser.getPasskeyConfig();
-      if (config) {
+      if (config && (config.method === 'passkey-prf' || config.method === 'passkey-gate')) {
         setupMethod = 'passkey';
         displayOutput('ℹ️ Existing Passkey Setup Detected', {
           method: config.method,

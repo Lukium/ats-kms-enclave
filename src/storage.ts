@@ -61,7 +61,9 @@ export type MetaKey =
   | 'auditPublicKey'
   | 'chainHead'
   | 'unlockMethod'
-  | 'unlockSalt';
+  | 'unlockSalt' // Deprecated: use passphraseConfig or passkeyConfig
+  | 'passphraseConfig'
+  | 'passkeyConfig';
 
 /**
  * Database name and version

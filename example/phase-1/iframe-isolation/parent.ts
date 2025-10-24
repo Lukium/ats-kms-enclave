@@ -136,10 +136,16 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
 
   try {
     const result = await kmsUser.setupPassphrase(passphrase);
-    setupMethod = 'passphrase'; // Track setup method
-    isLocked = false; // Setup auto-unlocks
-    displayOutput('✅ Passphrase Setup Complete', result);
-    enableOperationControls();
+
+    // Check if setup was successful
+    if (result.success) {
+      setupMethod = 'passphrase'; // Track setup method
+      isLocked = false; // Setup auto-unlocks
+      displayOutput('✅ Passphrase Setup Complete', result);
+      enableOperationControls();
+    } else {
+      displayError(new Error(result.error || 'Passphrase setup failed'));
+    }
   } catch (error) {
     displayError(error as Error);
   }
@@ -151,10 +157,16 @@ document.getElementById('setup-passkey')!.addEventListener('click', async () => 
       rpId: window.location.hostname,
       rpName: 'ATS KMS Demo',
     });
-    setupMethod = 'passkey'; // Track setup method
-    isLocked = false; // Setup auto-unlocks
-    displayOutput('✅ Passkey Setup Complete', result);
-    enableOperationControls();
+
+    // Check if setup was successful
+    if (result.success) {
+      setupMethod = 'passkey'; // Track setup method
+      isLocked = false; // Setup auto-unlocks
+      displayOutput('✅ Passkey Setup Complete', result);
+      enableOperationControls();
+    } else {
+      displayError(new Error(result.error || 'Passkey setup failed'));
+    }
   } catch (error) {
     displayError(error as Error);
   }
@@ -171,14 +183,26 @@ document.getElementById('unlock-kms')!.addEventListener('click', async () => {
       const passphrase = prompt('Enter passphrase to unlock:');
       if (!passphrase) return;
       const result = await kmsUser.unlockWithPassphrase(passphrase);
-      isLocked = false; // Mark as unlocked
-      displayOutput('✅ KMS Unlocked (Passphrase)', result);
-      updateLockButton(); // Update button state
+
+      // Check if unlock was successful
+      if (result.success) {
+        isLocked = false; // Mark as unlocked
+        displayOutput('✅ KMS Unlocked (Passphrase)', result);
+        updateLockButton(); // Update button state
+      } else {
+        displayError(new Error(result.error || 'Unlock failed'));
+      }
     } else {
       const result = await kmsUser.unlockWithPasskey(window.location.hostname);
-      isLocked = false; // Mark as unlocked
-      displayOutput('✅ KMS Unlocked (Passkey)', result);
-      updateLockButton(); // Update button state
+
+      // Check if unlock was successful
+      if (result.success) {
+        isLocked = false; // Mark as unlocked
+        displayOutput('✅ KMS Unlocked (Passkey)', result);
+        updateLockButton(); // Update button state
+      } else {
+        displayError(new Error(result.error || 'Unlock failed'));
+      }
     }
   } catch (error) {
     displayError(error as Error);
@@ -205,8 +229,8 @@ document.getElementById('sign-jwt')!.addEventListener('click', async () => {
     return;
   }
 
-  const endpoint = prompt('Enter push endpoint URL:', 'https://fcm.googleapis.com/fcm/send/example');
-  if (!endpoint) return;
+  // Use default FCM endpoint for demo
+  const endpoint = 'https://fcm.googleapis.com/fcm/send/example';
 
   try {
     const payload = {
@@ -218,8 +242,32 @@ document.getElementById('sign-jwt')!.addEventListener('click', async () => {
     displayOutput('✅ JWT Signed', {
       jwt: result.jwt,
       kid: vapidKid,
+      endpoint: endpoint,
       note: 'Signed with non-extractable private key in KMS',
     });
+  } catch (error) {
+    displayError(error as Error);
+  }
+});
+
+document.getElementById('reset-demo')!.addEventListener('click', async () => {
+  const confirmed = confirm(
+    '⚠️ This will delete all keys and configuration.\n\n' +
+    'The demo will reload after reset.\n\n' +
+    'Continue?'
+  );
+
+  if (!confirmed) return;
+
+  try {
+    // Reset KMS (deletes all data in iframe's IndexedDB)
+    const result = await kmsUser.resetKMS();
+    if (result.success) {
+      // Reload page to reset all state
+      window.location.reload();
+    } else {
+      displayError(new Error(result.error || 'Reset failed'));
+    }
   } catch (error) {
     displayError(error as Error);
   }

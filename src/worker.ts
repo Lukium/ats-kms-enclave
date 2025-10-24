@@ -1042,6 +1042,53 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         };
       }
 
+      case 'resetKMS': {
+        // Clear all data from IndexedDB stores
+        // TODO: For production, this MUST be protected with user authentication
+        // (e.g., require passphrase or passkey verification before allowing reset)
+        try {
+          // Reset audit logger in-memory state first
+          resetAuditLogger();
+
+          // Open database to clear all stores
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open('kms-enclave');
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(new Error('Failed to open database'));
+          });
+
+          // Get all object store names and clear each one
+          const storeNames = Array.from(db.objectStoreNames);
+
+          // Clear all stores in a single transaction
+          await new Promise<void>((resolve, reject) => {
+            const transaction = db.transaction(storeNames, 'readwrite');
+
+            // Clear each store
+            for (const storeName of storeNames) {
+              transaction.objectStore(storeName).clear();
+            }
+
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(new Error('Failed to clear stores'));
+          });
+
+          // Close the database connection we just opened
+          db.close();
+
+          return {
+            id: request.id,
+            result: { success: true },
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          return {
+            id: request.id,
+            result: { success: false, error: errorMessage },
+          };
+        }
+      }
+
       default:
         return {
           id: request.id,

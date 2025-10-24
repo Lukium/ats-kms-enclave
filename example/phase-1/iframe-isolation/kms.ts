@@ -40,10 +40,21 @@ window.addEventListener('message', async (event) => {
         result = await kmsClient.unlockWithPassphrase(params.passphrase);
         break;
       case 'setupPasskeyPRF':
-        result = await kmsClient.setupPasskeyPRF(params.rpId, params.rpName);
+        result = await kmsClient.setupPasskeyPRF(
+          params.rpId,
+          params.rpName,
+          params.credentialId,
+          params.prfOutput
+        );
+        break;
+      case 'setupPasskeyGate':
+        result = await kmsClient.setupPasskeyGate(params.rpId, params.rpName, params.credentialId);
         break;
       case 'unlockWithPasskeyPRF':
         result = await kmsClient.unlockWithPasskeyPRF(params.rpId);
+        break;
+      case 'unlockWithPasskeyGate':
+        result = await kmsClient.unlockWithPasskeyGate();
         break;
       case 'generateVAPID':
         result = await kmsClient.generateVAPID();
@@ -62,6 +73,10 @@ window.addEventListener('message', async (event) => {
         break;
       case 'getPasskeyConfig':
         result = await kmsClient.getPasskeyConfig();
+        break;
+      case 'resetKMS':
+        // Forward to KMSClient to reset all data
+        result = await kmsClient.resetKMS();
         break;
       default:
         throw new Error(`Unknown method: ${method}`);

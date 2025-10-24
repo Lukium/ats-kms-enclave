@@ -164,6 +164,18 @@ export class KMSClient {
   }
 
   /**
+   * Reset KMS (delete all keys and configuration)
+   *
+   * WARNING: This will permanently delete all keys and configuration.
+   *
+   * TODO: For production, this MUST be protected with user authentication
+   * (e.g., require passphrase or passkey verification before allowing reset)
+   */
+  resetKMS(): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>('resetKMS');
+  }
+
+  /**
    * Get passkey configuration from worker storage
    * (needed because client can't access worker's IndexedDB)
    */
@@ -187,14 +199,46 @@ export class KMSClient {
    *
    * Automatically falls back to gate-only mode if PRF is not supported,
    * reusing the same credential to avoid double authentication.
+   *
+   * @param rpId - Relying party ID
+   * @param rpName - Relying party name
+   * @param credentialId - Optional: Already-created credential rawId (for iframe isolation)
+   * @param prfOutput - Optional: PRF output (for iframe isolation PRF mode)
    */
   async setupPasskeyPRF(
     rpId: string,
-    rpName: string
+    rpName: string,
+    credentialId?: ArrayBuffer,
+    prfOutput?: ArrayBuffer
   ): Promise<{ success: boolean; error?: string; method?: 'prf' | 'gate' }> {
-    console.log('[KMS Client] setupPasskeyPRF called with:', { rpId, rpName });
+    console.log('[KMS Client] setupPasskeyPRF called with:', { rpId, rpName, hasCredentialId: !!credentialId, hasPrfOutput: !!prfOutput });
 
     /* c8 ignore start - browser WebAuthn API code tested by Playwright */
+
+    // Case 1: credentialId + prfOutput provided (iframe isolation, PRF mode)
+    if (credentialId && prfOutput) {
+      console.log('[KMS Client] Using provided credentialId + prfOutput (iframe isolation PRF mode)');
+      const prfResult = await this.request<{ success: boolean; error?: string }>('setupPasskeyPRF', {
+        credentialId,
+        prfOutput,
+      });
+
+      return {
+        success: prfResult.success,
+        method: 'prf' as const,
+        ...(prfResult.error && { error: prfResult.error })
+      };
+    }
+
+    // Case 2: ONLY credentialId provided (iframe isolation, gate-only mode)
+    if (credentialId && !prfOutput) {
+      console.log('[KMS Client] Using provided credentialId only (iframe isolation gate-only mode)');
+      return this.setupPasskeyGate(rpId, rpName, credentialId);
+    }
+
+    // Case 3: Nothing provided (standalone mode, do WebAuthn)
+    console.log('[KMS Client] Standalone mode: performing WebAuthn');
+
     // Check WebAuthn availability
     if (
       typeof navigator === 'undefined' ||
@@ -427,50 +471,66 @@ export class KMSClient {
 
   /**
    * Setup passkey in gate-only mode (fallback)
+   *
+   * @param rpId - Relying party ID
+   * @param rpName - Relying party name
+   * @param credentialId - Optional: Already-created credential rawId (for iframe isolation)
    */
   async setupPasskeyGate(
     rpId: string,
-    rpName: string
+    rpName: string,
+    credentialId?: ArrayBuffer
   ): Promise<{ success: boolean; error?: string }> {
     /* c8 ignore start - browser WebAuthn API code tested by Playwright */
-    if (typeof navigator === 'undefined' || !navigator.credentials) {
-      return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
-    }
 
-    try {
-      // Create passkey without PRF extension
-      const credential = (await navigator.credentials.create({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rp: { id: rpId, name: rpName },
-          user: {
-            id: crypto.getRandomValues(new Uint8Array(16)),
-            name: 'kms-user',
-            displayName: 'KMS User',
-          },
-          pubKeyCredParams: [
-            { type: 'public-key', alg: -7 },   // ES256 (preferred)
-            { type: 'public-key', alg: -257 }, // RS256 (fallback)
-          ],
-          authenticatorSelection: {
-            userVerification: 'required',
-            residentKey: 'required',
-          },
-        },
-      })) as PublicKeyCredential | null;
+    let credentialRawId: ArrayBuffer;
 
-      if (!credential) {
-        return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+    // If credential already provided (iframe isolation case), use it
+    if (credentialId) {
+      credentialRawId = credentialId;
+    } else {
+      // Standalone mode: create credential here
+      if (typeof navigator === 'undefined' || !navigator.credentials) {
+        return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
       }
 
-      // Send credential ID to worker
-      return this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
-        credentialId: credential.rawId,
-      });
-    } catch (error) {
-      console.error('[KMS Client] Passkey gate setup failed:', error);
-      return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+      try {
+        // Create passkey without PRF extension
+        const credential = (await navigator.credentials.create({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rp: { id: rpId, name: rpName },
+            user: {
+              id: crypto.getRandomValues(new Uint8Array(16)),
+              name: 'kms-user',
+              displayName: 'KMS User',
+            },
+            pubKeyCredParams: [
+              { type: 'public-key', alg: -7 },   // ES256 (preferred)
+              { type: 'public-key', alg: -257 }, // RS256 (fallback)
+            ],
+            authenticatorSelection: {
+              userVerification: 'required',
+              residentKey: 'required',
+            },
+          },
+        })) as PublicKeyCredential | null;
+
+        if (!credential) {
+          return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+        }
+
+        credentialRawId = credential.rawId;
+      } catch (error) {
+        console.error('[KMS Client] Passkey gate setup failed:', error);
+        return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+      }
     }
+
+    // Send credential ID to worker
+    return this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
+      credentialId: credentialRawId,
+    });
     /* c8 ignore stop */
   }
 

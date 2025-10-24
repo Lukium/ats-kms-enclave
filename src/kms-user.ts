@@ -186,8 +186,8 @@ export class KMSUser {
     }
 
     try {
-      // Check PRF extension support
-      const prfSupported = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      // Generate random app salt for PRF
+      const appSalt = crypto.getRandomValues(new Uint8Array(32));
 
       // Create credential with PRF extension
       const credential = await navigator.credentials.create({
@@ -208,38 +208,78 @@ export class KMSUser {
             residentKey: 'preferred',
           },
           extensions: {
-            prf: {
-              eval: {
-                first: crypto.getRandomValues(new Uint8Array(32)),
-              },
-            },
+            prf: {},
           },
         },
       }) as PublicKeyCredential;
 
-      // Get PRF output
-      const prfResults = (credential as any).getClientExtensionResults().prf;
-
-      if (prfResults?.results?.first) {
-        // Send PRF output to iframe
+      // Check if PRF extension is supported
+      const clientExtensionResults = credential.getClientExtensionResults();
+      if (!clientExtensionResults.prf?.enabled) {
+        // PRF not supported - use gate-only mode with the same credential
         return this.request<{ success: boolean; error?: string; method?: 'prf' | 'gate' }>(
           'setupPasskeyPRF',
           {
             rpId: config.rpId,
             rpName: config.rpName,
-            credentialId: credential.id,
-            prfOutput: prfResults.results.first,
-          }
-        );
-      } else {
-        // Fallback to gate-only mode
-        return this.request<{ success: boolean; error?: string; method?: 'prf' | 'gate' }>(
-          'setupPasskeyGate',
-          {
-            credentialId: credential.id,
+            credentialId: credential.rawId,
           }
         );
       }
+
+      // PRF is supported - proceed with PRF flow
+      // Derive PRF output (authenticate with same passkey)
+      const assertionCredential = await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rpId: config.rpId,
+          allowCredentials: [
+            {
+              type: 'public-key',
+              id: credential.rawId,
+            },
+          ],
+          userVerification: 'required',
+          extensions: {
+            prf: {
+              eval: {
+                first: appSalt,
+              },
+            },
+          },
+        },
+      }) as PublicKeyCredential | null;
+
+      if (!assertionCredential) {
+        return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+      }
+
+      const assertionExtensions = assertionCredential.getClientExtensionResults();
+
+      // Extract PRF output
+      const prfResults = assertionExtensions.prf;
+      if (!prfResults?.results?.first) {
+        // PRF failed during assertion - fall back to gate-only with same credential
+        return this.request<{ success: boolean; error?: string; method?: 'prf' | 'gate' }>(
+          'setupPasskeyPRF',
+          {
+            rpId: config.rpId,
+            rpName: config.rpName,
+            credentialId: credential.rawId,
+          }
+        );
+      }
+
+      // Send credential data + PRF output to iframe for PRF mode
+      return this.request<{ success: boolean; error?: string; method?: 'prf' | 'gate' }>(
+        'setupPasskeyPRF',
+        {
+          rpId: config.rpId,
+          rpName: config.rpName,
+          credentialId: credential.rawId,
+          prfOutput: prfResults.results.first,
+        }
+      );
     } catch (error) {
       return {
         success: false,
@@ -371,6 +411,18 @@ export class KMSUser {
       credentialId?: ArrayBuffer;
       appSalt?: ArrayBuffer;
     } | null>('getPasskeyConfig');
+  }
+
+  /**
+   * Reset KMS (delete all keys and configuration)
+   *
+   * WARNING: This will permanently delete all keys and configuration.
+   *
+   * TODO: For production, this MUST be protected with user authentication
+   * (e.g., require passphrase or passkey verification before allowing reset)
+   */
+  async resetKMS(): Promise<{ success: boolean; error?: string }> {
+    return this.request<{ success: boolean; error?: string }>('resetKMS');
   }
 
   /**

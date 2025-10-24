@@ -187,6 +187,16 @@ document.getElementById('unlock-kms')!.addEventListener('click', async () => {
       // Check if unlock was successful
       if (result.success) {
         isLocked = false; // Mark as unlocked
+
+        // Extract VAPID kid from unlock result
+        if (result.keys && result.keys.length > 0) {
+          const vapidKey = result.keys.find(k => k.purpose === 'vapid');
+          if (vapidKey) {
+            vapidKid = vapidKey.kid;
+            console.log('[Parent] Restored VAPID kid from unlock:', vapidKid);
+          }
+        }
+
         displayOutput('✅ KMS Unlocked (Passphrase)', result);
         updateLockButton(); // Update button state
       } else {
@@ -198,6 +208,16 @@ document.getElementById('unlock-kms')!.addEventListener('click', async () => {
       // Check if unlock was successful
       if (result.success) {
         isLocked = false; // Mark as unlocked
+
+        // Extract VAPID kid from unlock result
+        if (result.keys && result.keys.length > 0) {
+          const vapidKey = result.keys.find(k => k.purpose === 'vapid');
+          if (vapidKey) {
+            vapidKid = vapidKey.kid;
+            console.log('[Parent] Restored VAPID kid from unlock:', vapidKid);
+          }
+        }
+
         displayOutput('✅ KMS Unlocked (Passkey)', result);
         updateLockButton(); // Update button state
       } else {

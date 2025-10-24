@@ -9,7 +9,7 @@
 // Imports
 // ============================================================================
 
-import { initDB, wrapKey, unwrapKey, getWrappedKey, getMeta } from './storage.js';
+import { initDB, wrapKey, unwrapKey, getWrappedKey, getMeta, getAllWrappedKeys } from './storage.js';
 import {
   initAuditLogger,
   logOperation,
@@ -826,6 +826,17 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           request.id,
           request.origin
         );
+
+        // If unlock successful, add list of keys with purpose metadata
+        if (result.success) {
+          const keys = await getAllWrappedKeys();
+          const keyList = keys.map(k => ({ kid: k.kid, purpose: k.purpose || 'unknown' }));
+          return {
+            id: request.id,
+            result: { ...result, keys: keyList },
+          };
+        }
+
         return {
           id: request.id,
           result,
@@ -963,6 +974,17 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           request.id,
           request.origin
         );
+
+        // If unlock successful, add list of keys with purpose metadata
+        if (result.success) {
+          const keys = await getAllWrappedKeys();
+          const keyList = keys.map(k => ({ kid: k.kid, purpose: k.purpose || 'unknown' }));
+          return {
+            id: request.id,
+            result: { ...result, keys: keyList },
+          };
+        }
+
         return {
           id: request.id,
           result,
@@ -1016,10 +1038,21 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         // No params needed - WebAuthn ceremony performed by client
 
         const result = await unlockWithPasskeyGateMethod(
-          
+
           request.id,
           request.origin
         );
+
+        // If unlock successful, add list of keys with purpose metadata
+        if (result.success) {
+          const keys = await getAllWrappedKeys();
+          const keyList = keys.map(k => ({ kid: k.kid, purpose: k.purpose || 'unknown' }));
+          return {
+            id: request.id,
+            result: { ...result, keys: keyList },
+          };
+        }
+
         return {
           id: request.id,
           result,

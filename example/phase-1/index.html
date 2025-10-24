@@ -90,7 +90,7 @@
     }
 
     .controls-container {
-      margin-bottom: 1.5rem;
+      margin-bottom: 0.5rem;
       margin-top: 2rem;
       position: sticky;
       top: 0;
@@ -106,8 +106,8 @@
     .controls-box {
       flex: 1;
       display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
+      align-items: center;
+      gap: 1rem;
       padding: 1.25rem;
       background: #f8f9fa;
       border-radius: 12px;
@@ -115,12 +115,25 @@
     }
 
     .controls-box h3 {
-      margin: 0 0 0.5rem 0;
+      margin: 0;
       font-size: 0.875rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: #667eea;
+      white-space: nowrap;
+    }
+
+    .controls-box-buttons {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      flex: 1;
+    }
+
+    .controls-box-buttons button {
+      flex: 1;
+      min-width: 150px;
     }
 
     .controls {
@@ -658,28 +671,46 @@
         <!-- Setup and Reset Row -->
         <div class="controls-row">
           <div class="controls-box">
-            <h3>Setup (Choose One)</h3>
-            <button id="stage1-passphrase-btn">🔐 Setup Passphrase</button>
-            <button id="stage1-passkey-btn">🔑 Setup Passkey (PRF)</button>
+            <h3>Setup (Choose One):</h3>
+            <div class="controls-box-buttons">
+              <button id="stage1-passphrase-btn">🔐 Setup Passphrase</button>
+              <button id="stage1-passkey-btn">🔑 Setup Passkey (PRF)</button>
+            </div>
           </div>
           <div class="controls-box">
-            <h3>Reset</h3>
-            <button id="delete-passkey-btn" class="danger" disabled>🗑️ Delete Passkey</button>
-            <button id="reset-btn" class="danger">🔄 Reset Demo</button>
+            <h3>Reset:</h3>
+            <div class="controls-box-buttons">
+              <button id="delete-passkey-btn" class="danger" disabled>🗑️ Delete Passkey</button>
+              <button id="reset-btn" class="danger">🔄 Reset Demo</button>
+            </div>
           </div>
         </div>
 
-        <!-- Main Demo Controls -->
-        <div class="controls">
-          <button id="stage2-btn" disabled>2️⃣ Generate VAPID</button>
-          <button id="stage3-btn" disabled>3️⃣ Sign JWT</button>
-          <button id="stage4-btn" disabled>4️⃣ Lock Worker</button>
-          <button id="stage5-btn" disabled>5️⃣ Unlock Worker</button>
-          <button id="stage6-btn" disabled>6️⃣ Persistence Test</button>
-          <button id="stage7-btn" disabled>7️⃣ Verify JWT</button>
-          <button id="stage8-btn" disabled>8️⃣ Verify Audit Chain</button>
-          <button id="stage9-btn" disabled>9️⃣ Tamper Detection</button>
-          <button id="scroll-to-output-btn" disabled>📜 View Artifacts</button>
+        <!-- Operations Row -->
+        <div class="controls-row">
+          <div class="controls-box">
+            <h3>Operations:</h3>
+            <div class="controls-box-buttons">
+              <button id="stage2-btn" disabled>2️⃣ Generate VAPID</button>
+              <button id="stage3-btn" disabled>3️⃣ Sign JWT</button>
+              <button id="stage4-btn" disabled>4️⃣ Lock Worker</button>
+              <button id="stage5-btn" disabled>5️⃣ Unlock Worker</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tests Row -->
+        <div class="controls-row">
+          <div class="controls-box">
+            <h3>Tests:</h3>
+            <div class="controls-box-buttons">
+              <button id="stage6-btn" disabled>6️⃣ Persistence Test</button>
+              <button id="stage7-btn" disabled>7️⃣ Verify JWT</button>
+              <button id="stage8-btn" disabled>8️⃣ Verify Audit Chain</button>
+              <button id="stage9-btn" disabled>9️⃣ Tamper Detection</button>
+              <button id="scroll-to-output-btn" disabled>📜 View Artifacts</button>
+            </div>
+          </div>
         </div>
       </div>
 

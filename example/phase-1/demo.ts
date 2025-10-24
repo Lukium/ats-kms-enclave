@@ -61,21 +61,18 @@ interface DemoState {
     afterValid: boolean;
     errors: string[];
   } | null;
+  chainHeadHash: string | null;
+  auditEntryHashes: Map<number, string>;
+  // Unlock method tracking
+  unlockMethod: 'passphrase' | 'passkey-prf' | 'passkey-gate' | null;
+  // Passkey metadata (for demo purposes - showing which passkey was created)
+  passkeyCredentialId: string | null;
+  // Signature conversion tracking (hidden in UI but needed for internal state)
   signatureConversion: {
     originalFormat: 'DER' | 'P-1363';
     originalBytes: Uint8Array;
     convertedBytes: Uint8Array;
     wasConverted: boolean;
-  } | null;
-  chainHeadHash: string | null;
-  auditEntryHashes: Map<number, string>;
-  // WebAuthn passkey state
-  passkeyCredentialId: string | null;
-  passkeyPublicKey: JsonWebKey | null;
-  passkeyAssertion: {
-    signature: Uint8Array;
-    derFormat: boolean;
-    converted: Uint8Array;
   } | null;
 }
 
@@ -140,13 +137,13 @@ const state: DemoState = {
   auditPublicKey: null,
   auditVerification: null,
   tamperTestResult: null,
-  signatureConversion: null,
   chainHeadHash: null,
   auditEntryHashes: new Map(),
-  // WebAuthn passkey state
+  // Unlock method tracking
+  unlockMethod: null,
+  // Passkey metadata
   passkeyCredentialId: null,
-  passkeyPublicKey: null,
-  passkeyAssertion: null,
+  signatureConversion: null,
 };
 
 // ============================================================================
@@ -196,19 +193,9 @@ function updateButtonStates(): void {
   // Scroll to output: enabled when we have any artifacts
   scrollBtn.disabled = !state.vapidKid && !state.jwt;
 
-  // Passkey buttons
-  const createPasskeyBtn = document.getElementById('create-passkey-btn') as HTMLButtonElement;
-  const unlockPasskeyBtn = document.getElementById('unlock-passkey-btn') as HTMLButtonElement;
+  // Delete passkey button: enabled when passkey unlock is configured
   const deletePasskeyBtn = document.getElementById('delete-passkey-btn') as HTMLButtonElement;
-
-  // Create passkey: always enabled (independent of demo flow)
-  createPasskeyBtn.disabled = !!state.passkeyCredentialId; // Disabled if already created
-
-  // Unlock with passkey: enabled when passkey exists
-  unlockPasskeyBtn.disabled = !state.passkeyCredentialId;
-
-  // Delete passkey: enabled when passkey exists
-  deletePasskeyBtn.disabled = !state.passkeyCredentialId;
+  deletePasskeyBtn.disabled = state.unlockMethod !== 'passkey-prf' && state.unlockMethod !== 'passkey-gate';
 }
 
 /**
@@ -289,39 +276,45 @@ function formatDuration(ms: number | null): string {
 // ============================================================================
 
 function renderSetupCard(): void {
-  const { setupComplete, passphrase, metrics, isLocked } = state;
+  const { setupComplete, unlockMethod, passphrase, metrics, isLocked } = state;
 
   const checks = [
     setupComplete
-      ? renderCheck('pass', 'Setup successful', 'Passphrase accepted and wrapping key derived')
-      : renderCheck('pending', 'Setup required', 'Create a passphrase to begin'),
+      ? renderCheck('pass', 'Setup successful', unlockMethod === 'passphrase' ? 'Passphrase accepted and wrapping key derived' : `Passkey configured (${unlockMethod === 'passkey-prf' ? 'PRF mode' : 'gate-only mode'})`)
+      : renderCheck('pending', 'Setup required', 'Choose passphrase or passkey to begin'),
 
-    setupComplete && passphrase
-      ? renderCheck('pass', `Passphrase length: ${passphrase.length} characters`, 'Minimum 8 characters required')
-      : renderCheck('pending', 'Passphrase strength: Pending', 'Will validate on setup'),
+    setupComplete && unlockMethod === 'passphrase' && passphrase
+      ? renderCheck('pass', `Passphrase: ${passphrase.length} characters`, 'Minimum 8 characters required')
+      : setupComplete && unlockMethod?.startsWith('passkey')
+      ? renderCheck('pass', `Passkey method: ${unlockMethod === 'passkey-prf' ? 'PRF (recommended)' : 'Gate-only (fallback)'}`, unlockMethod === 'passkey-prf' ? 'Uses hmac-secret PRF extension for key derivation' : 'Uses user verification as gate, static salt for key derivation')
+      : renderCheck('pending', 'Authentication method: Pending', 'Will configure on setup'),
+
+    setupComplete && unlockMethod === 'passphrase'
+      ? renderCheck('pass', 'Key derivation: PBKDF2 (600k iterations)', 'OWASP recommendation for 2025+')
+      : setupComplete && unlockMethod === 'passkey-prf'
+      ? renderCheck('pass', 'Key derivation: PRF + HKDF', 'PRF provides 32 bytes entropy, HKDF derives wrapping key')
+      : setupComplete && unlockMethod === 'passkey-gate'
+      ? renderCheck('pass', 'Key derivation: Static salt + HKDF', 'User verification gates access, HKDF derives wrapping key')
+      : renderCheck('pending', 'Key derivation: Pending', 'Will configure on setup'),
 
     setupComplete
-      ? renderCheck('pass', 'Salt generated (32 bytes)', 'Unique salt for PBKDF2 key derivation')
+      ? renderCheck('pass', 'Salt generated', unlockMethod === 'passkey-prf' ? '32 bytes app salt for PRF' : '32 bytes random salt')
       : renderCheck('pending', 'Salt generation: Pending', 'Will generate on setup'),
-
-    setupComplete
-      ? renderCheck('pass', 'Iterations: 600,000', 'OWASP recommendation for 2025+')
-      : renderCheck('pending', 'PBKDF2 iterations: Pending', 'Will use 600k iterations'),
 
     setupComplete && !isLocked
       ? renderCheck('pass', 'Worker unlocked', 'Ready for cryptographic operations')
       : setupComplete && isLocked
-      ? renderCheck('pending', 'Worker locked', 'Unlock with passphrase to perform operations')
+      ? renderCheck('pending', 'Worker locked', 'Unlock to perform operations')
       : renderCheck('pending', 'Worker state: Not setup', 'Will unlock after setup'),
 
     metrics.setupTime !== null
-      ? renderCheck('pass', `Setup time: ${formatDuration(metrics.setupTime)}`, 'Target: <2s (includes PBKDF2)')
+      ? renderCheck('pass', `Setup time: ${formatDuration(metrics.setupTime)}`, unlockMethod === 'passphrase' ? 'Target: <2s (includes PBKDF2)' : 'Target: <5s (includes WebAuthn ceremony)')
       : renderCheck('pending', 'Performance: Not measured', 'Will measure on setup'),
   ].join('');
 
   const card = renderCard(
     '🔧 Initial Setup',
-    '<strong>What happens:</strong> User creates a passphrase. System derives wrapping key with PBKDF2 (600k iterations). Wrapping key stored securely in Worker memory. System is now unlocked and ready.<br><br><strong>Note:</strong> This demo uses passphrases for testing purposes. In production, <strong>passkeys (WebAuthn) should be preferred</strong> as they provide stronger security with better UX. Passphrases should be offered as a less-recommended fallback option.',
+    '<strong>Passphrase mode:</strong> PBKDF2 (600k iterations) derives AES-GCM wrapping key directly from passphrase and 32-byte random salt.<br><br><strong>Passkey PRF mode (recommended):</strong> WebAuthn passkey + PRF extension provides 32 bytes pseudorandom output. HKDF-SHA-256 derives wrapping key from PRF output. Resistant to phishing and credential stuffing.<br><br><strong>Passkey gate-only mode (fallback):</strong> WebAuthn user verification gates access. HKDF-SHA-256 derives wrapping key from deterministic salt (backwards compatible with PRF mode).',
     checks
   );
 
@@ -584,12 +577,14 @@ function renderLockCard(): void {
 }
 
 function renderUnlockCard(): void {
-  const { isLocked, metrics } = state;
+  const { isLocked, unlockMethod, metrics } = state;
 
   const checks = [
-    !isLocked && state.setupComplete
-      ? renderCheck('pass', 'Passphrase verified', 'Correct passphrase provided')
-      : renderCheck('pending', 'Passphrase: Pending', 'Unlock worker to test'),
+    !isLocked && state.setupComplete && unlockMethod === 'passphrase'
+      ? renderCheck('pass', 'Authentication verified', 'Correct passphrase provided')
+      : !isLocked && state.setupComplete && unlockMethod?.startsWith('passkey')
+      ? renderCheck('pass', 'Authentication verified', 'Passkey authentication successful')
+      : renderCheck('pending', 'Authentication: Pending', 'Unlock worker to test'),
 
     !isLocked && state.setupComplete
       ? renderCheck('pass', 'Worker unlocked', 'Wrapping key re-derived and loaded')
@@ -600,13 +595,13 @@ function renderUnlockCard(): void {
       : renderCheck('pending', 'Key access: Pending', 'Unlock worker to verify'),
 
     metrics.unlockTime !== null
-      ? renderCheck('pass', `Unlock time: ${formatDuration(metrics.unlockTime)}`, 'Target: <2s (includes PBKDF2)')
+      ? renderCheck('pass', `Unlock time: ${formatDuration(metrics.unlockTime)}`, unlockMethod === 'passphrase' ? 'Target: <2s (includes PBKDF2)' : 'Target: <5s (includes WebAuthn)')
       : renderCheck('pending', 'Performance: Not measured', 'Will measure on unlock'),
   ].join('');
 
   const card = renderCard(
     '🔓 Unlock Worker',
-    '<strong>What happens:</strong> User provides passphrase. System re-derives wrapping key. Worker unlocked. Crypto operations resume.',
+    '<strong>Passphrase mode:</strong> User provides passphrase, system re-derives wrapping key via PBKDF2.<br><br><strong>Passkey PRF mode:</strong> User authenticates with passkey, PRF provides entropy, HKDF derives wrapping key.<br><br><strong>Passkey gate-only mode:</strong> User verification gates access, HKDF derives wrapping key from static salt.',
     checks
   );
 
@@ -735,186 +730,6 @@ function renderTamperDetectionCard(): void {
   document.getElementById('tamper-card')!.innerHTML = card;
 }
 
-function renderSignatureConversionCard(): void {
-  const conv = state.signatureConversion;
-
-  if (!conv) {
-    document.getElementById('sig-conversion-card')!.innerHTML = renderCard(
-      '🔄 Signature Format Conversion',
-      '<strong>What this shows:</strong> WebCrypto returns DER format, but JWS ES256 requires P-1363. If conversion didn\'t happen, all JWT validators would reject our tokens.',
-      renderCheck('pending', 'Conversion: Pending', 'Sign a JWT to see conversion details')
-    );
-    return;
-  }
-
-  // Convert bytes to hex string
-  const toHex = (bytes: Uint8Array, limit = 16): string => {
-    const preview = Array.from(bytes.slice(0, limit))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join(' ');
-    return bytes.length > limit ? `${preview} ...` : preview;
-  };
-
-  // Convert bytes to base64url
-  const toB64u = (bytes: Uint8Array): string => {
-    let s = '';
-    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-  };
-
-  const checks = [
-    renderCheck(
-      'info',
-      'Original Format',
-      `${conv.originalFormat} (${conv.originalBytes.length} bytes)`
-    ),
-    conv.originalFormat === 'DER'
-      ? renderCheck(
-          'info',
-          'Original (DER)',
-          `Leading byte: 0x${conv.originalBytes[0]?.toString(16).padStart(2, '0')} (DER SEQUENCE)`
-        )
-      : renderCheck('info', 'Original', `Already P-1363 (test environment)`),
-    renderCheck(
-      'info',
-      'Original hex (first 16 bytes)',
-      toHex(conv.originalBytes)
-    ),
-    renderCheck(
-      'info',
-      'Original base64url',
-      `${toB64u(conv.originalBytes).substring(0, 20)}... (${toB64u(conv.originalBytes).length} chars)`
-    ),
-    renderCheck(
-      conv.wasConverted ? 'pass' : 'info',
-      'Conversion',
-      conv.wasConverted ? '↓ Converted DER → P-1363' : 'No conversion needed'
-    ),
-    renderCheck(
-      'info',
-      'Output Format',
-      `P-1363 (${conv.convertedBytes.length} bytes, raw r‖s)`
-    ),
-    renderCheck(
-      'info',
-      'Output (P-1363)',
-      `Leading byte: 0x${conv.convertedBytes[0]?.toString(16).padStart(2, '0')} (r value start)`
-    ),
-    renderCheck(
-      'info',
-      'Output hex (first 16 bytes)',
-      toHex(conv.convertedBytes)
-    ),
-    renderCheck(
-      'info',
-      'Output base64url',
-      `${toB64u(conv.convertedBytes).substring(0, 20)}... (${toB64u(conv.convertedBytes).length} chars)`
-    ),
-    conv.wasConverted
-      ? renderCheck('pass', 'Result', '✅ Conversion successful, compatible with JWS ES256')
-      : renderCheck('pass', 'Result', '✅ Already in correct format'),
-  ].join('');
-
-  const card = renderCard(
-    '🔄 Signature Format Conversion (DER → P-1363)',
-    '<strong>Why this matters:</strong> WebCrypto returns DER format (70-72 bytes), but JWS ES256 requires P-1363 (64 bytes). If we didn\'t convert, all JWT validators would reject our tokens. This visualization proves the conversion works correctly.',
-    checks
-  );
-
-  document.getElementById('sig-conversion-card')!.innerHTML = card;
-}
-
-function renderPasskeyAssertionCard(): void {
-  const assertion = state.passkeyAssertion;
-
-  if (!assertion) {
-    document.getElementById('passkey-assertion-card')!.innerHTML = renderCard(
-      '🔑 WebAuthn Passkey Signature (DER Format)',
-      '<strong>What this shows:</strong> WebAuthn (passkeys) return signatures in DER format, NOT P-1363. This is where DER→P-1363 conversion is actually needed (for passkey unlock), NOT for JWT signing.',
-      renderCheck('pending', 'WebAuthn Demo: Pending', 'Click "Test Passkey (DER Demo)" to see real DER signatures')
-    );
-    return;
-  }
-
-  // Convert bytes to hex string
-  const toHex = (bytes: Uint8Array, limit = 16): string => {
-    const preview = Array.from(bytes.slice(0, limit))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join(' ');
-    return bytes.length > limit ? `${preview} ...` : preview;
-  };
-
-  // Convert bytes to base64url
-  const toB64u = (bytes: Uint8Array): string => {
-    let s = '';
-    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-  };
-
-  const checks = [
-    renderCheck(
-      assertion.derFormat ? 'pass' : 'fail',
-      'Format Detection',
-      assertion.derFormat
-        ? '✅ DER (ASN.1) format detected (starts with 0x30)'
-        : '❌ Not DER format'
-    ),
-    renderCheck(
-      'info',
-      'Original WebAuthn Signature',
-      `${assertion.signature.length} bytes (DER variable length)`
-    ),
-    renderCheck(
-      'info',
-      'Leading byte',
-      `0x${assertion.signature[0]?.toString(16).padStart(2, '0')} ${assertion.derFormat ? '(DER SEQUENCE tag)' : ''}`
-    ),
-    renderCheck(
-      'info',
-      'Hex preview (first 16 bytes)',
-      toHex(assertion.signature)
-    ),
-    renderCheck(
-      'info',
-      'Base64url',
-      `${toB64u(assertion.signature).substring(0, 20)}... (${toB64u(assertion.signature).length} chars)`
-    ),
-    renderCheck(
-      'pass',
-      'Conversion',
-      '↓ DER → P-1363 (for WebCrypto verify)'
-    ),
-    renderCheck(
-      'info',
-      'Converted P-1363 Signature',
-      `${assertion.converted.length} bytes (fixed length, raw r‖s)`
-    ),
-    renderCheck(
-      'info',
-      'Leading byte (P-1363)',
-      `0x${assertion.converted[0]?.toString(16).padStart(2, '0')} (r value start)`
-    ),
-    renderCheck(
-      'info',
-      'Hex preview (first 16 bytes)',
-      toHex(assertion.converted)
-    ),
-    renderCheck(
-      'pass',
-      'Result',
-      '✅ Ready for WebCrypto verify()'
-    ),
-  ].join('');
-
-  const card = renderCard(
-    '🔑 WebAuthn Passkey Signature (DER Format)',
-    '<strong>Key insight:</strong> WebAuthn (passkeys) return DER-encoded signatures. This is the ACTUAL place where DER→P-1363 conversion is needed, NOT for JWT signing (WebCrypto sign() already returns P-1363).<br><br><strong>Use case:</strong> When implementing passkey unlock, the assertion signature must be converted from DER to P-1363 before calling crypto.subtle.verify().',
-    checks
-  );
-
-  document.getElementById('passkey-assertion-card')!.innerHTML = card;
-}
-
 function renderJWTPolicyCard(): void {
   if (!state.jwt || !state.jwtParts) {
     document.getElementById('jwt-policy-card')!.innerHTML = renderCard(
@@ -972,8 +787,6 @@ function updateAllCards(): void {
   renderVAPIDCard();
   renderJWTCard();
   renderJWTPolicyCard();
-  renderSignatureConversionCard();
-  renderPasskeyAssertionCard();
   renderVerifyJWTCard();
   renderAuditPublicKeyCard();
   renderAuditVerificationCard();
@@ -1386,29 +1199,30 @@ async function createPasskey(): Promise<void> {
 }
 
 /**
- * Delete the stored passkey credential
+ * Delete/reset passkey unlock configuration
  */
 async function deletePasskey(): Promise<void> {
-  if (!state.passkeyCredentialId) {
-    alert('No passkey to delete');
+  if (state.unlockMethod !== 'passkey-prf' && state.unlockMethod !== 'passkey-gate') {
+    alert('No passkey configured. Use reset to clear passphrase setup.');
     return;
   }
 
-  // Clear passkey state
-  state.passkeyCredentialId = null;
-  state.passkeyPublicKey = null;
-  state.passkeyAssertion = null;
+  const confirmed = confirm(
+    'This will reset the unlock configuration.\n\n' +
+    'Note: WebAuthn does not provide an API to delete passkeys from your device. ' +
+    'To remove the passkey from your OS:\n' +
+    '• macOS: System Settings → Passwords → Search for "localhost"\n' +
+    '• Windows: Settings → Accounts → Passkeys → Remove "localhost"\n' +
+    '• Chrome: Settings → Password Manager → Passkeys\n\n' +
+    'Continue with reset?'
+  );
 
-  // Remove from localStorage
-  localStorage.removeItem('demo-passkey-credential-id');
+  if (!confirmed) return;
 
-  console.log('[Demo] Passkey deleted');
-  console.log('[Demo] Passkey credential ID removed from localStorage');
-  alert('Passkey deleted');
+  // Reset the entire demo
+  await resetDemo(true);
 
-  // Update UI
-  updateButtonStates();
-  updateAllCards();
+  alert('Passkey configuration reset.\n\nRemember to manually delete the passkey from your OS if desired.');
 }
 
 /**
@@ -1512,8 +1326,8 @@ function base64urlToBytes(str: string): Uint8Array {
 // Demo Stage Functions
 // ============================================================================
 
-async function stage1Setup(): Promise<void> {
-  const button = document.getElementById('stage1-btn') as HTMLButtonElement;
+async function stage1SetupPassphrase(): Promise<void> {
+  const button = document.getElementById('stage1-passphrase-btn') as HTMLButtonElement;
   button.disabled = true;
   button.textContent = 'Setting up...';
 
@@ -1524,14 +1338,14 @@ async function stage1Setup(): Promise<void> {
     // Initialize client if needed
     if (!client) {
       const startLoad = performance.now();
-      client = new KMSClient(new URL('../../src/worker.ts', import.meta.url).href);
+      client = new KMSClient();
       state.metrics.workerLoadTime = performance.now() - startLoad;
     }
 
     // Check if already setup
     const unlockStatus = await client.isUnlockSetup();
     if (unlockStatus.isSetup) {
-      alert('Passphrase is already configured. Use the reset button to start over.');
+      alert('Unlock is already configured. Use the reset button to start over.');
       button.disabled = true;
       button.textContent = '✓ Already Setup';
       return;
@@ -1542,7 +1356,7 @@ async function stage1Setup(): Promise<void> {
     if (!passphrase || passphrase.length < 8) {
       alert('Passphrase must be at least 8 characters');
       button.disabled = false;
-      button.textContent = '1️⃣ Setup Passphrase';
+      button.textContent = '🔐 Setup Passphrase';
       return;
     }
 
@@ -1559,6 +1373,14 @@ async function stage1Setup(): Promise<void> {
 
     state.setupComplete = true;
     state.isLocked = false;
+    state.unlockMethod = 'passphrase';
+
+    // Cache the method in localStorage for future sessions
+    localStorage.setItem('kms-passkey-method', 'passphrase');
+
+    // Disable both setup buttons
+    (document.getElementById('stage1-passphrase-btn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('stage1-passkey-btn') as HTMLButtonElement).disabled = true;
 
     // Update button states based on new state
     updateButtonStates();
@@ -1571,14 +1393,121 @@ async function stage1Setup(): Promise<void> {
     await loadAuditLog();
     renderAuditLog();
 
-    button.textContent = '✓ Setup Complete';
+    button.textContent = '✓ Passphrase Setup Complete';
     setTimeout(() => {
-      button.textContent = '1️⃣ Setup Passphrase';
-      button.disabled = true; // Setup can only be done once
+      button.textContent = '🔐 Setup Passphrase';
     }, 2000);
   } catch (error) {
     alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    button.textContent = '1️⃣ Setup Passphrase';
+    button.textContent = '🔐 Setup Passphrase';
+    button.disabled = false;
+  }
+}
+
+async function stage1SetupPasskey(): Promise<void> {
+  const button = document.getElementById('stage1-passkey-btn') as HTMLButtonElement;
+  button.disabled = true;
+  button.textContent = 'Setting up...';
+
+  // Scroll to setup card
+  scrollToCard('setup');
+
+  try {
+    // Initialize client if needed
+    if (!client) {
+      const startLoad = performance.now();
+      client = new KMSClient();
+      state.metrics.workerLoadTime = performance.now() - startLoad;
+    }
+
+    // Check if already setup
+    const unlockStatus = await client.isUnlockSetup();
+    if (unlockStatus.isSetup) {
+      alert('Unlock is already configured. Use the reset button to start over.');
+      button.disabled = true;
+      button.textContent = '✓ Already Setup';
+      return;
+    }
+
+    // Determine RP ID (use 'localhost' for local development)
+    const rpId = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'localhost'
+      : window.location.hostname;
+    const rpName = 'ATS KMS Demo';
+
+    console.log('[Demo] Setting up passkey with RP ID:', rpId);
+
+    const startSetup = performance.now();
+
+    // Smart auto-fallback: setupPasskeyPRF tries PRF first, automatically falls back to gate-only
+    // if PRF not supported, reusing the same credential (no double authentication!)
+    const result = await client.setupPasskeyPRF(rpId, rpName);
+
+    state.metrics.setupTime = performance.now() - startSetup;
+
+    if (!result.success) {
+      throw new Error(result.error || 'Passkey setup failed');
+    }
+
+    // Determine which method was used (returned by setupPasskeyPRF)
+    const usedMethod = result.method === 'gate' ? 'passkey-gate' : 'passkey-prf';
+    const fallbackReason = result.method === 'gate'
+      ? 'PRF extension not available on this device/browser'
+      : null;
+
+    state.setupComplete = true;
+    state.isLocked = false;
+    state.unlockMethod = usedMethod;
+
+    // Cache the method in localStorage for future sessions
+    localStorage.setItem('kms-passkey-method', usedMethod);
+
+    console.log('[Demo] Passkey setup successful using', usedMethod);
+
+    // Show user-friendly message about which mode was used
+    if (usedMethod === 'passkey-gate') {
+      setTimeout(() => {
+        alert(
+          '✓ Passkey created successfully!\n\n' +
+          'Mode: Basic (gate-only)\n' +
+          `Reason: ${fallbackReason}\n\n` +
+          'Security note: Your passkey still provides strong authentication, ' +
+          'but uses a different key derivation method.'
+        );
+      }, 100);
+    } else {
+      setTimeout(() => {
+        alert(
+          '✓ Passkey created successfully!\n\n' +
+          'Mode: Advanced (PRF)\n' +
+          'Your device supports the PRF extension for enhanced key derivation.'
+        );
+      }, 100);
+    }
+
+    // Disable both setup buttons
+    (document.getElementById('stage1-passphrase-btn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('stage1-passkey-btn') as HTMLButtonElement).disabled = true;
+
+    // Update button states based on new state
+    updateButtonStates();
+
+    updateAllCards();
+    renderOutput();
+    renderPerformance();
+
+    // Reload audit log
+    await loadAuditLog();
+    renderAuditLog();
+
+    button.textContent = usedMethod === 'passkey-prf' ? '✓ Passkey Setup (PRF)' : '✓ Passkey Setup (Gate-only)';
+    setTimeout(() => {
+      button.textContent = '🔑 Setup Passkey (PRF)';
+    }, 2000);
+  } catch (error) {
+    console.error('[Demo] Passkey setup failed:', error);
+    alert(`Passkey setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    button.textContent = '🔑 Setup Passkey (PRF)';
     button.disabled = false;
   }
 }
@@ -1809,18 +1738,82 @@ async function stage5UnlockWorker(): Promise<void> {
   scrollToCard('unlock');
 
   try {
-    const passphrase = prompt('Enter passphrase to unlock:');
-    if (!passphrase) {
-      button.disabled = false;
-      button.textContent = '5️⃣ Unlock Worker';
-      return;
+    const startUnlock = performance.now();
+    let result: { success: boolean; error?: string };
+
+    // If unlock method is unknown (e.g., after page refresh), try to restore from cache
+    if (!state.unlockMethod) {
+      const cachedMethod = localStorage.getItem('kms-passkey-method') as 'passkey-prf' | 'passkey-gate' | null;
+
+      if (cachedMethod) {
+        console.log('[Demo] Restored unlock method from cache:', cachedMethod);
+        state.unlockMethod = cachedMethod;
+      } else {
+        // Check if setup exists in storage to infer method
+        const { isSetup } = await client!.isUnlockSetup();
+
+        if (!isSetup) {
+          alert('No unlock configuration found. Please complete setup first (Stage 1).');
+          button.disabled = false;
+          button.textContent = '5️⃣ Unlock Worker';
+          return;
+        }
+
+        // Last resort: ask user
+        const method = prompt(
+          'Unlock method not detected. Please select:\n' +
+          '1 = Passphrase\n' +
+          '2 = Passkey (PRF mode)\n' +
+          '3 = Passkey (gate-only mode)\n\n' +
+          'Enter 1, 2, or 3:'
+        );
+
+        if (method === '1') {
+          state.unlockMethod = 'passphrase';
+        } else if (method === '2') {
+          state.unlockMethod = 'passkey-prf';
+        } else if (method === '3') {
+          state.unlockMethod = 'passkey-gate';
+        } else {
+          button.disabled = false;
+          button.textContent = '5️⃣ Unlock Worker';
+          return;
+        }
+      }
     }
 
-    // Store passphrase in state for future use (e.g., lock/unlock cycles)
-    state.passphrase = passphrase;
+    // Determine unlock method and call appropriate function
+    if (state.unlockMethod === 'passphrase') {
+      // Passphrase unlock
+      const passphrase = prompt('Enter passphrase to unlock:');
+      if (!passphrase) {
+        button.disabled = false;
+        button.textContent = '5️⃣ Unlock Worker';
+        return;
+      }
 
-    const startUnlock = performance.now();
-    const result = await client!.unlockWithPassphrase(passphrase);
+      state.passphrase = passphrase;
+      result = await client!.unlockWithPassphrase(passphrase);
+    } else if (state.unlockMethod === 'passkey-prf') {
+      // Passkey PRF unlock
+      const rpId = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'localhost'
+        : window.location.hostname;
+
+      console.log('[Demo] Unlocking with passkey PRF, RP ID:', rpId);
+      result = await client!.unlockWithPasskeyPRF(rpId);
+    } else if (state.unlockMethod === 'passkey-gate') {
+      // Passkey gate-only unlock
+      const rpId = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'localhost'
+        : window.location.hostname;
+
+      console.log('[Demo] Unlocking with passkey gate-only, RP ID:', rpId);
+      result = await client!.unlockWithPasskeyGate(rpId);
+    } else {
+      throw new Error('Unknown unlock method');
+    }
+
     state.metrics.unlockTime = performance.now() - startUnlock;
 
     if (!result.success) {
@@ -1846,7 +1839,8 @@ async function stage5UnlockWorker(): Promise<void> {
       updateButtonStates();
     }, 2000);
   } catch (error) {
-    alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.error('[Demo] Unlock failed:', error);
+    alert(`Unlock failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     button.textContent = '5️⃣ Unlock Worker';
     updateButtonStates(); // Update based on state
   }
@@ -2156,7 +2150,9 @@ async function resetDemo(silent = false): Promise<void> {
     signatureConversion: null,
     chainHeadHash: null,
     auditEntryHashes: new Map(),
-    // WebAuthn passkey state
+    // Unlock method
+    unlockMethod: null,
+    // WebAuthn passkey state (demo only)
     passkeyCredentialId: null,
     passkeyPublicKey: null,
     passkeyAssertion: null,
@@ -2164,12 +2160,15 @@ async function resetDemo(silent = false): Promise<void> {
 
   // Clear passkey from localStorage
   localStorage.removeItem('demo-passkey-credential-id');
+  localStorage.removeItem('kms-passkey-method');
 
-  // Re-enable setup button and reset state
-  const setupBtn = document.getElementById('stage1-btn') as HTMLButtonElement;
-  setupBtn.disabled = false;
-  setupBtn.textContent = '1️⃣ Setup Passphrase';
-  setupBtn.title = '';
+  // Re-enable both setup buttons
+  const passphraseBtn = document.getElementById('stage1-passphrase-btn') as HTMLButtonElement;
+  const passkeyBtn = document.getElementById('stage1-passkey-btn') as HTMLButtonElement;
+  passphraseBtn.disabled = false;
+  passphraseBtn.textContent = '🔐 Setup Passphrase';
+  passkeyBtn.disabled = false;
+  passkeyBtn.textContent = '🔑 Setup Passkey (PRF)';
 
   // Update button states based on reset state
   updateButtonStates();
@@ -2245,24 +2244,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     // Initialize client to check unlock status
     if (!client) {
-      client = new KMSClient(new URL('../../src/worker.ts', import.meta.url).href);
+      client = new KMSClient();
     }
 
     const unlockStatus = await client.isUnlockSetup();
 
     if (unlockStatus.isSetup) {
-      // Passphrase is already configured
-      console.log('[Demo] Unlock already configured - disabling setup button');
+      // Unlock is already configured
+      console.log('[Demo] Unlock already configured');
 
-      // Disable setup button
-      const setupBtn = document.getElementById('stage1-btn') as HTMLButtonElement;
-      setupBtn.disabled = true;
-      setupBtn.textContent = '✓ Already Setup';
-      setupBtn.title = 'Passphrase already configured. Use unlock or reset to start over.';
+      // Disable both setup buttons
+      const passphraseBtn = document.getElementById('stage1-passphrase-btn') as HTMLButtonElement;
+      const passkeyBtn = document.getElementById('stage1-passkey-btn') as HTMLButtonElement;
+      passphraseBtn.disabled = true;
+      passphraseBtn.textContent = '✓ Already Setup';
+      passkeyBtn.disabled = true;
+      passkeyBtn.textContent = '✓ Already Setup';
 
       // Update state to reflect existing setup
       state.setupComplete = true;
       state.isLocked = true; // After page refresh, worker is locked
+
+      // Try to detect unlock method by checking stored metadata
+      // Note: We can't directly read the method without unlocking, so we'll set it to null
+      // and require the user to unlock to resume
+      state.unlockMethod = null; // Will be determined on unlock
 
       // Load key info if we have stored keys
       if (state.storedKeys.length > 0) {
@@ -2311,7 +2317,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('reset-btn')!.addEventListener('click', () => resetDemo());
 
   // Bind passkey buttons
-  document.getElementById('create-passkey-btn')!.addEventListener('click', createPasskey);
   document.getElementById('unlock-passkey-btn')!.addEventListener('click', unlockWithPasskey);
   document.getElementById('delete-passkey-btn')!.addEventListener('click', deletePasskey);
 

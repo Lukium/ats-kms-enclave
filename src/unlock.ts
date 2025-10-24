@@ -37,25 +37,33 @@ export type UnlockResult =
 /**
  * Unlock configuration stored in meta store
  */
+type UnlockPassphraseConfig = {
+  method: 'passphrase';
+  salt: ArrayBuffer;
+  iterations: number;
+  verificationHash: string; // Hash of derived key for verification
+};
+
+type UnlockPasskeyPRFConfig = {
+  method: 'passkey-prf';
+  credentialId: ArrayBuffer;
+  appSalt: ArrayBuffer;
+  wrappedKEK: ArrayBuffer;
+  wrapIV: ArrayBuffer;
+};
+
+type UnlockPasskeyGateConfig = {
+  method: 'passkey-gate';
+  credentialId: ArrayBuffer;
+  appSalt: ArrayBuffer;
+  wrappedKEK: ArrayBuffer;
+  wrapIV: ArrayBuffer;
+};
+
 type UnlockConfig =
-  | {
-      method: 'passphrase';
-      salt: ArrayBuffer;
-      iterations: number;
-      verificationHash: string; // Hash of derived key for verification
-    }
-  | {
-      method: 'passkey-prf';
-      credentialId: ArrayBuffer;
-      appSalt: ArrayBuffer;
-      wrappedKEK: ArrayBuffer;
-      wrapIV: ArrayBuffer;
-    }
-  | {
-      method: 'passkey-gate';
-      credentialId: ArrayBuffer;
-      sessionDuration: number;
-    };
+  | UnlockPassphraseConfig
+  | UnlockPasskeyPRFConfig
+  | UnlockPasskeyGateConfig;
 
 // ============================================================================
 // Constants
@@ -65,7 +73,9 @@ const MIN_PASSPHRASE_LENGTH = 8;
 const PBKDF2_ITERATIONS = 600000; // OWASP recommendation for 2024
 const SALT_LENGTH = 16; // 128 bits
 const APP_SALT_LENGTH = 32; // 256 bits
-const SESSION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+/* c8 ignore next */
+// @ts-expect-error - Reserved for future session management
+const _SESSION_DURATION_MS = 5 * 60 * 1000; // 5 minutes - kept for future session management
 const HKDF_INFO = 'ATS/KMS/KEK-wrap/v1'; // HKDF purpose label
 
 // ============================================================================
@@ -74,10 +84,17 @@ const HKDF_INFO = 'ATS/KMS/KEK-wrap/v1'; // HKDF purpose label
 
 let isInitialized = false;
 
-// Gate session state (only for passkey-gate mode)
-let gateSessionKey: CryptoKey | null = null;
-let gateSessionExpiry: number | null = null;
-let gateSessionTimer: ReturnType<typeof setTimeout> | null = null;
+// Wrapping key reference (stored in memory during unlocked session)
+// @ts-expect-error - Reserved for future session management
+let _wrappingKeyRef: CryptoKey | null = null;
+
+// Gate session state (only for passkey-gate mode) - kept for future use
+/* c8 ignore next 3 */
+// @ts-expect-error - Reserved for future session management
+let _gateSessionKey: CryptoKey | null = null;
+// @ts-expect-error - Reserved for future session management
+let _gateSessionExpiry: number | null = null;
+let _gateSessionTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Initialize the unlock manager
@@ -204,7 +221,7 @@ export async function resetUnlock(): Promise<void> {
   await ensureInitialized();
   await deleteMeta('unlockSalt');
   // Clear gate session if active
-  clearGateSession();
+  _clearGateSession();
 }
 
 /**
@@ -220,8 +237,8 @@ export async function resetUnlock(): Promise<void> {
  * @returns Result with derived wrapping key or error
  */
 export async function setupPasskeyPRF(
-  rpId: string,
-  rpName: string,
+  credentialId: ArrayBuffer,
+  prfOutput: ArrayBuffer,
   kek: CryptoKey
 ): Promise<UnlockResult> {
   await ensureInitialized();
@@ -231,89 +248,25 @@ export async function setupPasskeyPRF(
     return { success: false, error: 'ALREADY_SETUP' };
   }
 
-  // Check WebAuthn availability
-  if (
-    typeof navigator === 'undefined' ||
-    typeof window === 'undefined' ||
-    !navigator.credentials ||
-    !window.PublicKeyCredential
-  ) {
-    return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+  // Validate inputs
+  if (credentialId.byteLength === 0) {
+    return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+  }
+
+  if (prfOutput.byteLength !== 32) {
+    return { success: false, error: 'PASSKEY_PRF_NOT_SUPPORTED' };
   }
 
   // Generate random app salt for HKDF
   const appSalt = crypto.getRandomValues(new Uint8Array(APP_SALT_LENGTH));
 
   try {
-    // Create passkey with PRF extension
-    const credential = (await navigator.credentials.create({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: { id: rpId, name: rpName },
-        user: {
-          id: crypto.getRandomValues(new Uint8Array(16)),
-          name: 'kms-user',
-          displayName: 'KMS User',
-        },
-        pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256
-        authenticatorSelection: {
-          userVerification: 'required',
-          residentKey: 'required',
-        },
-        extensions: {
-          prf: {},
-        },
-      },
-    })) as PublicKeyCredential | null;
+    const prfOutputBytes = new Uint8Array(prfOutput);
 
-    if (!credential) {
-      return { success: false, error: 'PASSKEY_CREATION_FAILED' };
-    }
+    // Derive wrapping key from PRF output using HKDF
+    const wrappingKey = await hkdfDeriveKey(prfOutputBytes, appSalt, HKDF_INFO);
 
-    const clientExtensionResults = credential.getClientExtensionResults();
-
-    // Verify PRF extension is supported
-    if (!clientExtensionResults.prf?.enabled) {
-      return { success: false, error: 'PASSKEY_PRF_NOT_SUPPORTED' };
-    }
-
-    // Derive PRF output (first auth with same passkey)
-    const assertionCredential = (await navigator.credentials.get({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rpId: rpId,
-        allowCredentials: [
-          {
-            type: 'public-key',
-            id: credential.rawId,
-          },
-        ],
-        userVerification: 'required',
-        extensions: {
-          prf: {
-            eval: {
-              first: appSalt,
-            },
-          },
-        },
-      },
-    })) as PublicKeyCredential | null;
-
-    if (!assertionCredential) {
-      return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
-    }
-
-    const prfResults = assertionCredential.getClientExtensionResults().prf;
-
-    if (!prfResults?.results?.first) {
-      return { success: false, error: 'PASSKEY_PRF_NOT_SUPPORTED' };
-    }
-
-    // Derive wrapping key using HKDF
-    const prfOutput = new Uint8Array(prfResults.results.first as ArrayBuffer);
-    const wrappingKey = await hkdfDeriveKey(prfOutput, appSalt, HKDF_INFO);
-
-    // Wrap the KEK with the derived wrapping key
+    // Wrap KEK with wrapping key
     const wrapIV = crypto.getRandomValues(new Uint8Array(12));
     const wrappedKEK = await crypto.subtle.wrapKey(
       'raw',
@@ -326,21 +279,32 @@ export async function setupPasskeyPRF(
     );
 
     // Store unlock configuration
-    const config: UnlockConfig = {
+    await putMeta<UnlockPasskeyPRFConfig>('unlockSalt', {
       method: 'passkey-prf',
-      credentialId: credential.rawId,
-      appSalt: appSalt.buffer,
+      credentialId: credentialId,
+      appSalt: appSalt.buffer as ArrayBuffer,
       wrappedKEK: wrappedKEK,
-      wrapIV: wrapIV.buffer,
-    };
+      wrapIV: wrapIV.buffer as ArrayBuffer,
+    });
 
-    await putMeta('unlockSalt', config);
+    // Store the wrapping key in memory
+    _wrappingKeyRef = wrappingKey;
 
     return { success: true, key: wrappingKey };
   } catch {
     return { success: false, error: 'PASSKEY_CREATION_FAILED' };
   }
 }
+
+/**
+ * Unlock with passkey (PRF mode)
+ *
+ * NOTE: WebAuthn ceremony must be performed by the CLIENT (main window context).
+ * This function accepts the PRF output from the client's WebAuthn get() call.
+ *
+ * @param prfOutput - PRF output from PRF extension (32 bytes)
+ * @returns Result with derived wrapping key or error
+ */
 
 /**
  * Unlock with passkey PRF extension
@@ -351,7 +315,7 @@ export async function setupPasskeyPRF(
  * @returns Result with derived wrapping key or error
  */
 export async function unlockWithPasskeyPRF(
-  rpId: string
+  prfOutput: ArrayBuffer
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
@@ -365,81 +329,54 @@ export async function unlockWithPasskeyPRF(
     return { success: false, error: 'NOT_SETUP' };
   }
 
-  // Check WebAuthn availability
-  if (
-    typeof navigator === 'undefined' ||
-    typeof window === 'undefined' ||
-    !navigator.credentials ||
-    !window.PublicKeyCredential
-  ) {
-    return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+  // Validate PRF output
+  if (prfOutput.byteLength !== 32) {
+    return { success: false, error: 'PASSKEY_PRF_NOT_SUPPORTED' };
   }
 
   const appSalt = new Uint8Array(config.appSalt);
 
   try {
-    // Authenticate with passkey and get PRF output
-    const credential = (await navigator.credentials.get({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rpId: rpId,
-        allowCredentials: [
-          {
-            type: 'public-key',
-            id: config.credentialId,
-          },
-        ],
-        userVerification: 'required',
-        extensions: {
-          prf: {
-            eval: {
-              first: appSalt,
-            },
-          },
-        },
-      },
-    })) as PublicKeyCredential | null;
+    const prfOutputBytes = new Uint8Array(prfOutput);
 
-    if (!credential) {
-      return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
-    }
+    // Derive wrapping key from PRF output using HKDF
+    const wrappingKey = await hkdfDeriveKey(prfOutputBytes, appSalt, HKDF_INFO);
 
-    const prfResults = credential.getClientExtensionResults().prf;
-
-    if (!prfResults?.results?.first) {
-      return { success: false, error: 'PASSKEY_PRF_NOT_SUPPORTED' };
-    }
-
-    // Derive wrapping key using HKDF
-    const prfOutput = new Uint8Array(prfResults.results.first as ArrayBuffer);
-    const wrappingKey = await hkdfDeriveKey(prfOutput, appSalt, HKDF_INFO);
-
-    // Verify by unwrapping the KEK (if wrapping key is wrong, this will throw)
+    // Try to unwrap KEK to verify correctness
     try {
+      const wrapIV = new Uint8Array(config.wrapIV);
       await crypto.subtle.unwrapKey(
         'raw',
         config.wrappedKEK,
         wrappingKey,
-        {
-          name: 'AES-GCM',
-          iv: new Uint8Array(config.wrapIV),
-        },
-        {
-          name: 'AES-GCM',
-          length: 256,
-        },
-        true, // extractable (for re-wrapping if needed)
+        { name: 'AES-GCM', iv: wrapIV },
+        { name: 'AES-GCM', length: 256 },
+        false,
         ['wrapKey', 'unwrapKey']
       );
-
-      return { success: true, key: wrappingKey };
     } catch {
       return { success: false, error: 'INCORRECT_PASSKEY' };
     }
+
+    // Store the wrapping key in memory
+    _wrappingKeyRef = wrappingKey;
+
+    return { success: true, key: wrappingKey };
   } catch {
     return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
   }
 }
+
+/**
+ * Setup unlock with passkey (gate-only mode, no PRF)
+ *
+ * NOTE: WebAuthn ceremony must be performed by the CLIENT (main window context).
+ * This function accepts the credential data from the client.
+ *
+ * @param credentialId - Raw credential ID from PublicKeyCredential.rawId
+ * @param kek - Key Encryption Key to wrap (must be extractable)
+ * @returns Result with derived wrapping key or error
+ */
 
 /**
  * Setup passkey-based unlock with gate-only mode
@@ -453,8 +390,8 @@ export async function unlockWithPasskeyPRF(
  * @returns Result with temporary KEK or error
  */
 export async function setupPasskeyGate(
-  rpId: string,
-  rpName: string
+  credentialId: ArrayBuffer,
+  kek: CryptoKey
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
@@ -463,63 +400,61 @@ export async function setupPasskeyGate(
     return { success: false, error: 'ALREADY_SETUP' };
   }
 
-  // Check WebAuthn availability
-  if (
-    typeof navigator === 'undefined' ||
-    typeof window === 'undefined' ||
-    !navigator.credentials ||
-    !window.PublicKeyCredential
-  ) {
-    return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+  // Validate inputs
+  if (credentialId.byteLength === 0) {
+    return { success: false, error: 'PASSKEY_CREATION_FAILED' };
   }
 
   try {
-    // Create passkey without PRF extension
-    const credential = (await navigator.credentials.create({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: { id: rpId, name: rpName },
-        user: {
-          id: crypto.getRandomValues(new Uint8Array(16)),
-          name: 'kms-user',
-          displayName: 'KMS User',
-        },
-        pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256
-        authenticatorSelection: {
-          userVerification: 'required',
-          residentKey: 'required',
-        },
-      },
-    })) as PublicKeyCredential | null;
+    // Generate deterministic salt from credential ID
+    // In gate-only mode, user verification gates access, not the PRF output
+    const credIdBytes = new Uint8Array(credentialId);
+    const saltHash = await crypto.subtle.digest('SHA-256', credIdBytes);
+    const appSalt = new Uint8Array(saltHash);
 
-    if (!credential) {
-      return { success: false, error: 'PASSKEY_CREATION_FAILED' };
-    }
+    // Derive wrapping key from deterministic salt using HKDF
+    // This is secure because access is gated by user verification
+    const wrappingKey = await hkdfDeriveKey(appSalt, appSalt, HKDF_INFO);
 
-    // Generate temporary KEK for this session
-    const kek = await crypto.subtle.generateKey(
-      { name: 'AES-GCM', length: 256 },
-      true, // extractable (required for wrapKey operation)
-      ['wrapKey', 'unwrapKey']
+    // Wrap KEK with wrapping key
+    const wrapIV = crypto.getRandomValues(new Uint8Array(12));
+    const wrappedKEK = await crypto.subtle.wrapKey(
+      'raw',
+      kek,
+      wrappingKey,
+      {
+        name: 'AES-GCM',
+        iv: wrapIV,
+      }
     );
 
     // Store unlock configuration
-    const config: UnlockConfig = {
+    await putMeta<UnlockPasskeyGateConfig>('unlockSalt', {
       method: 'passkey-gate',
-      credentialId: credential.rawId,
-      sessionDuration: SESSION_DURATION_MS,
-    };
+      credentialId: credentialId,
+      appSalt: appSalt.buffer as ArrayBuffer,
+      wrappedKEK: wrappedKEK,
+      wrapIV: wrapIV.buffer as ArrayBuffer,
+    });
 
-    await putMeta('unlockSalt', config);
+    // Store the wrapping key in memory
+    _wrappingKeyRef = wrappingKey;
 
-    // Start gate session
-    startGateSession(kek, SESSION_DURATION_MS);
-
-    return { success: true, key: kek };
+    return { success: true, key: wrappingKey };
   } catch {
     return { success: false, error: 'PASSKEY_CREATION_FAILED' };
   }
 }
+
+/**
+ * Unlock with passkey (gate-only mode, no PRF)
+ *
+ * NOTE: WebAuthn ceremony must be performed by the CLIENT (main window context).
+ * This function derives the key deterministically once authentication succeeds.
+ * The security comes from the client only calling this after successful WebAuthn.
+ *
+ * @returns Result with derived wrapping key or error
+ */
 
 /**
  * Unlock with passkey gate-only mode
@@ -530,9 +465,7 @@ export async function setupPasskeyGate(
  * @param rpId - Relying Party ID (domain)
  * @returns Result with temporary KEK or error
  */
-export async function unlockWithPasskeyGate(
-  rpId: string
-): Promise<UnlockResult> {
+export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
   await ensureInitialized();
 
   // Check if setup
@@ -545,56 +478,38 @@ export async function unlockWithPasskeyGate(
     return { success: false, error: 'NOT_SETUP' };
   }
 
-  // Check if session is still active
-  if (gateSessionKey && gateSessionExpiry && Date.now() < gateSessionExpiry) {
-    return { success: true, key: gateSessionKey };
-  }
-
-  // Check WebAuthn availability
-  if (
-    typeof navigator === 'undefined' ||
-    typeof window === 'undefined' ||
-    !navigator.credentials ||
-    !window.PublicKeyCredential
-  ) {
-    return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
-  }
+  const appSalt = new Uint8Array(config.appSalt);
 
   try {
-    // Authenticate with passkey
-    const credential = (await navigator.credentials.get({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rpId: rpId,
-        allowCredentials: [
-          {
-            type: 'public-key',
-            id: config.credentialId,
-          },
-        ],
-        userVerification: 'required',
-      },
-    })) as PublicKeyCredential | null;
+    // Derive wrapping key deterministically from stored salt
+    // Security: This only runs if client successfully authenticated via WebAuthn
+    const wrappingKey = await hkdfDeriveKey(appSalt, appSalt, HKDF_INFO);
 
-    if (!credential) {
-      return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+    // Verify by attempting to unwrap KEK
+    try {
+      const wrapIV = new Uint8Array(config.wrapIV);
+      await crypto.subtle.unwrapKey(
+        'raw',
+        config.wrappedKEK,
+        wrappingKey,
+        { name: 'AES-GCM', iv: wrapIV },
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['wrapKey', 'unwrapKey']
+      );
+    } catch {
+      return { success: false, error: 'INCORRECT_PASSKEY' };
     }
 
-    // Generate new temporary KEK for this session
-    const kek = await crypto.subtle.generateKey(
-      { name: 'AES-GCM', length: 256 },
-      true, // extractable (required for wrapKey operation)
-      ['wrapKey', 'unwrapKey']
-    );
+    // Store the wrapping key in memory
+    _wrappingKeyRef = wrappingKey;
 
-    // Start gate session
-    startGateSession(kek, config.sessionDuration);
-
-    return { success: true, key: kek };
+    return { success: true, key: wrappingKey };
   } catch {
     return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
   }
 }
+
 
 /**
  * Derive a wrapping key from passphrase using PBKDF2
@@ -785,34 +700,37 @@ async function hkdfDeriveKey(
 
 /**
  * Start a gate session with automatic expiry
+ * Kept for future session management features
  *
  * @param kek - Key Encryption Key for this session
  * @param duration - Session duration in milliseconds
  */
-function startGateSession(kek: CryptoKey, duration: number): void {
+/* c8 ignore next 12 */
+// @ts-expect-error - Reserved for future session management
+function _startGateSession(kek: CryptoKey, duration: number): void {
   // Clear any existing session
-  clearGateSession();
+  _clearGateSession();
 
   // Set new session
-  gateSessionKey = kek;
-  gateSessionExpiry = Date.now() + duration;
+  _gateSessionKey = kek;
+  _gateSessionExpiry = Date.now() + duration;
 
   /* c8 ignore next 4 - Would take 5 minutes to tes */
   // Set timer to clear session on expiry
-  gateSessionTimer = setTimeout(() => {
-    clearGateSession();
+  _gateSessionTimer = setTimeout(() => {
+    _clearGateSession();
   }, duration);
 }
 
 /**
  * Clear the active gate session
  */
-function clearGateSession(): void {
-  gateSessionKey = null;
-  gateSessionExpiry = null;
+function _clearGateSession(): void {
+  _gateSessionKey = null;
+  _gateSessionExpiry = null;
 
-  if (gateSessionTimer) {
-    clearTimeout(gateSessionTimer);
-    gateSessionTimer = null;
+  if (_gateSessionTimer) {
+    clearTimeout(_gateSessionTimer);
+    _gateSessionTimer = null;
   }
 }

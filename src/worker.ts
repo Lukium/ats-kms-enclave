@@ -223,8 +223,8 @@ async function isUnlockSetup(): Promise<{ isSetup: boolean }> {
  * Setup passkey with PRF extension
  */
 async function setupPasskeyPRFMethod(
-  rpId: string,
-  rpName: string,
+  credentialId: ArrayBuffer,
+  prfOutput: ArrayBuffer,
   requestId: string,
   origin?: string
 ): Promise<{ success: boolean; error?: string }> {
@@ -243,7 +243,8 @@ async function setupPasskeyPRFMethod(
   );
 
   // Call unlock manager to setup passkey with PRF
-  const result = await setupPasskeyPRF(rpId, rpName, kek);
+  // WebAuthn ceremony was performed by client, this accepts the results
+  const result = await setupPasskeyPRF(credentialId, prfOutput, kek);
 
   if (!result.success) {
     return { success: false, error: result.error };
@@ -269,7 +270,7 @@ async function setupPasskeyPRFMethod(
  * Unlock with passkey using PRF extension
  */
 async function unlockWithPasskeyPRFMethod(
-  rpId: string,
+  prfOutput: ArrayBuffer,
   requestId: string,
   origin?: string
 ): Promise<{ success: boolean; error?: string }> {
@@ -277,7 +278,8 @@ async function unlockWithPasskeyPRFMethod(
   await init();
 
   // Call unlock manager to unlock with passkey PRF
-  const result = await unlockWithPasskeyPRF(rpId);
+  // WebAuthn ceremony was performed by client, this accepts the PRF output
+  const result = await unlockWithPasskeyPRF(prfOutput);
 
   if (!result.success) {
     return { success: false, error: result.error };
@@ -303,23 +305,33 @@ async function unlockWithPasskeyPRFMethod(
  * Setup passkey in gate-only mode (fallback)
  */
 async function setupPasskeyGateMethod(
-  rpId: string,
-  rpName: string,
+  credentialId: ArrayBuffer,
   requestId: string,
   origin?: string
 ): Promise<{ success: boolean; error?: string }> {
   // Ensure worker is initialized
   await init();
 
+  // Generate a temporary KEK that will be wrapped
+  const kek = await crypto.subtle.generateKey(
+    {
+      name: 'AES-GCM',
+      length: 256,
+    },
+    true, // extractable (required for wrapKey operation)
+    ['wrapKey', 'unwrapKey']
+  );
+
   // Call unlock manager to setup passkey in gate-only mode
-  const result = await setupPasskeyGate(rpId, rpName);
+  // WebAuthn ceremony was performed by client, this accepts the credential ID
+  const result = await setupPasskeyGate(credentialId, kek);
 
   if (!result.success) {
     return { success: false, error: result.error };
   }
 
   // Store the session KEK as wrapping key and mark as unlocked
-  wrappingKey = result.key;
+  wrappingKey = kek;
   isUnlocked = true;
 
   // Log operation to audit log
@@ -338,7 +350,6 @@ async function setupPasskeyGateMethod(
  * Unlock with passkey in gate-only mode (fallback)
  */
 async function unlockWithPasskeyGateMethod(
-  rpId: string,
   requestId: string,
   origin?: string
 ): Promise<{ success: boolean; error?: string }> {
@@ -346,7 +357,8 @@ async function unlockWithPasskeyGateMethod(
   await init();
 
   // Call unlock manager to unlock with passkey gate
-  const result = await unlockWithPasskeyGate(rpId);
+  // WebAuthn ceremony was performed by client, worker derives key deterministically
+  const result = await unlockWithPasskeyGate();
 
   if (!result.success) {
     return { success: false, error: result.error };
@@ -840,31 +852,31 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           };
         }
 
-        const params = request.params as { rpId?: string; rpName?: string };
+        const params = request.params as { credentialId?: ArrayBuffer; prfOutput?: ArrayBuffer };
 
-        if (!params.rpId || typeof params.rpId !== 'string') {
+        if (!params.credentialId || !(params.credentialId instanceof ArrayBuffer)) {
           return {
             id: request.id,
             error: {
               code: 'INVALID_PARAMS',
-              message: 'setupPasskeyPRF requires rpId parameter',
+              message: 'setupPasskeyPRF requires credentialId (ArrayBuffer) parameter',
             },
           };
         }
 
-        if (!params.rpName || typeof params.rpName !== 'string') {
+        if (!params.prfOutput || !(params.prfOutput instanceof ArrayBuffer)) {
           return {
             id: request.id,
             error: {
               code: 'INVALID_PARAMS',
-              message: 'setupPasskeyPRF requires rpName parameter',
+              message: 'setupPasskeyPRF requires prfOutput (ArrayBuffer) parameter',
             },
           };
         }
 
         const result = await setupPasskeyPRFMethod(
-          params.rpId,
-          params.rpName,
+          params.credentialId,
+          params.prfOutput,
           request.id,
           request.origin
         );
@@ -886,20 +898,20 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           };
         }
 
-        const params = request.params as { rpId?: string };
+        const params = request.params as { prfOutput?: ArrayBuffer };
 
-        if (!params.rpId || typeof params.rpId !== 'string') {
+        if (!params.prfOutput || !(params.prfOutput instanceof ArrayBuffer)) {
           return {
             id: request.id,
             error: {
               code: 'INVALID_PARAMS',
-              message: 'unlockWithPasskeyPRF requires rpId parameter',
+              message: 'unlockWithPasskeyPRF requires prfOutput (ArrayBuffer) parameter',
             },
           };
         }
 
         const result = await unlockWithPasskeyPRFMethod(
-          params.rpId,
+          params.prfOutput,
           request.id,
           request.origin
         );
@@ -921,31 +933,20 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           };
         }
 
-        const params = request.params as { rpId?: string; rpName?: string };
+        const params = request.params as { credentialId?: ArrayBuffer };
 
-        if (!params.rpId || typeof params.rpId !== 'string') {
+        if (!params.credentialId || !(params.credentialId instanceof ArrayBuffer)) {
           return {
             id: request.id,
             error: {
               code: 'INVALID_PARAMS',
-              message: 'setupPasskeyGate requires rpId parameter',
-            },
-          };
-        }
-
-        if (!params.rpName || typeof params.rpName !== 'string') {
-          return {
-            id: request.id,
-            error: {
-              code: 'INVALID_PARAMS',
-              message: 'setupPasskeyGate requires rpName parameter',
+              message: 'setupPasskeyGate requires credentialId (ArrayBuffer) parameter',
             },
           };
         }
 
         const result = await setupPasskeyGateMethod(
-          params.rpId,
-          params.rpName,
+          params.credentialId,
           request.id,
           request.origin
         );
@@ -956,31 +957,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
       }
 
       case 'unlockWithPasskeyGate': {
-        // Validate params
-        if (!request.params || typeof request.params !== 'object') {
-          return {
-            id: request.id,
-            error: {
-              code: 'INVALID_PARAMS',
-              message: 'unlockWithPasskeyGate requires params object',
-            },
-          };
-        }
-
-        const params = request.params as { rpId?: string };
-
-        if (!params.rpId || typeof params.rpId !== 'string') {
-          return {
-            id: request.id,
-            error: {
-              code: 'INVALID_PARAMS',
-              message: 'unlockWithPasskeyGate requires rpId parameter',
-            },
-          };
-        }
+        // No params needed - WebAuthn ceremony performed by client
 
         const result = await unlockWithPasskeyGateMethod(
-          params.rpId,
+          
           request.id,
           request.origin
         );

@@ -255,3 +255,38 @@ export interface VAPIDPayload {
   jti: string;
   [claim: string]: any;
 }
+
+/* ------------------------------------------------------------------
+ * AAD configuration types
+ *
+ * Additional Authenticated Data (AAD) for AES-GCM operations binds
+ * metadata to ciphertext to prevent swapping or replay attacks.
+ */
+
+export interface MSAADConfig {
+  kmsVersion: number;
+  method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+  algVersion: number;
+  purpose: string;
+  credentialId?: ArrayBuffer;
+}
+
+export interface KeyWrapAADConfig {
+  kmsVersion: number;
+  kid: string;
+  alg: string;
+  purpose: string;
+  createdAt: number;
+  keyType: string;
+}
+
+/* ------------------------------------------------------------------
+ * Unlock result type
+ *
+ * Returned by unlock functions to indicate success or failure.
+ * On success, returns decrypted Master Secret bytes.
+ */
+
+export type UnlockResult =
+  | { success: true; ms: Uint8Array }
+  | { success: false; error: string };

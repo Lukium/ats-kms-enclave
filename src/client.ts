@@ -174,6 +174,8 @@ export class KMSClient {
     rpId: string,
     rpName: string
   ): Promise<{ success: boolean; error?: string; method?: 'prf' | 'gate' }> {
+    console.log('[KMS Client] setupPasskeyPRF called with:', { rpId, rpName });
+
     // Check WebAuthn availability
     if (
       typeof navigator === 'undefined' ||
@@ -181,12 +183,16 @@ export class KMSClient {
       !navigator.credentials ||
       !window.PublicKeyCredential
     ) {
+      console.log('[KMS Client] WebAuthn not available');
       return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
     }
+
+    console.log('[KMS Client] WebAuthn available, creating credential...');
 
     try {
       // Generate random app salt for PRF
       const appSalt = crypto.getRandomValues(new Uint8Array(32));
+      console.log('[KMS Client] App salt generated:', appSalt.length, 'bytes');
 
       // Create passkey with PRF extension
       const credential = (await navigator.credentials.create({
@@ -212,16 +218,32 @@ export class KMSClient {
         },
       })) as PublicKeyCredential | null;
 
+      console.log('[KMS Client] Credential created:', {
+        hasCredential: !!credential,
+        credentialId: credential ? credential.id : null,
+        rawIdLength: credential ? credential.rawId.byteLength : 0,
+      });
+
       if (!credential) {
+        console.log('[KMS Client] Credential creation returned null');
         return { success: false, error: 'PASSKEY_CREATION_FAILED' };
       }
 
       const clientExtensionResults = credential.getClientExtensionResults();
+      console.log('[KMS Client] Extension results:', {
+        hasPrf: !!clientExtensionResults.prf,
+        prfEnabled: clientExtensionResults.prf?.enabled,
+      });
 
       // Check if PRF extension is supported
       if (!clientExtensionResults.prf?.enabled) {
         // PRF not supported - use gate-only mode with the same credential
         console.log('[KMS Client] PRF not supported, using gate-only mode with same credential');
+        console.log('[KMS Client] Credential for gate-only:', {
+          rawIdType: Object.prototype.toString.call(credential.rawId),
+          rawIdLength: credential.rawId.byteLength,
+          rawIdIsArrayBuffer: credential.rawId instanceof ArrayBuffer,
+        });
 
         const gateResult = await this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
           credentialId: credential.rawId,
@@ -281,6 +303,15 @@ export class KMSClient {
       }
 
       // Send credential data to worker for PRF mode
+      console.log('[KMS Client] Sending setupPasskeyPRF to worker:', {
+        credentialIdType: Object.prototype.toString.call(credential.rawId),
+        credentialIdLength: credential.rawId.byteLength,
+        prfOutputType: Object.prototype.toString.call(prfResults.results.first),
+        prfOutputLength: prfResults.results.first.byteLength,
+        credentialIdIsArrayBuffer: credential.rawId instanceof ArrayBuffer,
+        prfOutputIsArrayBuffer: prfResults.results.first instanceof ArrayBuffer,
+      });
+
       const prfResult = await this.request<{ success: boolean; error?: string }>('setupPasskeyPRF', {
         credentialId: credential.rawId,
         prfOutput: prfResults.results.first,

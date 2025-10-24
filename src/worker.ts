@@ -854,7 +854,28 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
         const params = request.params as { credentialId?: ArrayBuffer; prfOutput?: ArrayBuffer };
 
-        if (!params.credentialId || !(params.credentialId instanceof ArrayBuffer)) {
+        console.log('[Worker] Received setupPasskeyPRF params:', {
+          hasCredentialId: !!params.credentialId,
+          credentialIdType: params.credentialId ? Object.prototype.toString.call(params.credentialId) : 'undefined',
+          credentialIdIsArrayBuffer: params.credentialId instanceof ArrayBuffer,
+          credentialIdLength: params.credentialId ? (params.credentialId as any).byteLength : 0,
+          hasByteLength: params.credentialId ? 'byteLength' in params.credentialId : false,
+        });
+
+        // Check for ArrayBuffer-like object (handles cross-realm ArrayBuffers from postMessage)
+        const isArrayBufferLike = params.credentialId &&
+          typeof params.credentialId === 'object' &&
+          'byteLength' in params.credentialId &&
+          typeof (params.credentialId as any).byteLength === 'number';
+
+        if (!params.credentialId || !isArrayBufferLike) {
+          console.error('[Worker] credentialId validation failed:', {
+            exists: !!params.credentialId,
+            type: params.credentialId ? typeof params.credentialId : 'undefined',
+            constructor: params.credentialId ? params.credentialId.constructor.name : 'N/A',
+            isArrayBuffer: params.credentialId instanceof ArrayBuffer,
+            isArrayBufferLike,
+          });
           return {
             id: request.id,
             error: {

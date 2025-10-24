@@ -2317,7 +2317,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('reset-btn')!.addEventListener('click', () => resetDemo());
 
   // Bind passkey buttons
-  document.getElementById('unlock-passkey-btn')!.addEventListener('click', unlockWithPasskey);
   document.getElementById('delete-passkey-btn')!.addEventListener('click', deletePasskey);
 
   // Bind refresh buttons

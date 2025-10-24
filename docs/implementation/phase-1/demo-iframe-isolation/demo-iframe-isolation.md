@@ -63,6 +63,30 @@ Parent PWA (5176)              KMS Iframe (5177)
 
 ---
 
+## Critical Implementation Principle: Reuse Production Code
+
+**⚠️ IMPORTANT**: This demo MUST import from `src/` rather than duplicate code.
+
+**Why**:
+- Proves the real production code works in iframe-isolation setup
+- Avoids code duplication and drift
+- Ensures we're testing actual deployed code
+- If the demo works, we know the production implementation works
+
+**What to Import**:
+1. `src/client.ts` - `KMSClient` class for Worker communication
+2. `src/worker.ts` - Worker implementation (used directly)
+3. Types: `RPCRequest`, `RPCResponse`, `ChainVerificationResult`
+4. All crypto operations come from `src/worker.ts` (no simplified versions)
+
+**What to Write**:
+1. `kms.ts` - Thin postMessage bridge layer on top of `KMSClient`
+2. `parent.ts` - UI and iframe communication
+3. `kms.html`, `parent.html` - UI structure
+4. `styles.css` - Visual presentation
+
+---
+
 ## Implementation Approach: Incremental Bottom-Up
 
 ### Phase 1: Infrastructure & Communication (Verify Cross-Origin Works)
@@ -220,28 +244,22 @@ example/phase-1/iframe-isolation/
 
 ### 2. `kms.ts` - postMessage Receiver & Worker Bridge
 
-**Purpose**: Receive postMessage from parent, forward to Worker, return responses.
+**Purpose**: Receive postMessage from parent, forward to Worker via `KMSClient`, return responses.
+
+**⚠️ CRITICAL**: Import and use `KMSClient` from `src/client.ts` - do NOT duplicate Worker communication logic.
 
 **Core Logic**:
 
 ```typescript
-// Import Worker (reuse existing implementation)
-import type { RPCRequest, RPCResponse } from '../../src/worker';
+// ✅ REUSE: Import KMSClient from production code
+import { KMSClient } from '@/client';
+import type { ChainVerificationResult } from '@/client';
 
-// Create Worker instance
-const worker = new Worker(new URL('../../src/worker.ts', import.meta.url), {
-  type: 'module'
-});
+// Create KMSClient instance (handles Worker communication)
+const kmsClient = new KMSClient();
 
 // Origin validation
 const ALLOWED_PARENT_ORIGIN = 'http://localhost:5176';
-
-// Request tracking
-const pendingRequests = new Map<string, {
-  resolve: (response: RPCResponse) => void;
-  reject: (error: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}>();
 
 // Listen for messages from parent
 window.addEventListener('message', async (event) => {
@@ -251,72 +269,77 @@ window.addEventListener('message', async (event) => {
     return;
   }
 
-  const request: RPCRequest = event.data;
+  try {
+    const { id, method, params } = event.data;
 
-  // Forward to Worker
-  const requestId = crypto.randomUUID();
-  const workerRequest = { ...request, id: requestId };
+    // ✅ REUSE: KMSClient handles Worker communication
+    // Forward request to Worker via KMSClient (which handles all RPC logic)
+    const result = await kmsClient[method](params);
 
-  worker.postMessage(workerRequest);
+    // Send successful response back to parent
+    window.parent.postMessage(
+      { id, result },
+      ALLOWED_PARENT_ORIGIN
+    );
 
-  // Wait for Worker response (with timeout)
-  const response = await waitForWorkerResponse(requestId, 10000);
+    // Update UI (lock status, audit log)
+    await updateUI();
 
-  // Send response back to parent
-  window.parent.postMessage(response, ALLOWED_PARENT_ORIGIN);
-
-  // Update UI (lock status, audit log)
-  updateUI(response);
-});
-
-// Listen for Worker responses
-worker.addEventListener('message', (event) => {
-  const response: RPCResponse = event.data;
-
-  // Resolve pending request
-  const pending = pendingRequests.get(response.id);
-  if (pending) {
-    clearTimeout(pending.timeout);
-    pending.resolve(response);
-    pendingRequests.delete(response.id);
+  } catch (error) {
+    // Send error response back to parent
+    window.parent.postMessage(
+      {
+        id: event.data.id,
+        error: {
+          code: 'OPERATION_FAILED',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        }
+      },
+      ALLOWED_PARENT_ORIGIN
+    );
   }
 });
 
-// Update UI based on responses
-function updateUI(response: RPCResponse) {
-  // Update lock status
-  if (response.data?.locked !== undefined) {
-    const status = response.data.locked ? '🔒 Locked' : '🔓 Unlocked';
-    document.getElementById('lock-status')!.textContent = status;
-  }
+// Update UI based on KMS state
+async function updateUI() {
+  // Get current status from KMS
+  const status = await kmsClient.getStatus();
+
+  // Update lock status indicator
+  const lockStatus = status.locked ? '🔒 Locked' : '🔓 Unlocked';
+  document.getElementById('lock-status')!.textContent = lockStatus;
 
   // Refresh audit log
-  refreshAuditLog();
+  await refreshAuditLog();
 }
 
-// Display audit log
+// Display audit log with chain verification
 async function refreshAuditLog() {
-  // Request audit log from Worker
-  const response = await sendToWorker({ method: 'getAuditLog' });
+  // ✅ REUSE: Get audit log via KMSClient
+  const { entries, verification } = await kmsClient.getAuditLog();
 
-  // Display entries with chain verification
-  displayAuditEntries(response.data.entries);
+  // Display chain verification status
+  const chainStatus = verification.valid
+    ? '✅ Chain verified'
+    : `❌ Chain broken: ${verification.errors.join(', ')}`;
+  document.getElementById('chain-status')!.textContent = chainStatus;
+
+  // Display entries
+  displayAuditEntries(entries);
 }
 ```
 
 **Key Responsibilities**:
 1. Receive postMessage from parent
 2. Validate parent origin
-3. Forward to Worker
-4. Wait for Worker response (with timeout)
-5. Send response back to parent
-6. Update iframe UI (lock status, audit log)
+3. ✅ **REUSE `KMSClient`** to forward to Worker (handles all RPC logic)
+4. Send response back to parent
+5. Update iframe UI (lock status, audit log)
 
 **Security Considerations**:
 - MUST validate `event.origin` on every message
-- Timeout protection (10s max per operation)
-- Error handling for Worker failures
-- Never leak secrets in postMessage responses
+- ✅ Timeout/error handling provided by `KMSClient` (no need to duplicate)
+- Never leak secrets in postMessage responses (only public outputs)
 
 ---
 
@@ -387,6 +410,8 @@ async function refreshAuditLog() {
 ### 4. `parent.ts` - postMessage Sender
 
 **Purpose**: Send requests to KMS iframe, receive and display responses.
+
+**Note**: This implements iframe communication (not Worker communication, so can't use `KMSClient` directly). However, the pattern should mirror `KMSClient` for consistency: Promise-based API, request tracking, timeout handling, error handling.
 
 **Core Logic**:
 
@@ -743,13 +768,17 @@ The demo is complete when:
 
 ## Next Steps
 
+**⚠️ REMEMBER**: Import from `src/` - this demo proves production code works, not a simplified version.
+
 **Start with Phase 1**: Establish basic cross-origin communication before adding complexity. The simplest path forward is:
 
 1. Create minimal HTML files (kms.html, parent.html)
-2. Create minimal TypeScript files (kms.ts, parent.ts)
-3. Implement one simple operation (getStatus)
+2. Create minimal TypeScript files:
+   - `kms.ts` - Import and use `KMSClient` from `src/client.ts`
+   - `parent.ts` - Create iframe communication client (mirroring `KMSClient` pattern)
+3. Implement one simple operation (getStatus) using `KMSClient`
 4. Verify postMessage communication works across origins
-5. Then incrementally add remaining operations
+5. Then incrementally add remaining operations (all via `KMSClient` methods)
 
 **Estimated Timeline**:
 - Phase 1 (Infrastructure): 2-3 hours

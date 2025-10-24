@@ -1134,6 +1134,23 @@ describe('Worker RPC Handler - Passkey Methods', () => {
     expect(response.error?.message).toContain('prfOutput');
   });
 
+  it('should fail unlock when passkey PRF not setup', async () => {
+    // Reset to fresh state without passkey setup (only passphrase from global beforeEach)
+    const request: RPCRequest = {
+      id: 'req-607a',
+      method: 'unlockWithPasskeyPRF',
+      params: {
+        prfOutput: new ArrayBuffer(32),
+      },
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.result).toBeDefined();
+    expect((response.result as any).success).toBe(false);
+    expect((response.result as any).error).toBeDefined();
+  });
+
   // setupPasskeyGate tests
   it('should require params for setupPasskeyGate', async () => {
     const request: RPCRequest = {
@@ -1181,7 +1198,118 @@ describe('Worker RPC Handler - Passkey Methods', () => {
     expect(response.error?.message).toContain('credentialId');
   });
 
-  // unlockWithPasskeyGate tests - no parameter validation needed (takes no params)
+  // unlockWithPasskeyGate tests
+  it('should fail unlock when passkey gate not setup', async () => {
+    // Reset to fresh state without passkey setup (only passphrase from global beforeEach)
+    const request: RPCRequest = {
+      id: 'req-610a',
+      method: 'unlockWithPasskeyGate',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.result).toBeDefined();
+    expect((response.result as any).success).toBe(false);
+    expect((response.result as any).error).toBeDefined();
+  });
+});
+
+describe('Worker RPC Handler - getPasskeyConfig', () => {
+  // Note: Global beforeEach sets up passphrase, so unlockSalt will have passphrase config
+
+  it('should return null when no unlock method configured', async () => {
+    // Reset and create fresh DB
+    resetWorkerState();
+    globalThis.indexedDB = new IDBFactory();
+
+    // Initialize DB by calling initDB directly
+    const { initDB } = await import('@/storage');
+    await initDB();
+
+    const request: RPCRequest = {
+      id: 'req-get-config-empty',
+      method: 'getPasskeyConfig',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeNull();
+  });
+
+  it('should return unlock config (passphrase from global setup)', async () => {
+    // The global beforeEach sets up passphrase, so config should exist
+    const request: RPCRequest = {
+      id: 'req-get-config-1',
+      method: 'getPasskeyConfig',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    expect((response.result as any).method).toBe('passphrase'); // From global beforeEach
+  });
+
+  it('should return config when passkey PRF is setup', async () => {
+    // Reset worker for fresh test (remove passphrase setup)
+    resetWorkerState();
+    globalThis.indexedDB = new IDBFactory();
+
+    // Setup passkey PRF
+    const setupRequest: RPCRequest = {
+      id: 'req-setup-prf',
+      method: 'setupPasskeyPRF',
+      params: {
+        credentialId: new ArrayBuffer(32),
+        prfOutput: new ArrayBuffer(32),
+      },
+    };
+    await handleMessage(setupRequest);
+
+    // Now get the config
+    const request: RPCRequest = {
+      id: 'req-get-config-2',
+      method: 'getPasskeyConfig',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    expect((response.result as any).method).toBe('passkey-prf');
+    expect((response.result as any).credentialId).toBeDefined();
+    expect((response.result as any).appSalt).toBeDefined();
+  });
+
+  it('should return config when passkey gate is setup', async () => {
+    // Reset worker for fresh test (remove passphrase setup)
+    resetWorkerState();
+    globalThis.indexedDB = new IDBFactory();
+
+    // Setup passkey gate
+    const setupRequest: RPCRequest = {
+      id: 'req-setup-gate',
+      method: 'setupPasskeyGate',
+      params: {
+        credentialId: new ArrayBuffer(32),
+      },
+    };
+    await handleMessage(setupRequest);
+
+    // Now get the config
+    const request: RPCRequest = {
+      id: 'req-get-config-3',
+      method: 'getPasskeyConfig',
+    };
+
+    const response = await handleMessage(request) as RPCResponse;
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    expect((response.result as any).method).toBe('passkey-gate');
+    expect((response.result as any).credentialId).toBeDefined();
+  });
 });
 
 describe('Worker RPC Handler - Audit Operations', () => {

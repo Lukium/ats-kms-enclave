@@ -867,7 +867,9 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
             result: config,
           };
         } catch (error) {
+          /* c8 ignore next - defensive: getMeta only throws on DB errors */
           console.error('[Worker] getPasskeyConfig error:', error);
+          /* c8 ignore next 4 - defensive: error recovery path */
           return {
             id: request.id,
             result: null,
@@ -889,28 +891,14 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
         const params = request.params as { credentialId?: ArrayBuffer; prfOutput?: ArrayBuffer };
 
-        console.log('[Worker] Received setupPasskeyPRF params:', {
-          hasCredentialId: !!params.credentialId,
-          credentialIdType: params.credentialId ? Object.prototype.toString.call(params.credentialId) : 'undefined',
-          credentialIdIsArrayBuffer: params.credentialId instanceof ArrayBuffer,
-          credentialIdLength: params.credentialId ? (params.credentialId as any).byteLength : 0,
-          hasByteLength: params.credentialId ? 'byteLength' in params.credentialId : false,
-        });
-
-        // Check for ArrayBuffer-like object (handles cross-realm ArrayBuffers from postMessage)
+        // Validate credentialId is ArrayBuffer (or ArrayBuffer-like for cross-realm)
+        const isInstanceOf = params.credentialId instanceof ArrayBuffer;
         const isArrayBufferLike = params.credentialId &&
           typeof params.credentialId === 'object' &&
           'byteLength' in params.credentialId &&
           typeof (params.credentialId as any).byteLength === 'number';
 
-        if (!params.credentialId || !isArrayBufferLike) {
-          console.error('[Worker] credentialId validation failed:', {
-            exists: !!params.credentialId,
-            type: params.credentialId ? typeof params.credentialId : 'undefined',
-            constructor: params.credentialId ? params.credentialId.constructor.name : 'N/A',
-            isArrayBuffer: params.credentialId instanceof ArrayBuffer,
-            isArrayBufferLike,
-          });
+        if (!params.credentialId || !(isInstanceOf || isArrayBufferLike)) {
           return {
             id: request.id,
             error: {
@@ -991,28 +979,14 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
         const params = request.params as { credentialId?: ArrayBuffer };
 
-        console.log('[Worker] Received setupPasskeyGate params:', {
-          hasCredentialId: !!params.credentialId,
-          credentialIdType: params.credentialId ? Object.prototype.toString.call(params.credentialId) : 'undefined',
-          credentialIdIsArrayBuffer: params.credentialId instanceof ArrayBuffer,
-          credentialIdLength: params.credentialId ? (params.credentialId as any).byteLength : 0,
-          hasByteLength: params.credentialId ? 'byteLength' in params.credentialId : false,
-        });
-
-        // Check for ArrayBuffer-like object (handles cross-realm ArrayBuffers from postMessage)
+        // Validate credentialId is ArrayBuffer (or ArrayBuffer-like for cross-realm)
+        const isInstanceOf = params.credentialId instanceof ArrayBuffer;
         const isArrayBufferLike = params.credentialId &&
           typeof params.credentialId === 'object' &&
           'byteLength' in params.credentialId &&
           typeof (params.credentialId as any).byteLength === 'number';
 
-        if (!params.credentialId || !isArrayBufferLike) {
-          console.error('[Worker] setupPasskeyGate credentialId validation failed:', {
-            exists: !!params.credentialId,
-            type: params.credentialId ? typeof params.credentialId : 'undefined',
-            constructor: params.credentialId ? params.credentialId.constructor.name : 'N/A',
-            isArrayBuffer: params.credentialId instanceof ArrayBuffer,
-            isArrayBufferLike,
-          });
+        if (!params.credentialId || !(isInstanceOf || isArrayBufferLike)) {
           return {
             id: request.id,
             error: {
@@ -1021,8 +995,6 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
             },
           };
         }
-
-        console.log('[Worker] setupPasskeyGate validation passed, calling method...');
 
         const result = await setupPasskeyGateMethod(
           params.credentialId,

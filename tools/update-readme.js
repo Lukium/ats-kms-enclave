@@ -14,7 +14,6 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import * as yaml from 'yaml';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -115,41 +114,6 @@ function buildCoverageTable() {
   return table;
 }
 
-/**
- * Count coverage exceptions from COVERAGE_EXCEPTIONS.yml
- * Parses patterns to count actual number of lines excluded
- */
-function countCoverageExceptions() {
-  try {
-    const exceptionsPath = join(rootDir, 'COVERAGE_EXCEPTIONS.yml');
-    const exceptionsContent = readFileSync(exceptionsPath, 'utf-8');
-    const exceptions = yaml.parse(exceptionsContent);
-
-    let totalLines = 0;
-    for (const fileExceptions of Object.values(exceptions)) {
-      if (Array.isArray(fileExceptions)) {
-        for (const exc of fileExceptions) {
-          const pattern = exc.pattern || '';
-
-          // Parse "/* c8 ignore next N */" or "/* v8 ignore next N */"
-          const nextMatch = pattern.match(/ignore next (\d+)/);
-          if (nextMatch) {
-            totalLines += parseInt(nextMatch[1], 10);
-          }
-          // Parse "/* c8 ignore next */" (default to 1 line)
-          else if (pattern.includes('ignore next')) {
-            totalLines += 1;
-          }
-        }
-      }
-    }
-
-    return totalLines;
-  } catch (error) {
-    console.warn('Failed to read coverage exceptions:', error.message);
-    return 0;
-  }
-}
 
 /**
  * Count test files in tests directory
@@ -243,7 +207,6 @@ async function updateReadme() {
   }
 
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const exceptionsCount = countCoverageExceptions();
 
   const newSection = `### Test Coverage & Statistics
 
@@ -258,8 +221,6 @@ async function updateReadme() {
 **Coverage Report:**
 \`\`\`
 ${coverageTable}\`\`\`
-
-**Coverage Exceptions:** ${exceptionsCount} lines excluded ([view exceptions](COVERAGE_EXCEPTIONS.yml))
 <!-- END AUTO-GENERATED -->`;
 
   // Find and replace the auto-generated section

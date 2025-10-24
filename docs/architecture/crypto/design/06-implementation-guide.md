@@ -312,20 +312,26 @@ function rpc<T>(method: string, params: any): Promise<T> {
 
 **Critical**: WebCrypto ECDSA signatures and VAPID have format mismatches that **must** be handled correctly.
 
-#### 1. ECDSA Signature Format: DER vs P-1363
+#### 1. ECDSA Signature Format: P-1363 (WebCrypto Native Format)
 
-**Problem**:
-- WebCrypto `crypto.subtle.sign()` returns **DER-encoded** ECDSA signatures (~70-72 bytes)
-- JWS ES256 specification requires **P-1363 format** (raw r‖s, exactly 64 bytes)
-- If you base64url-encode DER directly, **JWT will be rejected** by validators
+**Truth**:
+- WebCrypto `crypto.subtle.sign()` with ECDSA returns **P-1363 format** (raw r‖s, exactly 64 bytes for P-256)
+- JWS ES256 specification requires **P-1363 format** (same format)
+- **No conversion needed** for pure WebCrypto → JWT signing
 
-**Solution**: Convert DER → P-1363 before building JWT
+**When conversion IS needed:**
+- **WebAuthn (passkeys)** signatures are DER format → convert DER → P-1363 for WebCrypto verification
+- **Some server libraries** expect DER → convert P-1363 → DER when sending to them
 
 ```typescript
 /**
  * Convert DER-encoded ECDSA signature to P-1363 (raw r‖s) format
- * DER: ~70-72 bytes with ASN.1 structure
- * P-1363: exactly 64 bytes (32-byte r + 32-byte s)
+ *
+ * Used for WebAuthn (passkey) signatures which are DER-encoded.
+ * NOT needed for WebCrypto sign() output (already P-1363).
+ *
+ * DER: ~70-72 bytes with ASN.1 structure (WebAuthn format)
+ * P-1363: exactly 64 bytes (32-byte r + 32-byte s) (WebCrypto format)
  */
 function derToP1363(derSignature: ArrayBuffer): ArrayBuffer {
   const der = new Uint8Array(derSignature)
@@ -472,7 +478,7 @@ async function generateVAPID(): Promise<{ kid: string; publicKey: string; rawPub
 }
 ```
 
-#### 4. Updated JWT Signing with DER→P-1363 Conversion
+#### 4. JWT Signing with WebCrypto (No Conversion Needed)
 
 ```typescript
 async function signJWT(payload: object): Promise<string> {
@@ -483,27 +489,26 @@ async function signJWT(payload: object): Promise<string> {
   const encodedPayload = base64url(JSON.stringify(payload))
   const message = `${encodedHeader}.${encodedPayload}`
 
-  // Sign with WebCrypto (returns DER format)
-  const derSignature = await crypto.subtle.sign(
+  // Sign with WebCrypto (returns P-1363 format - 64 bytes for P-256)
+  const signature = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
     keypair.privateKey,
     new TextEncoder().encode(message)
   )
 
-  // Convert DER → P-1363 (required for JWS ES256)
-  const p1363Signature = derToP1363(derSignature)
-
-  // Encode signature
-  const encodedSignature = base64url(p1363Signature)
+  // No conversion needed - WebCrypto returns P-1363, JWS expects P-1363
+  const encodedSignature = base64url(signature)
 
   return `${message}.${encodedSignature}`
 }
 ```
 
-**Why this matters**:
-- Without DER→P-1363 conversion: **JWT validation fails**
+**Why this works**:
+- WebCrypto `sign()` returns P-1363 format (64 bytes for P-256)
+- JWS ES256 spec requires P-1363 format
+- **No conversion needed** - formats already match
 - Without raw public key: **PushManager.subscribe() fails**
-- These are **critical for VAPID to work** in production
+- Raw public key export is **critical for VAPID to work** in production
 
 #### 5. Production-Ready ES256 Utilities (Drop-In Code)
 
@@ -539,7 +544,8 @@ export function b64uDecode(s: string): Uint8Array {
 }
 
 /* ===================== DER <-> P-1363 converters ===================== */
-// WebCrypto ECDSA returns DER. JWS ES256 needs raw P-1363 (r||s) 64 bytes.
+// WebAuthn (passkeys) returns DER. WebCrypto verify() needs P-1363 (r||s) 64 bytes.
+// WebCrypto sign() already returns P-1363 - no conversion needed for JWT signing.
 
 export function derToP1363(der: ArrayBuffer): Uint8Array {
   const d = new Uint8Array(der);
@@ -692,10 +698,10 @@ export async function signVAPIDJWT(
   const encPayload = b64uEncodeStr(JSON.stringify(claims));
   const signingInput = new TextEncoder().encode(`${encHeader}.${encPayload}`);
 
-  const derSig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, priv, signingInput);
-  const joseSig = derToP1363(derSig); // convert DER -> raw P-1363 (r||s), 64 bytes
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, priv, signingInput);
+  // Note: WebCrypto sign() already returns P-1363 format (64 bytes) - no conversion needed
 
-  const encSig = b64uEncode(joseSig);
+  const encSig = b64uEncode(sig);
   return `${encHeader}.${encPayload}.${encSig}`;
 }
 
@@ -838,15 +844,14 @@ const response = await fetch(pushEndpoint, {
 ```
 
 **What this code handles automatically**:
-- ✅ DER → P-1363 conversion (JWT signatures work correctly)
+- ✅ P-1363 signature format (WebCrypto native format, works with JWS ES256)
 - ✅ Raw public key export (PushManager.subscribe works correctly)
 - ✅ RFC 8292 VAPID headers (push services accept requests)
 - ✅ Non-extractable private keys (keys stay in enclave)
 - ✅ Base64url encoding (correct format for JWT/VAPID)
-- ✅ ASN.1 parsing (handles SPKI/DER edge cases)
+- ✅ DER ↔ P-1363 converters (available for WebAuthn passkey unlock)
 
 **Pitfalls this avoids**:
-- ❌ Base64url-encoding DER signatures directly (breaks JWT validation)
 - ❌ Passing SPKI to PushManager (subscription fails)
 - ❌ Missing Crypto-Key header (some push services reject)
 - ❌ Extractable private keys (could be stolen by compromised PWA)

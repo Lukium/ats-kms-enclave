@@ -62,6 +62,127 @@ This design makes **covert key extraction much harder** by requiring the attacke
 - If attacker extracts wrapped keys and passphrase hash, can brute-force
 - **Mitigation:** Use strong PBKDF2 parameters or passkey (hardware-backed)
 
+## Unlock Policy
+
+**All high-stakes cryptographic operations require an unlocked state:**
+
+- **VAPID key generation** - Requires unlock
+- **VAPID key regeneration** - Requires unlock
+- **JWT signing** - Requires unlock
+- **Key export** (public keys only) - No unlock required (public data)
+- **Audit log access** - No unlock required (read-only, publicly verifiable)
+
+**Unlock mechanisms:**
+
+### 1. Passphrase (PBKDF2 + HKDF)
+Software-based, requires strong password (≥8 characters).
+
+**Key derivation:**
+```
+PBKDF2(passphrase, salt, 600k iterations, SHA-256) → 256 bits raw material
+  ↓
+HKDF(raw material, salt, info="ATS/KMS/KEK-wrap/v1", SHA-256) → K_wrap (AES-GCM 256)
+```
+
+### 2. Passkey with PRF Extension (Recommended)
+Hardware-backed, phishing-resistant, uses WebAuthn PRF extension.
+
+**Key derivation:**
+```
+WebAuthn PRF(appSalt) → 256 bits from authenticator
+  ↓
+HKDF(PRF output, appSalt, info="ATS/KMS/KEK-wrap/v1", SHA-256) → K_wrap (AES-GCM 256)
+```
+
+The KEK is wrapped with K_wrap and stored. On unlock, K_wrap is derived again and used to unwrap the KEK.
+
+### 3. Passkey Gate-Only Mode (Fallback)
+For authenticators that don't support the PRF extension.
+
+**Behavior:**
+- WebAuthn assertion (user verification required) starts a 5-minute session
+- Fresh KEK is generated and kept in Worker memory (not wrapped at rest)
+- On session expiry or page sleep, KEK is zeroized and new assertion is required
+- **Note**: At-rest protection comes from IndexedDB + OS storage; passkey provides use-control only
+
+**Important:** When using passkey assertions for verification, the signature is DER format and must be converted to P-1363 for WebCrypto.
+
+## Key Derivation Architecture
+
+All unlock methods follow a consistent two-step pattern:
+
+### Step 1: Derive Raw Key Material
+Different sources, same output size (256 bits):
+
+```
+Passphrase:  PBKDF2-HMAC-SHA-256(password, salt, 600k) → 32 bytes
+Passkey PRF: WebAuthn PRF(appSalt) → 32 bytes  (from authenticator)
+```
+
+### Step 2: HKDF with Purpose Label
+Unified key derivation with domain separation:
+
+```
+K_wrap = HKDF-SHA-256(
+  ikm = raw_material,     // From step 1
+  salt = salt/appSalt,    // Same salt as step 1
+  info = "ATS/KMS/KEK-wrap/v1",  // Purpose label (versioned)
+  L = 32 bytes             // Output length
+)
+```
+
+### Why This Pattern?
+
+1. **Domain separation**: The `info` parameter ensures K_wrap can only be used for KEK wrapping
+2. **Future agility**: Can derive additional keys (e.g., `"ATS/login-token/v1"`) without re-running expensive PBKDF2
+3. **Consistent pattern**: Both passphrase and passkey PRF use identical HKDF step
+4. **Safe reuse**: No risk of using the same bits for different purposes
+
+### Implementation (WebCrypto)
+
+```typescript
+// Step 1: Get raw material (passphrase example)
+const ikmKey = await crypto.subtle.importKey('raw', passphraseBytes, 'PBKDF2', false, ['deriveBits']);
+const ikm = await crypto.subtle.deriveBits(
+  { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600000 },
+  ikmKey,
+  256  // 32 bytes
+);
+
+// Step 2: HKDF with purpose label
+const hkdfKey = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveKey']);
+const K_wrap = await crypto.subtle.deriveKey(
+  {
+    name: 'HKDF',
+    hash: 'SHA-256',
+    salt,
+    info: new TextEncoder().encode('ATS/KMS/KEK-wrap/v1')
+  },
+  hkdfKey,
+  { name: 'AES-GCM', length: 256 },
+  false,  // non-extractable
+  ['wrapKey', 'unwrapKey']
+);
+```
+
+## Signature Format Reference
+
+Understanding signature formats is critical for implementing unlock and JWT signing correctly:
+
+| Context | Format | Length (P-256) | Notes |
+|---------|--------|----------------|-------|
+| **WebCrypto `sign()`** | P-1363 | 64 bytes | Raw r\|\|s concatenation |
+| **WebCrypto `verify()`** | P-1363 | 64 bytes | Expects raw r\|\|s |
+| **WebAuthn (passkeys)** | DER (ASN.1) | ~70-72 bytes | Variable length, starts with 0x30 |
+| **JWS ES256 (JWT)** | P-1363 | 64 bytes | Base64url-encoded raw r\|\|s |
+| **Some server libs (Node.js default)** | DER | ~70-72 bytes | May need P-1363 → DER conversion |
+
+**When conversion is needed:**
+
+1. ✅ **WebAuthn unlock** - DER (from passkey) → P-1363 (for WebCrypto verify)
+2. ❌ **JWT signing** - No conversion (WebCrypto sign already returns P-1363)
+3. ⚠️ **Server interop** - May need P-1363 → DER (if server expects DER)
+
 ## Architecture
 
 ### Component Overview
@@ -170,55 +291,112 @@ This design makes **covert key extraction much harder** by requiring the attacke
 
 6. User chooses method:
 
-   A. Passkey:
-      - PWA triggers WebAuthn registration
-      - On success, generates unwrapKey
-      - Sends unwrapKey to KMS
-      - KMS wraps all future keys with unwrapKey
-      - KMS logs: "Setup complete (passkey)"
+   A. Passkey with PRF (Recommended):
+      - KMS triggers WebAuthn credential creation with `extensions: { prf: {} }`
+      - Browser/authenticator creates passkey
+      - KMS checks if `prf.enabled === true` in response
+      - If PRF supported:
+        * Generate random appSalt (32 bytes)
+        * Get PRF assertion with `prf: { eval: { first: appSalt } }`
+        * Derive: K_wrap = HKDF(PRF(appSalt), appSalt, "ATS/KMS/KEK-wrap/v1")
+        * Generate random KEK (AES-GCM 256)
+        * Wrap KEK with K_wrap
+        * Store: credentialId, appSalt, wrappedKEK, wrapIV
+        * KMS logs: "Setup complete (passkey-prf)"
+      - If PRF not supported, fallback to gate-only mode
 
-   B. Passphrase:
-      - PWA prompts for passphrase (min 12 chars)
-      - PWA derives unwrapKey: PBKDF2(passphrase, salt, 600000)
-      - Sends unwrapKey to KMS
-      - KMS wraps all future keys with unwrapKey
+   B. Passkey Gate-Only (Fallback):
+      - KMS triggers WebAuthn credential creation (no PRF extension)
+      - Browser/authenticator creates passkey
+      - Generate random KEK (AES-GCM 256, not wrapped)
+      - Keep KEK in Worker memory for 5-minute session
+      - Store: credentialId, sessionDuration
+      - KMS logs: "Setup complete (passkey-gate)"
+
+   C. Passphrase:
+      - User enters passphrase (min 8 chars)
+      - Generate random salt (16 bytes)
+      - Derive: PBKDF2(passphrase, salt, 600k) → 256 bits
+      - Derive: K_wrap = HKDF(PBKDF2 output, salt, "ATS/KMS/KEK-wrap/v1")
+      - Hash PBKDF2 output for verification
+      - Store: salt, iterations, verificationHash
       - KMS logs: "Setup complete (passphrase)"
 
 7. KMS creates first audit entry (genesis)
 ```
 
-### Unlock Flow (Passkey)
+### Unlock Flow (Passkey with PRF)
 
 ```
 1. User action requires key usage (e.g., generate VAPID keypair)
-2. KMS checks: isUnlocked()
+2. KMS Worker checks: isUnlocked
 3. If locked:
-   a. KMS sends: { type: 'needsUnlock', method: 'passkey' }
-   b. PWA shows: "Unlock KMS" modal with fingerprint icon
-   c. PWA triggers WebAuthn assertion
-   d. On success, PWA sends unwrapKey to KMS
-   e. KMS verifies and caches unwrapKey (5 min TTL)
-   f. KMS logs: "Unlocked (passkey)"
-4. KMS performs requested operation
+   a. Load unlock config from IndexedDB meta store
+   b. Trigger WebAuthn assertion with PRF extension:
+      navigator.credentials.get({
+        publicKey: {
+          challenge: random32Bytes,
+          rpId,
+          allowCredentials: [{ type: 'public-key', id: credentialId }],
+          userVerification: 'required',
+          extensions: { prf: { eval: { first: appSalt } } }
+        }
+      })
+   c. Get PRF output from assertion response
+   d. Derive: K_wrap = HKDF(PRF output, appSalt, "ATS/KMS/KEK-wrap/v1")
+   e. Unwrap KEK: unwrapKey('raw', wrappedKEK, K_wrap, { name: 'AES-GCM', iv })
+   f. Store KEK in Worker memory
+   g. Set isUnlocked = true
+   h. KMS logs: "Unlocked (passkey-prf)"
+4. KMS performs requested operation with KEK
 5. KMS logs: "Sign JWT (kid=..., aud=...)"
 6. KMS returns result
+```
+
+### Unlock Flow (Passkey Gate-Only)
+
+```
+1. User action requires key usage
+2. KMS Worker checks: isUnlocked && sessionExpiry > now
+3. If locked or session expired:
+   a. Load unlock config from IndexedDB meta store
+   b. Trigger WebAuthn assertion:
+      navigator.credentials.get({
+        publicKey: {
+          challenge: random32Bytes,
+          rpId,
+          allowCredentials: [{ type: 'public-key', id: credentialId }],
+          userVerification: 'required'
+        }
+      })
+   c. Generate fresh KEK (AES-GCM 256, not wrapped)
+   d. Store KEK in Worker memory
+   e. Set session expiry = now + 5 minutes
+   f. Start auto-clear timer
+   g. Set isUnlocked = true
+   h. KMS logs: "Unlocked (passkey-gate)"
+4. KMS performs requested operation with KEK
+5. KMS logs: "Sign JWT (kid=..., aud=...)"
+6. On session expiry: zeroize KEK, set isUnlocked = false
 ```
 
 ### Unlock Flow (Passphrase)
 
 ```
 1. User action requires key usage
-2. KMS checks: isUnlocked()
+2. KMS Worker checks: isUnlocked
 3. If locked:
-   a. KMS sends: { type: 'needsUnlock', method: 'passphrase' }
-   b. PWA shows: "Enter passphrase" modal
-   c. User enters passphrase
-   d. PWA derives unwrapKey: PBKDF2(passphrase, salt, 600000)
-   e. PWA sends unwrapKey to KMS
-   f. KMS verifies by attempting unwrap
-   g. If successful, caches unwrapKey (5 min TTL)
-   h. KMS logs: "Unlocked (passphrase)"
-4. KMS performs requested operation
+   a. Load unlock config from IndexedDB meta store
+   b. User enters passphrase
+   c. Derive: PBKDF2(passphrase, salt, iterations) → 256 bits
+   d. Verify: SHA-256(derived bits) === verificationHash
+   e. If match:
+      - Derive: K_wrap = HKDF(PBKDF2 output, salt, "ATS/KMS/KEK-wrap/v1")
+      - Store K_wrap in Worker memory
+      - Set isUnlocked = true
+      - KMS logs: "Unlocked (passphrase)"
+   f. If mismatch: return error "INCORRECT_PASSPHRASE"
+4. KMS performs requested operation with K_wrap
 5. KMS logs: "Sign JWT (kid=..., aud=...)"
 6. KMS returns result
 ```
@@ -227,22 +405,45 @@ This design makes **covert key extraction much harder** by requiring the attacke
 
 **In-memory state (worker):**
 ```typescript
-interface UnlockState {
-  isUnlocked: boolean;
-  method: 'passkey' | 'passphrase' | null;
-  unwrapKey: CryptoKey | null;  // ephemeral, never stored
-  unlockExpiry: number;           // timestamp
-  unlockCount: number;            // for rate limiting
-}
+// Primary unlock state (in worker.ts)
+let wrappingKey: CryptoKey | null = null;  // K_wrap or KEK depending on method
+let isUnlocked: boolean = false;
+
+// Gate-only session state (in unlock.ts)
+let gateSessionKey: CryptoKey | null = null;
+let gateSessionExpiry: number | null = null;
+let gateSessionTimer: ReturnType<typeof setTimeout> | null = null;
 ```
 
-**Unlock TTL:** 5 minutes (configurable)
+**Stored configuration (IndexedDB meta store):**
+```typescript
+type UnlockConfig =
+  | {
+      method: 'passphrase';
+      salt: ArrayBuffer;           // 16 bytes for PBKDF2 and HKDF
+      iterations: number;           // 600000
+      verificationHash: string;     // SHA-256 of PBKDF2 output
+    }
+  | {
+      method: 'passkey-prf';
+      credentialId: ArrayBuffer;
+      appSalt: ArrayBuffer;         // 32 bytes for PRF evaluation
+      wrappedKEK: ArrayBuffer;      // KEK wrapped with K_wrap from PRF
+      wrapIV: ArrayBuffer;          // 12 bytes for AES-GCM
+    }
+  | {
+      method: 'passkey-gate';
+      credentialId: ArrayBuffer;
+      sessionDuration: number;      // 5 * 60 * 1000 (5 minutes)
+    };
+```
 
-**Auto-lock triggers:**
-- Expiry timestamp reached
-- User navigates away from PWA (visibilitychange)
-- User explicit lock action
-- Suspicious pattern detected (too many unwraps)
+**Gate-only session TTL:** 5 minutes (hardcoded)
+
+**Session clear triggers (gate-only mode):**
+- Session expiry timestamp reached
+- Worker reset
+- Explicit lock action
 
 ## Audit Log Design
 
@@ -892,77 +1093,82 @@ Current head:    8d9e0f1a...b2c3d4e5
 
 ## Example Flows
 
-### Flow 1: First-Time Setup (Passkey)
+### Flow 1: First-Time Setup (Passkey with PRF)
 
 ```
 1. User visits https://ats.run for first time
 2. PWA loads KMS iframe (kms.ats.run)
 3. KMS worker starts, checks meta store
 4. No unlock method found
-5. KMS → PWA: { type: 'needsSetup' }
+5. PWA → KMS: isUnlockSetup() → { isSetup: false }
 6. PWA shows setup modal
-7. User clicks "Use Passkey"
-8. PWA calls navigator.credentials.create({
+7. User clicks "Use Passkey (Recommended)"
+8. PWA → KMS: setupPasskeyPRF({ rpId: 'ats.run', rpName: 'AllTheServices' })
+9. KMS calls navigator.credentials.create({
      publicKey: {
        challenge: randomBytes(32),
        rp: { id: 'ats.run', name: 'AllTheServices' },
-       user: { id: userId, name: email, displayName: name },
-       pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
+       user: { id: randomBytes(16), name: 'kms-user', displayName: 'KMS User' },
+       pubKeyCredParams: [
+         { alg: -7, type: 'public-key' },   // ES256
+         { alg: -257, type: 'public-key' }  // RS256
+       ],
        authenticatorSelection: {
          authenticatorAttachment: 'platform',
-         userVerification: 'required'
-       }
+         userVerification: 'required',
+         residentKey: 'preferred'
+       },
+       extensions: { prf: {} }  // Request PRF extension
      }
    })
-9. User completes biometric (Touch ID, Face ID, etc.)
-10. Credential created
-11. PWA generates unwrapKey: randomBytes(32)
-12. PWA encrypts unwrapKey with credential public key (or stores on server)
-13. PWA → KMS: setup({ method: 'passkey', unwrapKey })
-14. KMS stores unwrapKey in meta (for this session)
-15. KMS derives AES-GCM key from unwrapKey
-16. KMS logs: "Setup complete (passkey)"
-17. KMS → PWA: { type: 'setupComplete' }
-18. PWA shows success: "Your keys are now protected with passkey"
+10. User completes biometric (Touch ID, Face ID, etc.)
+11. Credential created
+12. KMS checks: getClientExtensionResults().prf.enabled === true
+13. If PRF supported:
+    a. Generate appSalt: randomBytes(32)
+    b. Get assertion with PRF: navigator.credentials.get({ extensions: { prf: { eval: { first: appSalt } } } })
+    c. Extract PRF output (32 bytes from authenticator)
+    d. Derive: K_wrap = HKDF(PRF output, appSalt, "ATS/KMS/KEK-wrap/v1")
+    e. Generate KEK: randomBytes(32) as AES-GCM key
+    f. Wrap KEK with K_wrap
+    g. Store: { method: 'passkey-prf', credentialId, appSalt, wrappedKEK, wrapIV }
+    h. Log audit entry: "Setup complete (passkey-prf)"
+    i. KMS → PWA: { success: true }
+14. PWA shows success: "Your keys are protected with passkey"
 ```
 
-### Flow 2: Generate VAPID Key (Requires Unlock)
+### Flow 2: Generate VAPID Key (Requires Unlock with PRF Passkey)
 
 ```
 1. User navigates to /app/notifications
 2. PWA → KMS: generateVAPID()
-3. KMS checks: unlockState.isUnlocked
-4. isUnlocked === false
-5. KMS → PWA: { type: 'needsUnlock', method: 'passkey', reason: 'generate VAPID keypair' }
-6. PWA shows unlock modal:
-   ┌────────────────────────────────────┐
-   │ Unlock KMS                         │
-   │                                    │
-   │ Touch the fingerprint sensor to    │
-   │ generate your notification key     │
-   │                                    │
-   │     [👆 Touch ID Icon]            │
-   │                                    │
-   │ [Cancel]                           │
-   └────────────────────────────────────┘
-7. User touches sensor
-8. PWA calls navigator.credentials.get({ publicKey: { challenge, ... } })
-9. Assertion succeeds
-10. PWA retrieves unwrapKey (from local encryption or server)
-11. PWA → KMS: unlock({ method: 'passkey', unwrapKey })
-12. KMS sets unlockState:
-    - isUnlocked = true
-    - unwrapKey = (cached in memory)
-    - unlockExpiry = now + 5 minutes
-13. KMS logs: "Unlocked (passkey)"
-14. KMS proceeds with generateVAPID():
+3. KMS Worker checks: isUnlocked === false
+4. KMS loads unlock config from IndexedDB: { method: 'passkey-prf', credentialId, appSalt, wrappedKEK, wrapIV }
+5. KMS calls navigator.credentials.get({
+     publicKey: {
+       challenge: randomBytes(32),
+       rpId: 'ats.run',
+       allowCredentials: [{ type: 'public-key', id: credentialId }],
+       userVerification: 'required',
+       extensions: { prf: { eval: { first: appSalt } } }
+     }
+   })
+6. User touches fingerprint sensor / Face ID
+7. Assertion succeeds, PRF output extracted (32 bytes)
+8. KMS derives: K_wrap = HKDF(PRF output, appSalt, "ATS/KMS/KEK-wrap/v1")
+9. KMS unwraps: KEK = unwrapKey('raw', wrappedKEK, K_wrap, { name: 'AES-GCM', iv: wrapIV })
+10. KMS sets: wrappingKey = KEK, isUnlocked = true
+11. KMS logs audit entry: "Unlocked (passkey-prf)"
+12. KMS proceeds with generateVAPID():
     a. Generate ECDSA P-256 keypair (non-extractable)
-    b. Wrap private key with unwrapKey
-    c. Store wrapped key in IndexedDB
-    d. Log: "Generated key vapid-abc123"
-    e. Export public key
-15. KMS → PWA: { kid: 'vapid-abc123', publicKey: '...' }
-16. PWA shows success: "Notification key created"
+    b. Export raw public key (65 bytes uncompressed)
+    c. Compute kid from JWK thumbprint (RFC 7638)
+    d. Wrap private key with KEK
+    e. Store wrapped key in IndexedDB: { kid, wrappedKey, wrapParams }
+    f. Log audit entry: "Generate key vapid-<kid>"
+    g. Return: { kid, publicKey: base64url(rawPublicKey) }
+13. KMS → PWA: { kid: 'vapid-abc123...', publicKey: 'BHj8...' }
+14. PWA shows success: "Notification key created"
 ```
 
 ### Flow 3: Sign JWT (Already Unlocked)

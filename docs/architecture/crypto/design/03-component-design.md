@@ -409,9 +409,9 @@ async function signJWT(payload: {
   const encodedPayload = base64url(JSON.stringify(payload))
   const message = `${encodedHeader}.${encodedPayload}`
 
-  // Sign with private key (returns DER-encoded signature)
+  // Sign with private key (returns P-1363 format - 64 bytes for P-256)
   const messageBuffer = new TextEncoder().encode(message)
-  const derSignature = await crypto.subtle.sign(
+  const signature = await crypto.subtle.sign(
     {
       name: 'ECDSA',
       hash: 'SHA-256'
@@ -420,13 +420,11 @@ async function signJWT(payload: {
     messageBuffer
   )
 
-  // CRITICAL: Convert DER signature to P-1363 format (raw r‖s)
-  // WebCrypto returns DER (~70-72 bytes), JWS ES256 requires P-1363 (64 bytes)
-  const p1363Signature = derToP1363(derSignature)
-  const signatureBase64 = base64url(p1363Signature)
+  // WebCrypto returns P-1363 format, JWS ES256 requires P-1363 - no conversion needed
+  const signatureBase64 = base64url(signature)
   const jwt = `${message}.${signatureBase64}`
 
-  console.log('[KMS Worker] ✅ JWT signed (DER→P-1363 converted)')
+  console.log('[KMS Worker] ✅ JWT signed')
 
   return {
     jwt,

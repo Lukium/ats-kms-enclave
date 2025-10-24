@@ -56,8 +56,11 @@ This document serves as the baseline for understanding what needs to be built.
 - ❌ **Dedicated Worker**: No worker thread for key operations
 - ❌ **Non-Extractable Keys**: No use of WebCrypto non-extractable feature
 - ❌ **VAPID Keys**: No per-user VAPID keypair for notifications
-- ❌ **Audit Logging**: No tamper-evident log of key operations (planned for Phase 1)
-- ❌ **Unlock Mechanisms**: No passkey/passphrase protection for key usage (planned for Phase 1)
+- ✅ **Audit Logging**: Tamper-evident log of key operations (Phase 1 complete - `src/audit.ts`)
+- ✅ **Unlock Mechanisms**: Passkey (PRF + gate-only) and passphrase protection (Phase 1 complete - `src/unlock.ts`)
+  - Passphrase: PBKDF2(600k) → HKDF → K_wrap
+  - Passkey PRF: WebAuthn PRF → HKDF → K_wrap → unwrap KEK
+  - Passkey Gate: WebAuthn assertion → 5-minute session with in-memory KEK
 - ❌ **Verifiable Build**: No reproducible build pipeline
 - ❌ **Content Addressing**: No hash-based artifact naming
 - ❌ **SRI Verification**: No subresource integrity checks

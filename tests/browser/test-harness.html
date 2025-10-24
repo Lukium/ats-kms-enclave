@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Test Harness</title>
+</head>
+<body>
+  <h1>KMS Browser Test Harness</h1>
+  <div id="status">Ready for testing...</div>
+
+  <script type="module">
+    // Import KMSClient for browser testing
+    import { KMSClient } from '../../src/client.js';
+
+    // Create worker instance
+    const worker = new Worker(
+      new URL('../../src/worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+
+    // Create client instance
+    const client = new KMSClient(worker);
+
+    // Expose to window for Playwright access
+    window.kmsClient = client;
+    window.kmsTestReady = true;
+
+    // Signal ready
+    document.getElementById('status').textContent = 'KMS Client Ready';
+    console.log('[Test Harness] KMS Client ready for testing');
+  </script>
+</body>
+</html>

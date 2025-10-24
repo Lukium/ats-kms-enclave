@@ -12,6 +12,7 @@ const KMS_ORIGIN = 'http://localhost:5177';
 
 let vapidKid: string | null = null; // Store VAPID kid for reuse
 let setupMethod: 'passphrase' | 'passkey' | null = null; // Track setup method for unlock
+let isLocked = true; // Track lock state
 
 // Display current origin
 document.getElementById('parent-origin')!.textContent = window.location.origin;
@@ -51,6 +52,7 @@ async function initKMSUser(): Promise<void> {
           note: 'Use Unlock button to unlock with passphrase',
         });
       }
+      isLocked = true; // Existing setup starts locked
       enableOperationControls();
     } else {
       enableInitialControls();
@@ -69,9 +71,26 @@ function enableInitialControls(): void {
 
 // Enable operation controls (after setup)
 function enableOperationControls(): void {
-  document.getElementById('unlock-kms')!.removeAttribute('disabled');
+  updateLockButton();
   document.getElementById('generate-vapid')!.removeAttribute('disabled');
   document.getElementById('sign-jwt')!.removeAttribute('disabled');
+}
+
+// Update lock/unlock button based on current state
+function updateLockButton(): void {
+  const unlockBtn = document.getElementById('unlock-kms') as HTMLButtonElement;
+
+  if (isLocked) {
+    unlockBtn.textContent = 'Unlock KMS';
+    unlockBtn.removeAttribute('disabled');
+    unlockBtn.classList.remove('btn-success');
+    unlockBtn.classList.add('btn-secondary');
+  } else {
+    unlockBtn.textContent = '🔓 Unlocked';
+    unlockBtn.setAttribute('disabled', 'true');
+    unlockBtn.classList.remove('btn-secondary');
+    unlockBtn.classList.add('btn-success');
+  }
 }
 
 // Display output
@@ -118,6 +137,7 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
   try {
     const result = await kmsUser.setupPassphrase(passphrase);
     setupMethod = 'passphrase'; // Track setup method
+    isLocked = false; // Setup auto-unlocks
     displayOutput('✅ Passphrase Setup Complete', result);
     enableOperationControls();
   } catch (error) {
@@ -132,6 +152,7 @@ document.getElementById('setup-passkey')!.addEventListener('click', async () => 
       rpName: 'ATS KMS Demo',
     });
     setupMethod = 'passkey'; // Track setup method
+    isLocked = false; // Setup auto-unlocks
     displayOutput('✅ Passkey Setup Complete', result);
     enableOperationControls();
   } catch (error) {
@@ -150,10 +171,14 @@ document.getElementById('unlock-kms')!.addEventListener('click', async () => {
       const passphrase = prompt('Enter passphrase to unlock:');
       if (!passphrase) return;
       const result = await kmsUser.unlockWithPassphrase(passphrase);
+      isLocked = false; // Mark as unlocked
       displayOutput('✅ KMS Unlocked (Passphrase)', result);
+      updateLockButton(); // Update button state
     } else {
       const result = await kmsUser.unlockWithPasskey(window.location.hostname);
+      isLocked = false; // Mark as unlocked
       displayOutput('✅ KMS Unlocked (Passkey)', result);
+      updateLockButton(); // Update button state
     }
   } catch (error) {
     displayError(error as Error);

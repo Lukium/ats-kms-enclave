@@ -152,8 +152,13 @@ button {
   background: #4f46e5;
 }
 
+.btn-success {
+  background: #059669;
+  color: white;
+}
+
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.7;
   cursor: not-allowed;
 }
 

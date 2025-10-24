@@ -6,15 +6,21 @@
  * like navigator.credentials (WebAuthn).
  */
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { test, expect, type Page } from '@playwright/test';
 
 // Helper to wait for KMS client to be ready
-async function waitForKMSReady(page: Page) {
+async function waitForKMSReady(page: Page): Promise<void> {
   await page.waitForFunction(() => window.kmsTestReady === true, { timeout: 10000 });
 }
 
 // Helper to enable WebAuthn virtual authenticator with PRF support
-async function setupVirtualAuthenticator(page: Page, enablePRF: boolean = true) {
+async function setupVirtualAuthenticator(page: Page, _enablePRF: boolean = true): Promise<{ client: unknown; authenticatorId: string }> {
   const client = await page.context().newCDPSession(page);
 
   // Enable the WebAuthn environment first
@@ -73,7 +79,7 @@ test.describe('KMSClient Passkey Flows (Browser)', () => {
     expect(result.error).toBeUndefined();
   });
 
-  test.skip('should unlock with passkey PRF after setup (skipped - PRF not supported by virtual authenticator)', async ({ page }) => {
+  test.skip('should unlock with passkey PRF after setup (skipped - PRF not supported by virtual authenticator)', async ({ page: _page }) => {
     // Virtual authenticators don't support PRF extension yet
     // This test would need a real hardware authenticator or browser with PRF support
   });
@@ -147,7 +153,7 @@ test.describe('KMSClient Passkey Flows (Browser)', () => {
     expect(result.error).toMatch(/PASSKEY_(NOT_AVAILABLE|CREATION_FAILED)/);
   });
 
-  test.skip('should handle passkey creation failure gracefully (skipped - timing issues with virtual auth removal)', async ({ page }) => {
+  test.skip('should handle passkey creation failure gracefully (skipped - timing issues with virtual auth removal)', async ({ page: _page }) => {
     // This test is flaky due to race conditions when removing the virtual authenticator
     // The client might check credentials.create before we remove the authenticator
   });

@@ -11,6 +11,8 @@ This demo demonstrates the **core security principle** of the KMS architecture: 
 3. **Secrets never touch the parent**: Passkey/passphrase setup, key generation, and signing all happen in the iframe
 4. **Parent receives only public outputs**: JWT signatures, public keys - never private keys
 5. **Iframe handles all crypto validation**: Lock/unlock operations are validated entirely within the KMS
+6. **Disk encryption via memory-only KEK**: Even if OS is compromised and IndexedDB is dumped, private keys cannot be unwrapped without user's passphrase/passkey
+7. **Tamper-evident audit log**: All operations are logged in a cryptographic chain - compromised KMS cannot hide malicious operations without detection
 
 ## Architecture
 
@@ -81,24 +83,53 @@ This dual-port setup allows us to configure **real CSP rules** and test **true c
 │  │                  KMS Worker (Isolated)                  │  │
 │  │                                                         │  │
 │  │  ┌───────────────────────────────────────────────────┐  │  │
+│  │  │         Memory (Volatile - Cleared on Lock)       │  │  │
+│  │  │                                                   │  │  │
+│  │  │  KEK (Key Encryption Key) - NEVER ON DISK         │  │  │
+│  │  │    ├─ Derived from passphrase (PBKDF2)            │  │  │
+│  │  │    └─ Derived from passkey PRF output             │  │  │
+│  │  │                                                   │  │  │
+│  │  │  Used to wrap/unwrap private keys                 │  │  │
+│  │  │  Cleared from memory when locked                  │  │  │
+│  │  └───────────────────────────────────────────────────┘  │  │
+│  │                          ↓                              │  │
+│  │  ┌───────────────────────────────────────────────────┐  │  │
 │  │  │        WebCrypto Operations (Sealed)              │  │  │
 │  │  │                                                   │  │  │
 │  │  │  - Passkey/passphrase setup (gate mode)           │  │  │
 │  │  │  - VAPID keypair generation (non-extractable)     │  │  │
 │  │  │  - JWT signing (ES256)                            │  │  │
-│  │  │  - Lock/unlock state management                   │  │  │
-│  │  │  - Key wrapping/unwrapping                        │  │  │
+│  │  │  - Key wrapping with KEK (AES-GCM)                │  │  │
+│  │  │  - Key unwrapping with KEK (decrypt + verify)     │  │  │
 │  │  │                                                   │  │  │
 │  │  │  All private keys: extractable: false             │  │  │
-│  │  │  Storage: IndexedDB (iframe-local)                │  │  │
+│  │  └───────────────────────────────────────────────────┘  │  │
+│  │                          ↓                              │  │
+│  │  ┌───────────────────────────────────────────────────┐  │  │
+│  │  │    IndexedDB Storage (Security-Appropriate)       │  │  │
+│  │  │                                                   │  │  │
+│  │  │  Wrapped private keys (AES-GCM encrypted)         │  │  │
+│  │  │  Public keys (plaintext - no secrets)             │  │  │
+│  │  │  Passkey config (credentialId, salt)              │  │  │
+│  │  │  Audit log (ES256 signed, plaintext)              │  │  │
+│  │  │  Audit signing key (non-extractable)              │  │  │
+│  │  │                                                   │  │  │
+│  │  │  ❌ KEK (NEVER STORED - memory only)               │  │  │
+│  │  │  ❌ Passphrase (NEVER STORED - derived only)       │  │  │
+│  │  │  ❌ PRF output (NEVER STORED - derived only)    │  │  │
 │  │  └───────────────────────────────────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                               │
 │  Parent PWA CANNOT access:                                    │
-│    ❌ Worker memory or state                                   │
+│    ❌ Worker memory or state (KEK, unwrapped keys)             │
 │    ❌ IndexedDB (different origin context)                     │
 │    ❌ Private keys (non-extractable + worker isolation)        │
 │    ❌ Passphrase or PRF outputs                                │
+│                                                               │
+│  Compromised OS with disk access CANNOT:                      │
+│    ❌ Unwrap private keys (KEK not on disk)                    │
+│    ❌ Read audit log plaintext (encrypted with KEK)            │
+│    ❌ Derive KEK (needs passphrase or passkey PRF)             │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -222,7 +253,54 @@ Private keys are marked `extractable: false`:
 
 **Demo Test**: In Worker scope, try `crypto.subtle.exportKey('pkcs8', privateKey)` → **Operation not supported error**
 
-### 4. Minimal Attack Surface
+### 4. Disk Encryption via Memory-Only KEK (Critical Defense Layer)
+
+The KEK (Key Encryption Key) is **NEVER stored on disk** - it only exists in Worker memory:
+
+**KEK Lifecycle:**
+1. **Derivation**: KEK is derived from passphrase (PBKDF2) or passkey PRF output during unlock
+2. **Memory Storage**: KEK exists only in Worker memory (`_wrappingKeyRef` variable)
+3. **Usage**: All private keys are wrapped with KEK before storing in IndexedDB
+4. **Lock**: KEK is cleared from memory (`_wrappingKeyRef = null`)
+5. **Re-derivation**: User must re-authenticate to derive KEK again
+
+**What This Protects Against:**
+
+| Threat | Protection | Details |
+|--------|-----------|---------|
+| **Compromised OS (disk access)** | ✅ Protected | Attacker sees wrapped keys in IndexedDB but cannot unwrap without KEK |
+| **Cold boot attack** | ✅ Protected | Wrapped keys are useless without KEK from passphrase/passkey |
+| **Memory dump (while locked)** | ✅ Protected | KEK is cleared from memory when locked |
+| **IndexedDB export** | ✅ Protected | All private keys and audit log are AES-GCM encrypted |
+| **Database forensics** | ✅ Protected | Cannot derive KEK from stored data (no KEK on disk) |
+
+**Attack Requirements:**
+
+To unwrap private keys, attacker needs **BOTH**:
+- Disk access (to get wrapped keys from IndexedDB)
+- **AND** user's passphrase/passkey (to derive KEK)
+- **OR** memory access while KMS is unlocked (live memory dump)
+
+**What Gets Encrypted with KEK:**
+- ✅ Private keys (wrapped with AES-GCM before IndexedDB storage)
+- ✅ Audit log entries (all operations encrypted)
+- ✅ Sensitive metadata (key usage stats, timestamps)
+
+**What Is NOT Encrypted:**
+- ✅ Public keys (safe to store plaintext)
+- ✅ Passkey credential IDs (needed for WebAuthn, not sensitive)
+- ✅ Salt values (needed for PBKDF2, not sensitive without passphrase)
+
+**Demo Test**:
+1. Setup passkey and generate VAPID keypair
+2. Lock the KMS (clears KEK from memory)
+3. Open iframe DevTools → Application → IndexedDB
+4. Inspect wrapped private key blob → **AES-GCM ciphertext (unreadable)**
+5. Try to unwrap without KEK → **Cannot derive KEK without passphrase/passkey**
+
+**Implementation Note**: The security-flow demo already implements this via `unlock.ts` functions (`setupPasskeyPRF`, `unlockWithPasskeyPRF`, etc.). The iframe-isolation demo will use the same Worker code, demonstrating that even with cross-origin isolation, disk encryption provides an additional defense layer.
+
+### 5. Minimal Attack Surface
 
 Parent PWA is **untrusted** by design:
 - If parent is compromised, keys remain safe
@@ -231,6 +309,165 @@ Parent PWA is **untrusted** by design:
 - Parent cannot bypass lock state
 
 **Demo Test**: Compromise parent by modifying its code → **KMS operations still protected**
+
+### 6. Tamper-Evident Audit Log (Compromise Detection)
+
+The KMS maintains a **cryptographically-signed and hash-chained audit log** that records all operations. This provides tamper detection even if the KMS itself is compromised.
+
+**Signature + Chain Hash Mechanism:**
+
+Every operation in the KMS generates an audit log entry with:
+1. **Operation details**: Type, timestamp, parameters, origin, requestId
+2. **Previous entry hash** (`prevHash`): SHA-256 hash of the previous log entry
+3. **Nonce**: 16 random bytes (prevents replay attacks)
+4. **ES256 Signature** (`sig`): ECDSA P-256 signature of the entire entry
+
+This creates a dual-protection system:
+```
+Entry 1:
+  - prevHash: GENESIS (64 zeros)
+  - data: {op, timestamp, kid, ...}
+  - sig: Sign(data, privateKey)
+  - entryHash: SHA-256(data)
+        ↓
+Entry 2:
+  - prevHash: entryHash(Entry 1)   ← Hash chain
+  - data: {op, timestamp, kid, ...}
+  - sig: Sign(data, privateKey)    ← Signature
+  - entryHash: SHA-256(data)
+        ↓
+Entry 3:
+  - prevHash: entryHash(Entry 2)
+  - data: {op, timestamp, kid, ...}
+  - sig: Sign(data, privateKey)
+  - entryHash: SHA-256(data)
+        ↓
+      ...
+```
+
+**Dual Protection:**
+- **Hash chain** (prevHash): Prevents reordering, deletion, or insertion of entries
+- **ES256 signature** (sig): Prevents forgery - requires non-extractable private key to create valid entry
+
+**Tamper Detection:**
+
+| Scenario | What Happens | Detection |
+|----------|--------------|-----------|
+| **Compromised KMS forces an operation** | Operation gets logged with valid signature | ✅ User sees unauthorized operation in log |
+| **Attacker removes log entry** | Chain hash breaks (next entry's prevHash doesn't match) | ✅ Tamper detected on next operation |
+| **Attacker modifies log entry** | Signature verification fails (signed data changed) | ✅ Tamper detected immediately |
+| **Attacker forges new entry** | Cannot create valid signature without private key | ✅ Signature verification fails |
+| **Attacker recomputes entire chain** | Cannot create valid signatures for recomputed entries | ✅ All signatures fail verification |
+
+**Security Properties:**
+
+1. **Append-only**: Cannot remove past entries without breaking chain
+2. **Tamper-evident**: Any modification breaks signature verification
+3. **Forgery-resistant**: Cannot create valid entries without audit signing key (non-extractable)
+4. **User-auditable**: User can view log and verify chain + signatures
+5. **Immediate detection**: Chain and signature validation happens on every operation
+6. **Recoverable**: Stored plaintext (not encrypted) for important security reasons
+
+**Why Audit Log is NOT Encrypted (Design Decision):**
+
+The audit log is intentionally stored as plaintext (signed but not encrypted) because:
+
+1. **No Secrets**: Audit log contains only operation metadata (timestamps, operation types, requestIds)
+   - Does NOT contain: private keys, KEK, passphrases, JWT payloads, signatures
+   - Only records THAT operations occurred, not sensitive data
+
+2. **Integrity Protection**: ES256 signatures provide tamper detection
+   - Cannot modify entries without detection (signature verification fails)
+   - Cannot forge entries without audit signing key (non-extractable)
+   - Signatures provide stronger guarantees than encryption for audit integrity
+
+3. **External Verification**: Anyone with audit public key can verify the log
+   - Security researchers can independently verify chain integrity
+   - Users can export and verify log outside the KMS
+   - Enables third-party auditing without compromising security
+
+4. **Recovery & Forensics**: If user loses passphrase/passkey (KEK lost):
+   - Audit log remains accessible (not encrypted with KEK)
+   - User can prove what operations occurred (for recovery, insurance claims)
+   - Enables post-compromise forensics and investigation
+
+5. **Transparency**: Plaintext audit log supports security-by-design principles
+   - Operations are visible and auditable
+   - No "hidden" activity that can't be verified
+   - Aligns with KMS goal of user-verifiable security
+
+**What IS Encrypted:**
+- ✅ Private keys (wrapped with KEK, AES-GCM)
+- ✅ Audit signing private key (non-extractable, encrypted by browser)
+- ❌ Audit log entries (plaintext by design)
+
+**Attack Scenario - Why Plaintext Audit is Safe:**
+- Attacker dumps IndexedDB → sees audit log plaintext → "User signed JWT at timestamp X"
+- **No secrets leaked**: Attacker doesn't get private keys, KEK, passphrase, or JWT itself
+- **Cannot forge**: Attacker cannot create fake audit entries (needs non-extractable signing key)
+- **Cannot hide operations**: Any operations attacker forces will be logged and visible
+
+**What Gets Logged (from src/audit.ts):**
+- ✅ **Setup operations** (`setup`): passphrase setup, passkey PRF setup, passkey gate setup
+- ✅ **Unlock operations** (`unlock`): passphrase unlock, passkey PRF unlock, passkey gate unlock
+- ✅ **VAPID key generation** (`generate_vapid`): P-256 keypair creation
+- ✅ **JWT signing** (`sign`): All sign operations including policy violations
+- ✅ **Metadata**: timestamp, requestId, origin, clientInfo (user agent, URL), kid (key ID)
+- ✅ **Chain data**: prevHash, nonce, signature
+
+**What Is NOT Logged:**
+- ❌ Private keys (never logged)
+- ❌ KEK or wrapping keys (never logged)
+- ❌ Passphrase or PRF outputs (never logged)
+- ❌ JWT payloads or signatures (only that signing occurred)
+- ❌ User secrets (only operation metadata)
+
+**Audit Log Signing Key:**
+- Separate ES256 (ECDSA P-256) keypair for audit log signatures
+- Private key is non-extractable, stored in IndexedDB
+- Public key is exportable (JWK format) for external verification
+- NOT the same key as VAPID keys
+
+**Attack Scenario - Compromised KMS:**
+
+1. **Attacker compromises KMS** (malicious update, browser exploit)
+2. **Attacker forces KMS to sign malicious JWT** (e.g., impersonate user)
+3. **Operation gets logged with valid signature** (cannot avoid logging)
+4. **User checks audit log** (sees unauthorized JWT signing operation)
+5. **User detects compromise** (timestamp, requestId, unexpected operation)
+
+**Attack Scenario - Covering Tracks:**
+
+1. **Attacker forces malicious operation** (logged with valid signature)
+2. **Attacker tries to remove log entry** (hide evidence)
+3. **Chain hash breaks** (next entry's prevHash doesn't match)
+4. **Tamper detected on next operation** (chain validation fails)
+5. **User sees tamper warning** (immediate visibility)
+
+**Attack Scenario - Forging Audit Entry:**
+
+1. **Attacker wants to create fake audit entry** (make operation look legitimate)
+2. **Attacker attempts to sign entry** (needs audit signing private key)
+3. **Signing fails** (key is non-extractable, cannot be accessed)
+4. **Attacker inserts unsigned/invalid entry** (hoping it won't be verified)
+5. **Signature verification fails** (entry has invalid or missing signature)
+6. **User sees tamper warning** (invalid signature detected)
+
+**Demo Test**:
+1. Generate VAPID keypair and sign JWT (creates audit log entries)
+2. View audit log in iframe (shows all operations with signatures and hashes)
+3. Verify chain integrity (each entry's prevHash matches previous entry's hash)
+4. Verify signatures (each entry has valid ES256 signature from audit signing key)
+5. Simulate tamper: manually modify an entry's timestamp in IndexedDB
+6. Perform new operation → **Signature verification fails**
+7. Check iframe UI → "⚠️ Audit log tamper detected - signature invalid for entry"
+
+**Implementation Note**: The security-flow demo already implements this via the audit log system in `src/audit.ts`. The iframe-isolation demo will expose the audit log viewer in the iframe UI, demonstrating that even if the KMS is compromised, tampering is immediately visible to the user. The audit log uses ES256 (ECDSA P-256) signatures with a separate non-extractable signing key stored in IndexedDB.
+
+**Defense-in-Depth Layer**: This complements the other security properties:
+- Cross-origin isolation prevents parent from accessing KMS
+- Disk encryption (KEK) prevents OS from reading keys
+- **Audit log prevents compromised KMS from hiding malicious operations**
 
 ## Visual Design
 
@@ -248,18 +485,25 @@ The demo UI is split into two visual sections:
 - **Title**: "KMS Enclave (Isolated)"
 - **Content**: Embedded iframe showing KMS internal state
   - Current lock status: 🔓 Unlocked / 🔒 Locked
-  - Operations log: Recent crypto operations
+  - **Audit log viewer**: Scrollable list of all operations with chain hashes
+    - Each entry shows: timestamp, operation type, parameters, result
+    - Chain integrity indicator: ✅ Valid / ⚠️ Tampered
+    - Visual chain links showing hash connections between entries
   - Security guarantees: Visual reminders of isolation
 - **Visual Separation**: Heavy border, different background color, clear label
-- **Security Indicator**: "✅ Private keys never leave this iframe" (always visible)
+- **Security Indicators**:
+  - "✅ Private keys never leave this iframe" (always visible)
+  - "✅ Audit log chain verified" (green) or "⚠️ Tamper detected" (red)
 
 ### Key Visual Elements
 
-1. **Origin display**: Show parent origin (localhost:5176) vs iframe origin
+1. **Origin display**: Show parent origin (localhost:5176) vs iframe origin (localhost:5177)
 2. **Message flow arrows**: Animate postMessage direction when operations occur
 3. **Lock state indicator**: Visual lock icon that changes color (green=unlocked, red=locked)
 4. **Operation success/fail**: Color-coded feedback (green/red)
 5. **Security boundaries**: Dashed line between parent and iframe sections
+6. **Audit log chain visualization**: Connect entries with visual arrows showing hash dependencies
+7. **Tamper warning banner**: Prominent red banner if chain integrity fails
 
 ## Testing Security Claims
 
@@ -289,6 +533,23 @@ After implementing the demo, users can verify isolation:
 2. Modify parent code to send `signJWT` without checking lock state
 3. Send message directly → **Worker refuses operation**
 4. KMS enforces lock internally, parent cannot override
+
+### Test 5: Audit Log Chain Integrity
+1. Perform several operations (setup, generate VAPID, sign JWT, lock/unlock)
+2. View audit log in iframe UI → **See all operations logged**
+3. Verify chain: each entry's `prevHash` matches previous entry's hash
+4. Open iframe DevTools → Application → IndexedDB → audit log table
+5. Manually modify an entry (change timestamp or operation type)
+6. Perform a new operation (e.g., sign JWT)
+7. **Chain validation fails** → "⚠️ Audit log tamper detected"
+8. Check iframe UI → **Tamper warning visible to user**
+9. Verify specific entry shows broken chain link
+
+**What This Proves:**
+- Cannot hide operations without breaking chain
+- Cannot modify past operations without detection
+- Tamper detection is immediate and visible
+- Even compromised KMS cannot cover its tracks
 
 ## Implementation Notes
 

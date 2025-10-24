@@ -70,7 +70,6 @@ async function sendToKMS(method: string, params?: any): Promise<any> {
 // Enable initial controls
 function enableInitialControls(): void {
   document.getElementById('setup-passphrase')!.removeAttribute('disabled');
-  document.getElementById('setup-passkey')!.removeAttribute('disabled');
 }
 
 // Enable operation controls (after setup)
@@ -123,19 +122,6 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
   try {
     const result = await sendToKMS('setupPassphrase', { passphrase });
     displayOutput('✅ Passphrase Setup Complete', result);
-    enableOperationControls();
-  } catch (error) {
-    displayError(error as Error);
-  }
-});
-
-document.getElementById('setup-passkey')!.addEventListener('click', async () => {
-  try {
-    const result = await sendToKMS('setupPasskeyPRF', {
-      rpId: window.location.hostname,
-      rpName: 'ATS KMS Demo'
-    });
-    displayOutput('✅ Passkey Setup Complete', result);
     enableOperationControls();
   } catch (error) {
     displayError(error as Error);

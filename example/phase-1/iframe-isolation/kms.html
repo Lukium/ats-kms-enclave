@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Enclave (Isolated)</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="kms-container">
+    <h2>🔐 KMS Enclave</h2>
+    <p class="origin-display">Origin: <span id="kms-origin">http://localhost:5177</span></p>
+    <p class="security-badge">✅ Isolated from parent</p>
+
+    <div id="status-section">
+      <h3>Status</h3>
+      <div id="lock-status" class="status-locked">🔒 Locked</div>
+    </div>
+
+    <div id="audit-log-section">
+      <h3>Audit Log</h3>
+      <div id="chain-status" class="chain-valid">✅ Chain verified</div>
+      <div id="audit-entries"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./kms.ts"></script>
+</body>
+</html>

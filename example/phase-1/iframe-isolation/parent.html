@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parent PWA (Untrusted)</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="parent-container">
+    <h1>🌐 Parent PWA</h1>
+    <p class="origin-display">Origin: <span id="parent-origin">http://localhost:5176</span></p>
+    <p class="security-warning">❌ Cannot access KMS internals (cross-origin isolated)</p>
+
+    <div class="controls-section">
+      <h2>Setup (Choose One)</h2>
+      <div class="button-group">
+        <button id="setup-passphrase" class="btn-primary">Setup Passphrase</button>
+        <button id="setup-passkey" class="btn-primary">Setup Passkey</button>
+      </div>
+
+      <h2>Operations</h2>
+      <div class="button-group">
+        <button id="unlock-kms" class="btn-secondary" disabled>Unlock KMS</button>
+        <button id="generate-vapid" class="btn-secondary" disabled>Generate VAPID</button>
+        <button id="sign-jwt" class="btn-secondary" disabled>Sign JWT</button>
+        <button id="lock-kms" class="btn-secondary" disabled>Lock KMS</button>
+      </div>
+
+      <h2>Testing</h2>
+      <div class="button-group">
+        <button id="get-status" class="btn-test">Get Status</button>
+        <button id="view-audit" class="btn-test">View Audit Log</button>
+      </div>
+    </div>
+
+    <div class="output-section">
+      <h2>Received from KMS (Public Data Only)</h2>
+      <div id="output-display"></div>
+    </div>
+  </div>
+
+  <!-- KMS Iframe (cross-origin isolated) -->
+  <div id="iframe-container">
+    <iframe
+      id="kms-iframe"
+      src="http://localhost:5177"
+      sandbox="allow-scripts allow-same-origin"
+      referrerpolicy="no-referrer"
+    ></iframe>
+  </div>
+
+  <script type="module" src="./parent.ts"></script>
+</body>
+</html>

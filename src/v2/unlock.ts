@@ -1,0 +1,357 @@
+/**
+ * Unlock context management for KMS V2
+ *
+ * The unlock module encapsulates the logic for creating and
+ * decrypting the master secret (MS) using various authentication
+ * methods. It supports passphrase and passkey PRF enrolments and
+ * provides a single unlock gate via `withUnlock` which guarantees
+ * cleanup of sensitive material. Key derivation and encryption
+ * routines are delegated to the crypto utilities and WebCrypto APIs.
+ */
+
+import {
+  computeKCV,
+  verifyKCV,
+  deriveDeterministicSalt,
+  buildMSEncryptionAAD,
+  calibratePBKDF2Iterations,
+} from './crypto-utils';
+import {
+  getMeta,
+  putMeta,
+} from './storage';
+import type {
+  PassphraseConfigV2,
+  PasskeyPRFConfigV2,
+  AuthCredentials,
+  UnlockOperationResult,
+  EnrollmentConfigV2,
+  UnlockResult,
+} from './types';
+
+// Persistent config keys for enrolments. In a real implementation
+// these would include unique identifiers; here a single entry per
+// method suffices for demonstration.
+const PASSPHRASE_CONFIG_KEY = 'enrollment:passphrase:v2';
+const PASSKEY_PRF_CONFIG_KEY = 'enrollment:passkey-prf:v2';
+
+/**
+ * Generate a new random 32‑byte master secret. The MS should never
+ * persist in storage unencrypted.
+ */
+function generateMasterSecret(): Uint8Array {
+  const ms = new Uint8Array(32);
+  crypto.getRandomValues(ms);
+  return ms;
+}
+
+/**
+ * Setup the passphrase authentication method. Derives a key
+ * encryption key (KEK) from the provided passphrase via calibrated
+ * PBKDF2, encrypts the master secret under AES‑GCM and stores the
+ * resulting configuration. Returns the cleartext MS to the caller.
+ */
+export async function setupPassphrase(
+  passphrase: string,
+  existingMS?: Uint8Array
+): Promise<UnlockResult> {
+  const ms = existingMS ?? generateMasterSecret();
+  // Calibrate PBKDF2 iterations and derive KEK
+  const { iterations } = await calibratePBKDF2Iterations();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const passphraseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  );
+  const kek = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    passphraseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  // Compute KCV
+  const kcv = await computeKCV(kek);
+  // Encrypt MS
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const aad = buildMSEncryptionAAD({
+    kmsVersion: 2,
+    method: 'passphrase',
+    algVersion: 1,
+    purpose: 'master-secret',
+  });
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: aad },
+    kek,
+    ms
+  );
+  // Persist config
+  const config: PassphraseConfigV2 = {
+    kmsVersion: 2,
+    algVersion: 1,
+    method: 'passphrase',
+    kdf: {
+      algorithm: 'PBKDF2-HMAC-SHA256',
+      iterations,
+      salt: salt.buffer.slice(salt.byteOffset, salt.byteOffset + salt.byteLength),
+      lastCalibratedAt: Date.now(),
+      platformHash: '', // platform hash can be filled by caller
+    },
+    kcv,
+    encryptedMS: ciphertext,
+    msIV: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength),
+    msAAD: aad,
+    msVersion: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  await putMeta(PASSPHRASE_CONFIG_KEY, config);
+  return { success: true, ms };
+}
+
+/**
+ * Setup the passkey PRF authentication method. Derives a KEK via
+ * HKDF from the provided PRF output, encrypts the master secret and
+ * stores the resulting configuration. The RP ID must be supplied
+ * externally; here it is optional and defaults to an empty string.
+ */
+export async function setupPasskeyPRF(
+  credentialId: ArrayBuffer,
+  prfOutput: ArrayBuffer,
+  existingMS?: Uint8Array,
+  rpId: string = ''
+): Promise<UnlockResult> {
+  const ms = existingMS ?? generateMasterSecret();
+  // Deterministic salt and info for KEK derivation
+  const hkdfSalt = await deriveDeterministicSalt('ATS/KMS/KEK-wrap/salt/v2');
+  const info = new TextEncoder().encode('ATS/KMS/KEK-wrap/v2');
+  const ikm = await crypto.subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveKey']);
+  const kek = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: hkdfSalt, info },
+    ikm,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  // Encrypt MS
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const aad = buildMSEncryptionAAD({
+    kmsVersion: 2,
+    method: 'passkey-prf',
+    algVersion: 1,
+    credentialId,
+    purpose: 'master-secret',
+  });
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: aad },
+    kek,
+    ms
+  );
+  const now = Date.now();
+  // Generate appSalt for WebAuthn PRF first evaluation and separate HKDF salt for future use
+  const appSalt = crypto.getRandomValues(new Uint8Array(32));
+  const config: PasskeyPRFConfigV2 = {
+    kmsVersion: 2,
+    algVersion: 1,
+    method: 'passkey-prf',
+    credentialId,
+    rpId,
+    kdf: {
+      algorithm: 'HKDF-SHA256',
+      appSalt: appSalt.buffer.slice(appSalt.byteOffset, appSalt.byteOffset + appSalt.byteLength),
+      hkdfSalt: hkdfSalt,
+      info: 'ATS/KMS/KEK-wrap/v2',
+    },
+    encryptedMS: ciphertext,
+    msIV: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength),
+    msAAD: aad,
+    msVersion: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await putMeta(PASSKEY_PRF_CONFIG_KEY, config);
+  return { success: true, ms };
+}
+
+/**
+ * Unimplemented setup for passkey gate method. Returns failure.
+ */
+export async function setupPasskeyGate(
+  _credentialId: ArrayBuffer,
+  _existingMS?: Uint8Array
+): Promise<UnlockResult> {
+  return { success: false, error: 'Passkey gate method not implemented' };
+}
+
+/**
+ * Unlock the master secret using a passphrase. Retrieves the stored
+ * configuration, derives the KEK and verifies the KCV. If the
+ * verification passes the master secret is decrypted and returned.
+ */
+export async function unlockWithPassphrase(passphrase: string): Promise<UnlockResult> {
+  const config = (await getMeta<PassphraseConfigV2>(PASSPHRASE_CONFIG_KEY));
+  if (!config) return { success: false, error: 'Passphrase not set up' };
+  const passphraseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  );
+  const kek = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: config.kdf.salt, iterations: config.kdf.iterations },
+    passphraseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  const computedKcv = await computeKCV(kek);
+  if (!verifyKCV(computedKcv, config.kcv)) {
+    return { success: false, error: 'Invalid passphrase' };
+  }
+  try {
+    const msBuf = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: config.msIV, additionalData: config.msAAD },
+      kek,
+      config.encryptedMS
+    );
+    return { success: true, ms: new Uint8Array(msBuf) };
+  } catch (err) {
+    return { success: false, error: 'Decryption failed' };
+  }
+}
+
+/**
+ * Unlock the master secret using a passkey PRF output. Uses HKDF to
+ * derive the KEK, decrypts the MS and returns it. No KCV is stored
+ * for passkey enrolments in this simplified implementation.
+ */
+export async function unlockWithPasskeyPRF(prfOutput: ArrayBuffer): Promise<UnlockResult> {
+  const config = (await getMeta<PasskeyPRFConfigV2>(PASSKEY_PRF_CONFIG_KEY));
+  if (!config) return { success: false, error: 'Passkey not set up' };
+  const hkdfSalt = config.kdf.hkdfSalt;
+  const info = new TextEncoder().encode(config.kdf.info);
+  const ikm = await crypto.subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveKey']);
+  const kek = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: hkdfSalt, info },
+    ikm,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  try {
+    const msBuf = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: config.msIV, additionalData: config.msAAD },
+      kek,
+      config.encryptedMS
+    );
+    return { success: true, ms: new Uint8Array(msBuf) };
+  } catch (err) {
+    return { success: false, error: 'Decryption failed' };
+  }
+}
+
+/**
+ * Unlocking via passkey gate is unimplemented. Returns failure.
+ */
+export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
+  return { success: false, error: 'Passkey gate method not implemented' };
+}
+
+/**
+ * Test whether any enrolment exists. Used by the UI to determine
+ * whether setup is required.
+ */
+export async function isSetup(): Promise<boolean> {
+  const pass = await getMeta(PASSPHRASE_CONFIG_KEY);
+  const prf = await getMeta(PASSKEY_PRF_CONFIG_KEY);
+  return !!(pass || prf);
+}
+
+/**
+ * Test whether a passphrase enrolment exists.
+ */
+export async function isPassphraseSetup(): Promise<boolean> {
+  return !!(await getMeta(PASSPHRASE_CONFIG_KEY));
+}
+
+/**
+ * Test whether a passkey PRF enrolment exists.
+ */
+export async function isPasskeySetup(): Promise<boolean> {
+  return !!(await getMeta(PASSKEY_PRF_CONFIG_KEY));
+}
+
+/**
+ * Derive the master key encryption key (MKEK) from the master secret.
+ * Uses HKDF with a deterministic salt and info string specific to
+ * MKEK derivation. The returned key is non‑extractable and can be
+ * used for wrapping application keys.
+ */
+export async function deriveMKEKFromMS(ms: Uint8Array): Promise<CryptoKey> {
+  const salt = await deriveDeterministicSalt('ATS/KMS/MKEK/salt/v2');
+  const info = new TextEncoder().encode('ATS/KMS/MKEK/v2');
+  const ikm = await crypto.subtle.importKey('raw', ms, 'HKDF', false, ['deriveKey']);
+  const mkek = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt, info },
+    ikm,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  return mkek;
+}
+
+/**
+ * Execute an operation within an unlocked context. Accepts
+ * credentials, unlocks the MS and derives the MKEK. The provided
+ * operation callback receives the MKEK and may perform any
+ * cryptographic action (e.g. wrapping keys, signing JWTs). After the
+ * callback resolves the MS is zeroised and the timing information
+ * returned alongside the operation result. Errors thrown by the
+ * callback propagate to the caller.
+ */
+export async function withUnlock<T>(
+  credentials: AuthCredentials,
+  operation: (mkek: CryptoKey) => Promise<T>
+): Promise<UnlockOperationResult<T>> {
+  const start = Date.now();
+  let ms: Uint8Array | null = null;
+  try {
+    let unlockResult: UnlockResult;
+    switch (credentials.method) {
+      case 'passphrase':
+        unlockResult = await unlockWithPassphrase(credentials.passphrase);
+        break;
+      case 'passkey-prf':
+        unlockResult = await unlockWithPasskeyPRF(credentials.prfOutput);
+        break;
+      case 'passkey-gate':
+        unlockResult = await unlockWithPasskeyGate();
+        break;
+      default:
+        throw new Error('Unknown credential method');
+    }
+    if (!unlockResult.success) {
+      throw new Error(unlockResult.error ?? 'Unlock failed');
+    }
+    ms = unlockResult.ms;
+    const mkek = await deriveMKEKFromMS(ms);
+    const result = await operation(mkek);
+    const end = Date.now();
+    return {
+      result,
+      unlockTime: start,
+      lockTime: end,
+      duration: end - start,
+    };
+  } finally {
+    // Zeroise MS
+    if (ms) {
+      ms.fill(0);
+    }
+  }
+}

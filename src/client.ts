@@ -162,6 +162,22 @@ export class KMSClient {
   }
 
   /**
+   * Get passkey configuration from worker storage
+   * (needed because client can't access worker's IndexedDB)
+   */
+  getPasskeyConfig(): Promise<{
+    method: string;
+    credentialId?: ArrayBuffer;
+    appSalt?: ArrayBuffer;
+  } | null> {
+    return this.request<{
+      method: string;
+      credentialId?: ArrayBuffer;
+      appSalt?: ArrayBuffer;
+    } | null>('getPasskeyConfig');
+  }
+
+  /**
    * Setup passkey with PRF extension (recommended)
    *
    * Performs WebAuthn ceremony in the client (main window), then sends
@@ -346,15 +362,21 @@ export class KMSClient {
     }
 
     try {
-      // Retrieve stored credential ID from storage
-      const { getMeta } = await import('./storage.js');
-      const config = await getMeta<unknown>('unlockSalt');
-      if (!config || typeof config !== 'object' || !('method' in config) || config.method !== 'passkey-prf') {
+      // Retrieve stored credential ID from worker storage via RPC
+      const config = await this.getPasskeyConfig();
+      console.log('[KMS Client] Retrieved passkey config:', {
+        hasConfig: !!config,
+        method: config?.method,
+        hasCredentialId: !!(config?.credentialId),
+        hasAppSalt: !!(config?.appSalt),
+      });
+
+      if (!config || config.method !== 'passkey-prf' || !config.credentialId || !config.appSalt) {
+        console.log('[KMS Client] Config validation failed');
         return { success: false, error: 'NOT_SETUP' };
       }
 
-      const configData = config as unknown as { credentialId: ArrayBuffer; appSalt: ArrayBuffer };
-      const appSalt = new Uint8Array(configData.appSalt);
+      const appSalt = new Uint8Array(config.appSalt);
 
       // Get assertion with PRF
       const credential = (await navigator.credentials.get({
@@ -364,7 +386,7 @@ export class KMSClient {
           allowCredentials: [
             {
               type: 'public-key',
-              id: configData.credentialId,
+              id: config.credentialId,
             },
           ],
           userVerification: 'required',
@@ -456,14 +478,18 @@ export class KMSClient {
     }
 
     try {
-      // Retrieve stored credential ID
-      const { getMeta } = await import('./storage.js');
-      const config = await getMeta<unknown>('unlockSalt');
-      if (!config || typeof config !== 'object' || !('method' in config) || config.method !== 'passkey-gate') {
+      // Retrieve stored credential ID from worker storage via RPC
+      const config = await this.getPasskeyConfig();
+      console.log('[KMS Client] Retrieved passkey config for gate-only:', {
+        hasConfig: !!config,
+        method: config?.method,
+        hasCredentialId: !!(config?.credentialId),
+      });
+
+      if (!config || config.method !== 'passkey-gate' || !config.credentialId) {
+        console.log('[KMS Client] Gate-only config validation failed');
         return { success: false, error: 'NOT_SETUP' };
       }
-
-      const configData = config as unknown as { credentialId: ArrayBuffer };
 
       // Get assertion (user verification is the gate)
       const credential = (await navigator.credentials.get({
@@ -473,7 +499,7 @@ export class KMSClient {
           allowCredentials: [
             {
               type: 'public-key',
-              id: configData.credentialId,
+              id: config.credentialId,
             },
           ],
           userVerification: 'required',

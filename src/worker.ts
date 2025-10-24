@@ -9,7 +9,7 @@
 // Imports
 // ============================================================================
 
-import { initDB, wrapKey, unwrapKey, getWrappedKey } from './storage.js';
+import { initDB, wrapKey, unwrapKey, getWrappedKey, getMeta } from './storage.js';
 import {
   initAuditLogger,
   logOperation,
@@ -838,6 +838,30 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           id: request.id,
           result,
         };
+      }
+
+      case 'getPasskeyConfig': {
+        // Return passkey configuration from storage
+        // (client can't access worker's IndexedDB directly)
+        try {
+          const config = await getMeta<unknown>('unlockSalt');
+          if (!config) {
+            return {
+              id: request.id,
+              result: null,
+            };
+          }
+
+          return {
+            id: request.id,
+            result: config,
+          };
+        } catch (error) {
+          return {
+            id: request.id,
+            result: null,
+          };
+        }
       }
 
       case 'setupPasskeyPRF': {

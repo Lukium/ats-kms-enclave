@@ -400,11 +400,27 @@ export class KMSClient {
 
   /**
    * Unlock with passkey using PRF extension
+   *
+   * @param rpId - Relying party ID
+   * @param prfOutput - Optional: PRF output from parent (for iframe isolation)
    */
   async unlockWithPasskeyPRF(
-    rpId: string
+    rpId: string,
+    prfOutput?: ArrayBuffer
   ): Promise<{ success: boolean; error?: string }> {
     /* c8 ignore start - browser WebAuthn API code tested by Playwright */
+
+    // Case 1: prfOutput provided (iframe isolation mode - WebAuthn done in parent)
+    if (prfOutput) {
+      console.log('[KMS Client] Using provided prfOutput (iframe isolation mode)');
+      return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyPRF', {
+        prfOutput,
+      });
+    }
+
+    // Case 2: No prfOutput (standalone mode - do WebAuthn here)
+    console.log('[KMS Client] Standalone mode: performing WebAuthn for PRF unlock');
+
     if (typeof navigator === 'undefined' || !navigator.credentials) {
       return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
     }
@@ -536,11 +552,24 @@ export class KMSClient {
 
   /**
    * Unlock with passkey in gate-only mode (fallback)
+   *
+   * @param rpId - Optional: Relying party ID (for standalone mode)
+   *               If not provided, skips WebAuthn (iframe isolation mode where parent did auth)
    */
   async unlockWithPasskeyGate(
-    rpId: string
+    rpId?: string
   ): Promise<{ success: boolean; error?: string }> {
     /* c8 ignore start - browser WebAuthn API code tested by Playwright */
+
+    // Case 1: No rpId provided (iframe isolation mode - WebAuthn done in parent)
+    if (!rpId) {
+      console.log('[KMS Client] Iframe isolation mode: skipping WebAuthn for gate-only unlock');
+      return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyGate', {});
+    }
+
+    // Case 2: rpId provided (standalone mode - do WebAuthn here)
+    console.log('[KMS Client] Standalone mode: performing WebAuthn for gate-only unlock');
+
     if (typeof navigator === 'undefined' || !navigator.credentials) {
       return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
     }

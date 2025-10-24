@@ -51,9 +51,10 @@ window.addEventListener('message', async (event) => {
         result = await kmsClient.setupPasskeyGate(params.rpId, params.rpName, params.credentialId);
         break;
       case 'unlockWithPasskeyPRF':
-        result = await kmsClient.unlockWithPasskeyPRF(params.rpId);
+        result = await kmsClient.unlockWithPasskeyPRF(params.rpId, params.prfOutput);
         break;
       case 'unlockWithPasskeyGate':
+        // No params - iframe isolation mode (WebAuthn done in parent)
         result = await kmsClient.unlockWithPasskeyGate();
         break;
       case 'generateVAPID':

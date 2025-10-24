@@ -301,7 +301,8 @@ export class KMSUser {
   /**
    * Unlock with passkey
    *
-   * Performs WebAuthn ceremony in parent window, sends PRF output to iframe.
+   * Checks stored config to determine unlock method (PRF vs gate-only),
+   * performs WebAuthn ceremony in parent window, sends data to iframe.
    */
   async unlockWithPasskey(rpId: string): Promise<{ success: boolean; error?: string }> {
     /* c8 ignore start - browser WebAuthn API */
@@ -313,31 +314,70 @@ export class KMSUser {
     }
 
     try {
-      const assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rpId,
-          userVerification: 'required',
-          extensions: {
-            prf: {
-              eval: {
-                first: crypto.getRandomValues(new Uint8Array(32)),
+      // Get config from iframe to determine unlock method
+      const config = await this.getPasskeyConfig();
+
+      if (!config) {
+        return { success: false, error: 'NOT_SETUP' };
+      }
+
+      // Route based on setup method
+      if (config.method === 'passkey-prf') {
+        // PRF mode: use stored appSalt
+        if (!config.appSalt) {
+          return { success: false, error: 'INVALID_CONFIG' };
+        }
+
+        const appSalt = new Uint8Array(config.appSalt);
+
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rpId,
+            userVerification: 'required',
+            extensions: {
+              prf: {
+                eval: {
+                  first: appSalt,  // Use stored salt, not random!
+                },
               },
             },
           },
-        },
-      }) as PublicKeyCredential;
+        }) as PublicKeyCredential;
 
-      const prfResults = (assertion as any).getClientExtensionResults().prf;
+        const prfResults = (assertion as any).getClientExtensionResults().prf;
 
-      if (prfResults?.results?.first) {
+        if (!prfResults?.results?.first) {
+          return { success: false, error: 'PASSKEY_PRF_FAILED' };
+        }
+
         return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyPRF', {
           rpId,
           prfOutput: prfResults.results.first,
         });
-      } else {
+
+      } else if (config.method === 'passkey-gate') {
+        // Gate-only mode: authenticate without PRF
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rpId,
+            userVerification: 'required',
+            // No PRF extension for gate-only
+          },
+        }) as PublicKeyCredential;
+
+        if (!assertion) {
+          return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+        }
+
+        // Send gate-only unlock request (no prfOutput)
         return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyGate', {});
+
+      } else {
+        return { success: false, error: 'UNKNOWN_PASSKEY_METHOD' };
       }
+
     } catch (error) {
       return {
         success: false,

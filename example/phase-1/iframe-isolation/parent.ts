@@ -10,6 +10,7 @@ const KMS_ORIGIN = 'http://localhost:5177';
 
 let requestIdCounter = 0;
 let iframeReady = false;
+let vapidKid: string | null = null; // Store VAPID kid for reuse
 
 // Display current origin
 document.getElementById('parent-origin')!.textContent = window.location.origin;
@@ -144,6 +145,7 @@ document.getElementById('setup-passkey')!.addEventListener('click', async () => 
 document.getElementById('generate-vapid')!.addEventListener('click', async () => {
   try {
     const result = await sendToKMS('generateVAPID', {});
+    vapidKid = result.kid; // Store kid for later use
     displayOutput('✅ VAPID Keypair Generated', {
       publicKey: result.publicKey,
       kid: result.kid,
@@ -155,12 +157,13 @@ document.getElementById('generate-vapid')!.addEventListener('click', async () =>
 });
 
 document.getElementById('sign-jwt')!.addEventListener('click', async () => {
+  if (!vapidKid) {
+    displayError(new Error('Please generate VAPID keypair first'));
+    return;
+  }
+
   const endpoint = prompt('Enter push endpoint URL:', 'https://fcm.googleapis.com/fcm/send/example');
   if (!endpoint) return;
-
-  // Get VAPID kid first
-  const kidInput = prompt('Enter VAPID kid (key ID):', 'vapid-1');
-  if (!kidInput) return;
 
   try {
     const payload = {
@@ -169,11 +172,12 @@ document.getElementById('sign-jwt')!.addEventListener('click', async () => {
       exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60 // 12 hours
     };
     const result = await sendToKMS('signJWT', {
-      kid: kidInput,
+      kid: vapidKid, // Use stored kid
       payload
     });
     displayOutput('✅ JWT Signed', {
       jwt: result.jwt,
+      kid: vapidKid,
       note: 'Signed with non-extractable private key in KMS'
     });
   } catch (error) {

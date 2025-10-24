@@ -116,7 +116,7 @@ This dual-port setup allows us to configure **real CSP rules** and test **true c
 │  │  │                                                   │  │  │
 │  │  │  ❌ KEK (NEVER STORED - memory only)               │  │  │
 │  │  │  ❌ Passphrase (NEVER STORED - derived only)       │  │  │
-│  │  │  ❌ PRF output (NEVER STORED - derived only)    │  │  │
+│  │  │  ❌ PRF output (NEVER STORED - derived only)       │  │  │
 │  │  └───────────────────────────────────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                               │

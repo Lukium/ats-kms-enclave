@@ -210,6 +210,12 @@ Artifacts:
 - [ ] Phase 2: Sigstore integration (transparency logs)
 - [ ] Phase 3: Random cadence workflow (probabilistic scheduling)
 - [ ] Phase 4: Verifier implementation (comparison logic)
+- [ ] Phase 4.5: Badge generation (machine-readable verification results)
+- [ ] Phase 4.6: Badge verification (runtime integrity checking)
+- [ ] Phase 4.7: Quorum logic (multi-source verification)
+- [ ] Phase 4.8: Fail-secure mode (automatic lockdown on failure)
+- [ ] Phase 4.9: Operational guardrails (caching, backoff, tolerance)
+- [ ] Phase 4.10: Testing and rollout (production deployment)
 - [ ] Phase 5: Public evidence UI (user-facing display)
 - [ ] Phase 6: Attestation publishing (OIDC-bound proofs)
 
@@ -217,6 +223,7 @@ Artifacts:
 
 - [Current State](./current-state.md) - What exists today
 - [Design](./design.md) - Detailed technical design
+- [Fail-Secure Verification](./fail-secure-verification.md) - Runtime integrity checking with automatic lockdown
 - [Target State](./target-state.md) - Ideal end state
 - [Plan](./plan.md) - Implementation roadmap
 

@@ -60,6 +60,9 @@ window.addEventListener('message', async (event) => {
       case 'verifyAuditChain':
         result = await kmsClient.verifyAuditChain();
         break;
+      case 'getPasskeyConfig':
+        result = await kmsClient.getPasskeyConfig();
+        break;
       default:
         throw new Error(`Unknown method: ${method}`);
     }

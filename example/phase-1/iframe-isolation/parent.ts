@@ -1,79 +1,75 @@
 /**
- * Parent PWA - Iframe Communication Client
+ * Parent PWA - Uses KMSUser for iframe communication
  *
- * Sends requests to KMS iframe via postMessage, receives responses.
- * Mirrors KMSClient pattern for consistency.
+ * Demonstrates using KMSUser client to communicate with KMS iframe.
+ * KMSUser handles WebAuthn ceremonies in parent context, forwards to iframe.
  */
+
+import { KMSUser } from '@/kms-user';
 
 const iframe = document.getElementById('kms-iframe') as HTMLIFrameElement;
 const KMS_ORIGIN = 'http://localhost:5177';
 
-let requestIdCounter = 0;
-let iframeReady = false;
 let vapidKid: string | null = null; // Store VAPID kid for reuse
+let setupMethod: 'passphrase' | 'passkey' | null = null; // Track setup method for unlock
 
 // Display current origin
 document.getElementById('parent-origin')!.textContent = window.location.origin;
 
-// Wait for iframe to load
+// Wait for iframe to load, then create KMSUser
 iframe.addEventListener('load', () => {
-  console.log('[Parent] KMS iframe loaded');
-  iframeReady = true;
-  enableInitialControls();
+  console.log('[Parent] KMS iframe loaded, creating KMSUser client');
+  initKMSUser();
 });
 
-// Send request to KMS iframe (mirrors KMSClient pattern)
-async function sendToKMS(method: string, params?: any): Promise<any> {
-  if (!iframeReady) {
-    throw new Error('KMS iframe not ready');
-  }
+let kmsUser: KMSUser;
 
-  return new Promise((resolve, reject) => {
-    const id = `req-${++requestIdCounter}`;
-
-    // Set up response listener
-    const responseHandler = (event: MessageEvent) => {
-      // Validate origin
-      if (event.origin !== KMS_ORIGIN) {
-        return;
-      }
-
-      const response = event.data;
-      if (response.id === id) {
-        window.removeEventListener('message', responseHandler);
-        clearTimeout(timeout);
-
-        if (response.error) {
-          reject(new Error(response.error.message));
-        } else {
-          resolve(response.result);
-        }
-      }
-    };
-
-    window.addEventListener('message', responseHandler);
-
-    // Timeout after 10s
-    const timeout = setTimeout(() => {
-      window.removeEventListener('message', responseHandler);
-      reject(new Error('Request timeout (10s)'));
-    }, 10000);
-
-    // Send request to iframe
-    iframe.contentWindow!.postMessage(
-      { id, method, params },
-      KMS_ORIGIN
-    );
+async function initKMSUser(): Promise<void> {
+  // Create KMSUser client (handles parent-side operations and iframe communication)
+  kmsUser = new KMSUser({
+    kmsOrigin: KMS_ORIGIN,
+    iframe,
   });
+
+  console.log('[Parent] KMSUser client ready');
+
+  // Auto-detect if setup already exists
+  try {
+    const status = await kmsUser.isUnlockSetup();
+    if (status.isSetup) {
+      // Check setup method
+      const config = await kmsUser.getPasskeyConfig();
+      if (config) {
+        setupMethod = 'passkey';
+        displayOutput('ℹ️ Existing Passkey Setup Detected', {
+          method: config.method,
+          note: 'Use Unlock button to unlock with passkey',
+        });
+      } else {
+        setupMethod = 'passphrase';
+        displayOutput('ℹ️ Existing Passphrase Setup Detected', {
+          note: 'Use Unlock button to unlock with passphrase',
+        });
+      }
+      enableOperationControls();
+    } else {
+      enableInitialControls();
+    }
+  } catch (error) {
+    console.error('[Parent] Failed to check setup status:', error);
+    enableInitialControls();
+  }
 }
 
 // Enable initial controls
 function enableInitialControls(): void {
   document.getElementById('setup-passphrase')!.removeAttribute('disabled');
+  document.getElementById('setup-passkey')!.removeAttribute('disabled');
 }
 
 // Enable operation controls (after setup)
 function enableOperationControls(): void {
+  document.getElementById('unlock-kms')!.removeAttribute('disabled');
   document.getElementById('generate-vapid')!.removeAttribute('disabled');
   document.getElementById('sign-jwt')!.removeAttribute('disabled');
 }
@@ -120,7 +116,8 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
   if (!passphrase) return;
 
   try {
-    const result = await sendToKMS('setupPassphrase', { passphrase });
+    const result = await kmsUser.setupPassphrase(passphrase);
+    setupMethod = 'passphrase'; // Track setup method
     displayOutput('✅ Passphrase Setup Complete', result);
     enableOperationControls();
   } catch (error) {
@@ -128,14 +125,49 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
   }
 });
 
+document.getElementById('setup-passkey')!.addEventListener('click', async () => {
+  try {
+    const result = await kmsUser.setupPasskey({
+      rpId: window.location.hostname,
+      rpName: 'ATS KMS Demo',
+    });
+    setupMethod = 'passkey'; // Track setup method
+    displayOutput('✅ Passkey Setup Complete', result);
+    enableOperationControls();
+  } catch (error) {
+    displayError(error as Error);
+  }
+});
+
+document.getElementById('unlock-kms')!.addEventListener('click', async () => {
+  if (!setupMethod) {
+    displayError(new Error('Please setup passphrase or passkey first'));
+    return;
+  }
+
+  try {
+    if (setupMethod === 'passphrase') {
+      const passphrase = prompt('Enter passphrase to unlock:');
+      if (!passphrase) return;
+      const result = await kmsUser.unlockWithPassphrase(passphrase);
+      displayOutput('✅ KMS Unlocked (Passphrase)', result);
+    } else {
+      const result = await kmsUser.unlockWithPasskey(window.location.hostname);
+      displayOutput('✅ KMS Unlocked (Passkey)', result);
+    }
+  } catch (error) {
+    displayError(error as Error);
+  }
+});
+
 document.getElementById('generate-vapid')!.addEventListener('click', async () => {
   try {
-    const result = await sendToKMS('generateVAPID', {});
+    const result = await kmsUser.generateVAPID();
     vapidKid = result.kid; // Store kid for later use
     displayOutput('✅ VAPID Keypair Generated', {
       publicKey: result.publicKey,
       kid: result.kid,
-      note: 'Private key is non-extractable and isolated in KMS'
+      note: 'Private key is non-extractable and isolated in KMS',
     });
   } catch (error) {
     displayError(error as Error);
@@ -155,16 +187,13 @@ document.getElementById('sign-jwt')!.addEventListener('click', async () => {
     const payload = {
       aud: new URL(endpoint).origin,
       sub: 'mailto:admin@allthe.services',
-      exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60 // 12 hours
+      exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60, // 12 hours
     };
-    const result = await sendToKMS('signJWT', {
-      kid: vapidKid, // Use stored kid
-      payload
-    });
+    const result = await kmsUser.signJWT(vapidKid, payload);
     displayOutput('✅ JWT Signed', {
       jwt: result.jwt,
       kid: vapidKid,
-      note: 'Signed with non-extractable private key in KMS'
+      note: 'Signed with non-extractable private key in KMS',
     });
   } catch (error) {
     displayError(error as Error);

@@ -28,8 +28,41 @@ window.addEventListener('message', async (event) => {
   const { id, method, params } = event.data;
 
   try {
+    let result;
+
     // Forward request to Worker via KMSClient (production code)
-    const result = await (kmsClient as any)[method](params);
+    // Unpack params based on method signature
+    switch (method) {
+      case 'setupPassphrase':
+        result = await kmsClient.setupPassphrase(params.passphrase);
+        break;
+      case 'unlockWithPassphrase':
+        result = await kmsClient.unlockWithPassphrase(params.passphrase);
+        break;
+      case 'setupPasskeyPRF':
+        result = await kmsClient.setupPasskeyPRF(params.rpId, params.rpName);
+        break;
+      case 'unlockWithPasskeyPRF':
+        result = await kmsClient.unlockWithPasskeyPRF(params.rpId);
+        break;
+      case 'generateVAPID':
+        result = await kmsClient.generateVAPID();
+        break;
+      case 'signJWT':
+        result = await kmsClient.signJWT(params.kid, params.payload);
+        break;
+      case 'getPublicKey':
+        result = await kmsClient.getPublicKey(params.kid);
+        break;
+      case 'isUnlockSetup':
+        result = await kmsClient.isUnlockSetup();
+        break;
+      case 'verifyAuditChain':
+        result = await kmsClient.verifyAuditChain();
+        break;
+      default:
+        throw new Error(`Unknown method: ${method}`);
+    }
 
     // Send successful response back to parent
     window.parent.postMessage(

@@ -31,25 +31,25 @@ This dual-port setup allows us to configure **real CSP rules** and test **true c
 │                    Parent Window (PWA)                        │
 │                    Origin: localhost:5176                     │
 │                                                               │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                      UI Controls                        │ │
-│  │                                                         │ │
-│  │  [Setup Passkey]  [Setup Passphrase]                   │ │
-│  │  [Generate VAPID] [Request JWT]                        │ │
-│  │  [Lock KMS]       [Unlock KMS]                         │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │                      UI Controls                        │  │
+│  │                                                         │  │
+│  │  [Setup Passkey]  [Setup Passphrase]                    │  │
+│  │  [Generate VAPID] [Request JWT]                         │  │
+│  │  [Lock KMS]       [Unlock KMS]                          │  │
+│  └─────────────────────────────────────────────────────────┘  │
 │                                                               │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │            Received from KMS (Public Only)              │ │
-│  │                                                         │ │
-│  │  ✅ JWT signature (base64url)                           │ │
-│  │  ✅ VAPID public key (ArrayBuffer)                      │ │
-│  │  ✅ Success/error messages                              │ │
-│  │                                                         │ │
-│  │  ❌ Private keys (NEVER accessible)                     │ │
-│  │  ❌ Passphrase/PRF output (NEVER accessible)            │ │
-│  │  ❌ IndexedDB contents (NEVER accessible)               │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │            Received from KMS (Public Only)              │  │
+│  │                                                         │  │
+│  │  JWT signature (base64url)                              │  │
+│  │  VAPID public key (ArrayBuffer)                         │  │
+│  │  Success/error messages                                 │  │
+│  │                                                         │  │
+│  │  ❌ Private keys (NEVER accessible)                      │  │
+│  │  ❌ Passphrase/PRF output (NEVER accessible)             │  │
+│  │  ❌ IndexedDB contents (NEVER accessible)                │  │
+│  └─────────────────────────────────────────────────────────┘  │
 │                                                               │
 │  CSP: frame-src localhost:5177                                │
 │  Embeds: <iframe src="http://localhost:5177">                 │
@@ -68,37 +68,37 @@ This dual-port setup allows us to configure **real CSP rules** and test **true c
 │  CSP: frame-ancestors localhost:5176                          │
 │  CSP: connect-src 'self'                                      │
 │                                                               │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                    KMS Main Thread                      │ │
-│  │                                                         │ │
-│  │  - Receive postMessage requests from parent             │ │
-│  │  - Validate request origin and structure                │ │
-│  │  - Forward to Dedicated Worker                          │ │
-│  │  - Return public results to parent                      │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │                    KMS Main Thread                      │  │
+│  │                                                         │  │
+│  │  - Receive postMessage requests from parent             │  │
+│  │  - Validate request origin and structure                │  │
+│  │  - Forward to Dedicated Worker                          │  │
+│  │  - Return public results to parent                      │  │
+│  └─────────────────────────────────────────────────────────┘  │
 │                      ↓ Worker boundary ↓                      │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                  KMS Worker (Isolated)                  │ │
-│  │                                                         │ │
-│  │  ┌───────────────────────────────────────────────────┐ │ │
-│  │  │        WebCrypto Operations (Sealed)              │ │ │
-│  │  │                                                   │ │ │
-│  │  │  - Passkey/passphrase setup (gate mode)          │ │ │
-│  │  │  - VAPID keypair generation (non-extractable)    │ │ │
-│  │  │  - JWT signing (ES256)                            │ │ │
-│  │  │  - Lock/unlock state management                   │ │ │
-│  │  │  - Key wrapping/unwrapping                        │ │ │
-│  │  │                                                   │ │ │
-│  │  │  All private keys: extractable: false             │ │ │
-│  │  │  Storage: IndexedDB (iframe-local)                │ │ │
-│  │  └───────────────────────────────────────────────────┘ │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │                  KMS Worker (Isolated)                  │  │
+│  │                                                         │  │
+│  │  ┌───────────────────────────────────────────────────┐  │  │
+│  │  │        WebCrypto Operations (Sealed)              │  │  │
+│  │  │                                                   │  │  │
+│  │  │  - Passkey/passphrase setup (gate mode)           │  │  │
+│  │  │  - VAPID keypair generation (non-extractable)     │  │  │
+│  │  │  - JWT signing (ES256)                            │  │  │
+│  │  │  - Lock/unlock state management                   │  │  │
+│  │  │  - Key wrapping/unwrapping                        │  │  │
+│  │  │                                                   │  │  │
+│  │  │  All private keys: extractable: false             │  │  │
+│  │  │  Storage: IndexedDB (iframe-local)                │  │  │
+│  │  └───────────────────────────────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────────┘  │
 │                                                               │
-│  Parent PWA CANNOT access:                                   │
-│    ❌ Worker memory or state                                 │
-│    ❌ IndexedDB (different origin context)                   │
-│    ❌ Private keys (non-extractable + worker isolation)      │
-│    ❌ Passphrase or PRF outputs                              │
+│  Parent PWA CANNOT access:                                    │
+│    ❌ Worker memory or state                                   │
+│    ❌ IndexedDB (different origin context)                     │
+│    ❌ Private keys (non-extractable + worker isolation)        │
+│    ❌ Passphrase or PRF outputs                                │
 └───────────────────────────────────────────────────────────────┘
 ```
 

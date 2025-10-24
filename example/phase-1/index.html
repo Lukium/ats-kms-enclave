@@ -89,19 +89,48 @@
       max-height: calc(100vh - 280px);
     }
 
+    .controls-container {
+      margin-bottom: 1.5rem;
+      margin-top: 2rem;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .controls-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding: 1.25rem;
+      background: #f8f9fa;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .controls-box h3 {
+      margin: 0 0 0.5rem 0;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #667eea;
+    }
+
     .controls {
       display: flex;
       gap: 1rem;
       justify-content: center;
       flex-wrap: wrap;
-      margin-bottom: 1.5rem;
-      margin-top: 2rem;
       padding: 1.5rem;
       background: #f8f9fa;
       border-radius: 12px;
-      position: sticky;
-      top: 0;
-      z-index: 10;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
 
@@ -625,18 +654,34 @@
 
     <!-- Demo Flow Tab -->
     <div class="tab-content active" id="demo-tab">
-      <div class="controls">
-        <button id="stage1-btn">1️⃣ Setup Passphrase</button>
-        <button id="stage2-btn" disabled>2️⃣ Generate VAPID</button>
-        <button id="stage3-btn" disabled>3️⃣ Sign JWT</button>
-        <button id="stage4-btn" disabled>4️⃣ Lock Worker</button>
-        <button id="stage5-btn" disabled>5️⃣ Unlock Worker</button>
-        <button id="stage6-btn" disabled>6️⃣ Persistence Test</button>
-        <button id="stage7-btn" disabled>7️⃣ Verify JWT</button>
-        <button id="stage8-btn" disabled>8️⃣ Verify Audit Chain</button>
-        <button id="stage9-btn" disabled>9️⃣ Tamper Detection</button>
-        <button id="scroll-to-output-btn" disabled>📜 View Artifacts</button>
-        <button id="reset-btn" class="danger">🔄 Reset Demo</button>
+      <div class="controls-container">
+        <!-- Setup and Reset Row -->
+        <div class="controls-row">
+          <div class="controls-box">
+            <h3>Setup (Choose One)</h3>
+            <button id="stage1-passphrase-btn">🔐 Setup Passphrase</button>
+            <button id="stage1-passkey-btn">🔑 Setup Passkey (PRF)</button>
+          </div>
+          <div class="controls-box">
+            <h3>Reset</h3>
+            <button id="delete-passkey-btn" class="danger" disabled>🗑️ Delete Passkey</button>
+            <button id="reset-btn" class="danger">🔄 Reset Demo</button>
+          </div>
+        </div>
+
+        <!-- Main Demo Controls -->
+        <div class="controls">
+          <button id="stage2-btn" disabled>2️⃣ Generate VAPID</button>
+          <button id="stage3-btn" disabled>3️⃣ Sign JWT</button>
+          <button id="stage4-btn" disabled>4️⃣ Lock Worker</button>
+          <button id="stage5-btn" disabled>5️⃣ Unlock Worker</button>
+          <button id="stage6-btn" disabled>6️⃣ Persistence Test</button>
+          <button id="stage7-btn" disabled>7️⃣ Verify JWT</button>
+          <button id="stage8-btn" disabled>8️⃣ Verify Audit Chain</button>
+          <button id="stage9-btn" disabled>9️⃣ Tamper Detection</button>
+          <button id="unlock-passkey-btn" disabled>🔓 Test Passkey (DER Demo)</button>
+          <button id="scroll-to-output-btn" disabled>📜 View Artifacts</button>
+        </div>
       </div>
 
       <div id="performance-metrics"></div>
@@ -649,6 +694,7 @@
           <div id="jwt-card" data-card="jwt"></div>
           <div id="jwt-policy-card" data-card="jwt-policy"></div>
           <div id="sig-conversion-card" data-card="sig-conversion"></div>
+          <div id="passkey-assertion-card" data-card="passkey-assertion"></div>
           <div id="verify-jwt-card" data-card="verify-jwt"></div>
           <div id="audit-pubkey-card" data-card="audit-pubkey"></div>
           <div id="audit-verify-card" data-card="audit-verify"></div>

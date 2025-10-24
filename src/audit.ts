@@ -300,8 +300,10 @@ function generateNonce(): string {
  * Compute entry hash (for chain linking)
  *
  * Hash includes all fields except signature
+ *
+ * Exported for demo/verification purposes
  */
-async function computeEntryHash(entry: AuditEntry): Promise<string> {
+export async function computeEntryHash(entry: AuditEntry): Promise<string> {
   const data = JSON.stringify({
     version: entry.version,
     timestamp: entry.timestamp,

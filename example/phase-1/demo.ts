@@ -15,11 +15,12 @@ import {
   verifyRawP256,
   verifyJwtEs256Compact,
   verifyVAPIDPayload,
-  jwkThumbprintP256,
   type PublicKeyVerification,
   type JWTVerification,
   type JWTPayloadVerification,
 } from './verify.js';
+import { jwkThumbprintP256 } from '../../src/crypto-utils.js';
+import { computeEntryHash } from '../../src/audit.js';
 
 // ============================================================================
 // Types
@@ -68,6 +69,14 @@ interface DemoState {
   } | null;
   chainHeadHash: string | null;
   auditEntryHashes: Map<number, string>;
+  // WebAuthn passkey state
+  passkeyCredentialId: string | null;
+  passkeyPublicKey: JsonWebKey | null;
+  passkeyAssertion: {
+    signature: Uint8Array;
+    derFormat: boolean;
+    converted: Uint8Array;
+  } | null;
 }
 
 interface AuditEntry {
@@ -134,37 +143,17 @@ const state: DemoState = {
   signatureConversion: null,
   chainHeadHash: null,
   auditEntryHashes: new Map(),
+  // WebAuthn passkey state
+  passkeyCredentialId: null,
+  passkeyPublicKey: null,
+  passkeyAssertion: null,
 };
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
 
-/**
- * Compute hash of audit entry (same algorithm as audit.ts)
- */
-async function computeAuditEntryHash(entry: StorageAuditEntry): Promise<string> {
-  const data = JSON.stringify({
-    version: entry.version,
-    timestamp: entry.timestamp,
-    op: entry.op,
-    kid: entry.kid,
-    requestId: entry.requestId,
-    origin: entry.origin,
-    clientInfo: entry.clientInfo,
-    prevHash: entry.prevHash,
-    nonce: entry.nonce,
-    ...(entry.details && { details: entry.details }),
-  });
-
-  const buffer = new TextEncoder().encode(data);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-
-  // Convert to hex string
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+// Note: computeEntryHash is imported from src/audit.ts (not duplicated here)
 
 /**
  * Update button states based on current demo state
@@ -206,6 +195,20 @@ function updateButtonStates(): void {
 
   // Scroll to output: enabled when we have any artifacts
   scrollBtn.disabled = !state.vapidKid && !state.jwt;
+
+  // Passkey buttons
+  const createPasskeyBtn = document.getElementById('create-passkey-btn') as HTMLButtonElement;
+  const unlockPasskeyBtn = document.getElementById('unlock-passkey-btn') as HTMLButtonElement;
+  const deletePasskeyBtn = document.getElementById('delete-passkey-btn') as HTMLButtonElement;
+
+  // Create passkey: always enabled (independent of demo flow)
+  createPasskeyBtn.disabled = !!state.passkeyCredentialId; // Disabled if already created
+
+  // Unlock with passkey: enabled when passkey exists
+  unlockPasskeyBtn.disabled = !state.passkeyCredentialId;
+
+  // Delete passkey: enabled when passkey exists
+  deletePasskeyBtn.disabled = !state.passkeyCredentialId;
 }
 
 /**
@@ -821,6 +824,97 @@ function renderSignatureConversionCard(): void {
   document.getElementById('sig-conversion-card')!.innerHTML = card;
 }
 
+function renderPasskeyAssertionCard(): void {
+  const assertion = state.passkeyAssertion;
+
+  if (!assertion) {
+    document.getElementById('passkey-assertion-card')!.innerHTML = renderCard(
+      '🔑 WebAuthn Passkey Signature (DER Format)',
+      '<strong>What this shows:</strong> WebAuthn (passkeys) return signatures in DER format, NOT P-1363. This is where DER→P-1363 conversion is actually needed (for passkey unlock), NOT for JWT signing.',
+      renderCheck('pending', 'WebAuthn Demo: Pending', 'Click "Test Passkey (DER Demo)" to see real DER signatures')
+    );
+    return;
+  }
+
+  // Convert bytes to hex string
+  const toHex = (bytes: Uint8Array, limit = 16): string => {
+    const preview = Array.from(bytes.slice(0, limit))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join(' ');
+    return bytes.length > limit ? `${preview} ...` : preview;
+  };
+
+  // Convert bytes to base64url
+  const toB64u = (bytes: Uint8Array): string => {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  };
+
+  const checks = [
+    renderCheck(
+      assertion.derFormat ? 'pass' : 'fail',
+      'Format Detection',
+      assertion.derFormat
+        ? '✅ DER (ASN.1) format detected (starts with 0x30)'
+        : '❌ Not DER format'
+    ),
+    renderCheck(
+      'info',
+      'Original WebAuthn Signature',
+      `${assertion.signature.length} bytes (DER variable length)`
+    ),
+    renderCheck(
+      'info',
+      'Leading byte',
+      `0x${assertion.signature[0]?.toString(16).padStart(2, '0')} ${assertion.derFormat ? '(DER SEQUENCE tag)' : ''}`
+    ),
+    renderCheck(
+      'info',
+      'Hex preview (first 16 bytes)',
+      toHex(assertion.signature)
+    ),
+    renderCheck(
+      'info',
+      'Base64url',
+      `${toB64u(assertion.signature).substring(0, 20)}... (${toB64u(assertion.signature).length} chars)`
+    ),
+    renderCheck(
+      'pass',
+      'Conversion',
+      '↓ DER → P-1363 (for WebCrypto verify)'
+    ),
+    renderCheck(
+      'info',
+      'Converted P-1363 Signature',
+      `${assertion.converted.length} bytes (fixed length, raw r‖s)`
+    ),
+    renderCheck(
+      'info',
+      'Leading byte (P-1363)',
+      `0x${assertion.converted[0]?.toString(16).padStart(2, '0')} (r value start)`
+    ),
+    renderCheck(
+      'info',
+      'Hex preview (first 16 bytes)',
+      toHex(assertion.converted)
+    ),
+    renderCheck(
+      'pass',
+      'Result',
+      '✅ Ready for WebCrypto verify()'
+    ),
+  ].join('');
+
+  const card = renderCard(
+    '🔑 WebAuthn Passkey Signature (DER Format)',
+    '<strong>Key insight:</strong> WebAuthn (passkeys) return DER-encoded signatures. This is the ACTUAL place where DER→P-1363 conversion is needed, NOT for JWT signing (WebCrypto sign() already returns P-1363).<br><br><strong>Use case:</strong> When implementing passkey unlock, the assertion signature must be converted from DER to P-1363 before calling crypto.subtle.verify().',
+    checks
+  );
+
+  document.getElementById('passkey-assertion-card')!.innerHTML = card;
+}
+
 function renderJWTPolicyCard(): void {
   if (!state.jwt || !state.jwtParts) {
     document.getElementById('jwt-policy-card')!.innerHTML = renderCard(
@@ -879,6 +973,7 @@ function updateAllCards(): void {
   renderJWTCard();
   renderJWTPolicyCard();
   renderSignatureConversionCard();
+  renderPasskeyAssertionCard();
   renderVerifyJWTCard();
   renderAuditPublicKeyCard();
   renderAuditVerificationCard();
@@ -1158,7 +1253,7 @@ async function loadAuditLog(): Promise<void> {
     // Compute hashes for all entries (for display in audit log table)
     state.auditEntryHashes.clear();
     for (const entry of entries) {
-      const hash = await computeAuditEntryHash(entry);
+      const hash = await computeEntryHash(entry);
       state.auditEntryHashes.set(entry.id, hash);
     }
 
@@ -1205,6 +1300,212 @@ function arrayBufferToBase64url(buffer: ArrayBuffer): string {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
+}
+
+// ============================================================================
+// WebAuthn Passkey Functions
+// ============================================================================
+
+/**
+ * Create a WebAuthn passkey credential
+ */
+async function createPasskey(): Promise<void> {
+  try {
+    // Check if WebAuthn is available
+    if (!window.PublicKeyCredential) {
+      alert('WebAuthn is not supported in this browser');
+      return;
+    }
+
+    // Generate random challenge
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = crypto.getRandomValues(new Uint8Array(16));
+
+    // Determine RP ID (use 'localhost' for local development)
+    const rpId = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'localhost'
+      : window.location.hostname;
+
+    console.log('[Demo] Creating passkey with RP ID:', rpId);
+
+    // Create credential
+    const credential = (await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: {
+          name: 'ATS KMS Demo',
+          id: rpId,
+        },
+        user: {
+          id: userId,
+          name: 'demo@ats.run',
+          displayName: 'Demo User',
+        },
+        pubKeyCredParams: [
+          { alg: -7, type: 'public-key' },  // ES256 (ECDSA P-256)
+          { alg: -257, type: 'public-key' }, // RS256 (RSA PKCS#1)
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          userVerification: 'required',
+        },
+        timeout: 60000,
+      },
+    })) as PublicKeyCredential;
+
+    if (!credential) {
+      alert('Passkey creation was cancelled');
+      return;
+    }
+
+    // Store credential ID
+    const credentialId = arrayBufferToBase64url(credential.rawId);
+    state.passkeyCredentialId = credentialId;
+
+    // Persist to localStorage for page refresh
+    localStorage.setItem('demo-passkey-credential-id', credentialId);
+
+    // Extract public key from attestation
+    const response = credential.response as AuthenticatorAttestationResponse;
+    // Note: In a real implementation, you'd parse the attestationObject to get the public key
+    // For demo purposes, we'll just indicate success
+
+    console.log('[Demo] Passkey created successfully');
+    console.log('  RP ID:', rpId);
+    console.log('  Credential ID:', credentialId);
+    console.log('  Credential ID (raw bytes):', Array.from(new Uint8Array(credential.rawId)).slice(0, 8).join(','), '...');
+    alert('Passkey created successfully!');
+
+    // Update UI
+    updateButtonStates();
+    updateAllCards();
+  } catch (error) {
+    console.error('[Demo] Passkey creation failed:', error);
+    alert(`Passkey creation failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+  }
+}
+
+/**
+ * Delete the stored passkey credential
+ */
+async function deletePasskey(): Promise<void> {
+  if (!state.passkeyCredentialId) {
+    alert('No passkey to delete');
+    return;
+  }
+
+  // Clear passkey state
+  state.passkeyCredentialId = null;
+  state.passkeyPublicKey = null;
+  state.passkeyAssertion = null;
+
+  // Remove from localStorage
+  localStorage.removeItem('demo-passkey-credential-id');
+
+  console.log('[Demo] Passkey deleted');
+  console.log('[Demo] Passkey credential ID removed from localStorage');
+  alert('Passkey deleted');
+
+  // Update UI
+  updateButtonStates();
+  updateAllCards();
+}
+
+/**
+ * Unlock with passkey (demonstrates DER signature from WebAuthn)
+ */
+async function unlockWithPasskey(): Promise<void> {
+  if (!state.passkeyCredentialId) {
+    alert('No passkey configured. Create a passkey first.');
+    return;
+  }
+
+  try {
+    // Generate random challenge
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+    // Determine RP ID (must match the one used during creation)
+    const rpId = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'localhost'
+      : window.location.hostname;
+
+    console.log('[Demo] Authenticating with RP ID:', rpId);
+    console.log('[Demo] Credential ID:', state.passkeyCredentialId);
+
+    // Get assertion
+    const assertion = (await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        rpId,
+        allowCredentials: [
+          {
+            type: 'public-key',
+            id: base64urlToBytes(state.passkeyCredentialId),
+          },
+        ],
+        userVerification: 'required',
+        timeout: 60000,
+      },
+    })) as PublicKeyCredential;
+
+    if (!assertion) {
+      alert('Passkey authentication was cancelled');
+      return;
+    }
+
+    const response = assertion.response as AuthenticatorAssertionResponse;
+    const signature = new Uint8Array(response.signature);
+
+    // Check if signature is DER format (starts with 0x30)
+    const isDER = signature[0] === 0x30;
+
+    console.log('[Demo] WebAuthn signature received:');
+    console.log('  Format:', isDER ? 'DER (ASN.1)' : 'Unknown');
+    console.log('  Length:', signature.length, 'bytes');
+    console.log('  Leading byte:', `0x${signature[0]?.toString(16).padStart(2, '0')}`);
+
+    // If DER, convert to P-1363 for WebCrypto
+    let convertedSignature = signature;
+    if (isDER) {
+      // Import derToP1363 from crypto-utils
+      const { derToP1363 } = await import('../../src/crypto-utils.js');
+      convertedSignature = derToP1363(signature);
+      console.log('[Demo] Converted to P-1363:', convertedSignature.length, 'bytes');
+    }
+
+    // Store for display
+    state.passkeyAssertion = {
+      signature,
+      derFormat: isDER,
+      converted: convertedSignature,
+    };
+
+    console.log('[Demo] Passkey authentication successful');
+    alert('Passkey authentication successful!\n\nCheck the "WebAuthn Passkey Signature" card to see the DER → P-1363 conversion.');
+
+    // Update UI
+    updateButtonStates();
+    updateAllCards();
+  } catch (error) {
+    console.error('[Demo] Passkey authentication failed:', error);
+    if (error instanceof Error) {
+      console.error('  Error name:', error.name);
+      console.error('  Error message:', error.message);
+    }
+    alert(`Passkey authentication failed: ${error instanceof Error ? error.message : 'unknown error'}\n\nCheck the console for details.`);
+  }
+}
+
+// Helper: base64url to Uint8Array
+function base64urlToBytes(str: string): Uint8Array {
+  const pad = str.length % 4 === 2 ? '==' : str.length % 4 === 3 ? '=' : '';
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
 }
 
 // ============================================================================
@@ -1694,7 +1995,7 @@ async function stage8VerifyAuditChain(): Promise<void> {
     const entries = await getAllAuditEntries();
     if (entries.length > 0) {
       const latestEntry = entries[entries.length - 1]!;
-      state.chainHeadHash = await computeAuditEntryHash(latestEntry);
+      state.chainHeadHash = await computeEntryHash(latestEntry);
     }
 
     updateAllCards();
@@ -1788,8 +2089,8 @@ async function stage9TamperDetection(): Promise<void> {
   }
 }
 
-async function resetDemo(): Promise<void> {
-  const confirmed = confirm('This will clear all demo state and IndexedDB data. Continue?');
+async function resetDemo(silent = false): Promise<void> {
+  const confirmed = silent || confirm('This will clear all demo state and IndexedDB data. Continue?');
   if (!confirmed) return;
 
   // Destroy client (terminates worker)
@@ -1848,7 +2149,21 @@ async function resetDemo(): Promise<void> {
     jwtSignatureValid: null,
     jwtVerificationError: null,
     keyMetadata: null,
+    // Phase 1 additions
+    auditPublicKey: null,
+    auditVerification: null,
+    tamperTestResult: null,
+    signatureConversion: null,
+    chainHeadHash: null,
+    auditEntryHashes: new Map(),
+    // WebAuthn passkey state
+    passkeyCredentialId: null,
+    passkeyPublicKey: null,
+    passkeyAssertion: null,
   });
+
+  // Clear passkey from localStorage
+  localStorage.removeItem('demo-passkey-credential-id');
 
   // Re-enable setup button and reset state
   const setupBtn = document.getElementById('stage1-btn') as HTMLButtonElement;
@@ -1919,6 +2234,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   console.log('[Demo] Loaded storage, found', state.storedKeys.length, 'keys');
 
+  // Load passkey credential ID from localStorage (if exists)
+  const savedCredentialId = localStorage.getItem('demo-passkey-credential-id');
+  if (savedCredentialId) {
+    state.passkeyCredentialId = savedCredentialId;
+    console.log('[Demo] Loaded passkey credential ID from localStorage');
+  }
+
   // Check if unlock is already configured (e.g., after page refresh)
   try {
     // Initialize client to check unlock status
@@ -1970,7 +2292,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Bind stage buttons
-  document.getElementById('stage1-btn')!.addEventListener('click', stage1Setup);
+  document.getElementById('stage1-passphrase-btn')!.addEventListener('click', stage1SetupPassphrase);
+  document.getElementById('stage1-passkey-btn')!.addEventListener('click', stage1SetupPasskey);
   document.getElementById('stage2-btn')!.addEventListener('click', stage2GenerateVAPID);
   document.getElementById('stage3-btn')!.addEventListener('click', stage3SignJWT);
   document.getElementById('stage4-btn')!.addEventListener('click', stage4LockWorker);
@@ -1986,6 +2309,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   document.getElementById('reset-btn')!.addEventListener('click', () => resetDemo());
+
+  // Bind passkey buttons
+  document.getElementById('create-passkey-btn')!.addEventListener('click', createPasskey);
+  document.getElementById('unlock-passkey-btn')!.addEventListener('click', unlockWithPasskey);
+  document.getElementById('delete-passkey-btn')!.addEventListener('click', deletePasskey);
 
   // Bind refresh buttons
   document.getElementById('refresh-audit-btn')!.addEventListener('click', () => {

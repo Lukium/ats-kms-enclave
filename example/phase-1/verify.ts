@@ -143,35 +143,10 @@ export function verifyJwtEs256Compact(jwt: string): JWTVerification {
 }
 
 // ============================================================================
-// JWK Thumbprint (RFC 7638)
-// ============================================================================
-
-/**
- * Compute RFC 7638 thumbprint for EC P-256 JWK
- *
- * Why this matters: The key ID is content-derived from the public key,
- * not a random string. This enables consistent rotation and auditability.
- */
-export async function jwkThumbprintP256(jwk: JsonWebKey): Promise<string> {
-  // RFC 7638 requires lexicographic ordering of required fields
-  const canonical = JSON.stringify({
-    crv: jwk.crv,
-    kty: jwk.kty,
-    x: jwk.x,
-    y: jwk.y
-  });
-
-  const hash = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(canonical)
-  );
-
-  return bytesToB64u(new Uint8Array(hash));
-}
-
-// ============================================================================
 // JWT Payload Verification
 // ============================================================================
+
+// Note: JWK thumbprint computation is in src/crypto-utils.ts (not duplicated here)
 
 export interface JWTPayloadVerification {
   ok: boolean;

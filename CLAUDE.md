@@ -2,6 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+# ⚠️ CRITICAL: FILE REVERT POLICY ⚠️
+
+**NEVER REVERT ANY FILE USING `git checkout`, `git restore`, OR ANY OTHER METHOD WITHOUT:**
+
+1. **EXPLICIT USER APPROVAL** - User must specifically say "revert file X"
+2. **CONFIRMATION** - After approval, ask for confirmation: "Are you sure you want to revert [filename]? This will lose all uncommitted changes."
+
+**WHY THIS IS CRITICAL:**
+- Reverting a file can break the entire application by creating API mismatches
+- Uncommitted work may represent hours of implementation
+- File dependencies are not always obvious (e.g., client.ts ↔ worker.ts ↔ unlock.ts)
+- Breaking changes cascade across multiple components
+
+**IF YOU NEED TO UNDO CHANGES:**
+- First, understand what changed: `git diff <filename>`
+- Ask the user how to proceed
+- Consider selective edits rather than full reverts
+- If reverting is necessary, get explicit permission FIRST
+
+**THIS RULE APPLIES TO ALL FILES WITHOUT EXCEPTION.**
+
+---
+
 ## Repository Overview
 
 This repository contains the **browser-based verifiable Key Management System (KMS) enclave** for AllTheServices (ATS). The KMS enclave is a sandboxed, verifiable execution environment for cryptographic operations, designed to provide user-auditable security guarantees.

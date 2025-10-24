@@ -520,7 +520,7 @@ describe('Client RPC Bridge - Unlock Methods', () => {
     expect(typeof client.unlockWithPasskeyGate).toBe('function');
   });
 
-  it.skip('should return promise for setupPasskeyPRF', async () => {
+  it('should return promise for setupPasskeyPRF', async () => {
     // Set up WebAuthn mocks
     (globalThis as any).navigator = {
       credentials: {

@@ -163,52 +163,302 @@ export class KMSClient {
 
   /**
    * Setup passkey with PRF extension (recommended)
+   *
+   * Performs WebAuthn ceremony in the client (main window), then sends
+   * credential data to the worker for key derivation and storage.
+   *
+   * Automatically falls back to gate-only mode if PRF is not supported,
+   * reusing the same credential to avoid double authentication.
    */
-  setupPasskeyPRF(
+  async setupPasskeyPRF(
     rpId: string,
     rpName: string
-  ): Promise<{ success: boolean; error?: string }> {
-    return this.request<{ success: boolean; error?: string }>('setupPasskeyPRF', {
-      rpId,
-      rpName,
-    });
+  ): Promise<{ success: boolean; error?: string; method?: 'prf' | 'gate' }> {
+    // Check WebAuthn availability
+    if (
+      typeof navigator === 'undefined' ||
+      typeof window === 'undefined' ||
+      !navigator.credentials ||
+      !window.PublicKeyCredential
+    ) {
+      return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+    }
+
+    try {
+      // Generate random app salt for PRF
+      const appSalt = crypto.getRandomValues(new Uint8Array(32));
+
+      // Create passkey with PRF extension
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { id: rpId, name: rpName },
+          user: {
+            id: crypto.getRandomValues(new Uint8Array(16)),
+            name: 'kms-user',
+            displayName: 'KMS User',
+          },
+          pubKeyCredParams: [
+            { type: 'public-key', alg: -7 },   // ES256 (preferred)
+            { type: 'public-key', alg: -257 }, // RS256 (fallback)
+          ],
+          authenticatorSelection: {
+            userVerification: 'required',
+            residentKey: 'required',
+          },
+          extensions: {
+            prf: {},
+          },
+        },
+      })) as PublicKeyCredential | null;
+
+      if (!credential) {
+        return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+      }
+
+      const clientExtensionResults = credential.getClientExtensionResults();
+
+      // Check if PRF extension is supported
+      if (!clientExtensionResults.prf?.enabled) {
+        // PRF not supported - use gate-only mode with the same credential
+        console.log('[KMS Client] PRF not supported, using gate-only mode with same credential');
+
+        const gateResult = await this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
+          credentialId: credential.rawId,
+        });
+
+        return {
+          success: gateResult.success,
+          method: 'gate' as const,
+          ...(gateResult.error && { error: gateResult.error })
+        };
+      }
+
+      // PRF is supported - proceed with PRF flow
+      // Derive PRF output (first auth with same passkey)
+      const assertionCredential = (await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rpId: rpId,
+          allowCredentials: [
+            {
+              type: 'public-key',
+              id: credential.rawId,
+            },
+          ],
+          userVerification: 'required',
+          extensions: {
+            prf: {
+              eval: {
+                first: appSalt,
+              },
+            },
+          },
+        },
+      })) as PublicKeyCredential | null;
+
+      if (!assertionCredential) {
+        return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+      }
+
+      const assertionExtensions = assertionCredential.getClientExtensionResults();
+
+      // Extract PRF output
+      const prfResults = assertionExtensions.prf;
+      if (!prfResults?.results?.first) {
+        // PRF failed during assertion - fall back to gate-only with same credential
+        console.log('[KMS Client] PRF failed during assertion, using gate-only mode');
+
+        const gateResult = await this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
+          credentialId: credential.rawId,
+        });
+
+        return {
+          success: gateResult.success,
+          method: 'gate' as const,
+          ...(gateResult.error && { error: gateResult.error })
+        };
+      }
+
+      // Send credential data to worker for PRF mode
+      const prfResult = await this.request<{ success: boolean; error?: string }>('setupPasskeyPRF', {
+        credentialId: credential.rawId,
+        prfOutput: prfResults.results.first,
+      });
+
+      return {
+        success: prfResult.success,
+        method: 'prf' as const,
+        ...(prfResult.error && { error: prfResult.error })
+      };
+    } catch (error) {
+      console.error('[KMS Client] Passkey setup failed:', error);
+
+      // Check if error is user cancellation (NotAllowedError)
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+      }
+
+      // For other errors, this is likely a fatal issue
+      return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+    }
   }
 
   /**
    * Unlock with passkey using PRF extension
    */
-  unlockWithPasskeyPRF(
+  async unlockWithPasskeyPRF(
     rpId: string
   ): Promise<{ success: boolean; error?: string }> {
-    return this.request<{ success: boolean; error?: string }>(
-      'unlockWithPasskeyPRF',
-      { rpId }
-    );
+    if (typeof navigator === 'undefined' || !navigator.credentials) {
+      return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+    }
+
+    try {
+      // Retrieve stored credential ID from storage
+      const { getMeta } = await import('./storage.js');
+      const config = await getMeta<unknown>('unlockSalt');
+      if (!config || typeof config !== 'object' || !('method' in config) || config.method !== 'passkey-prf') {
+        return { success: false, error: 'NOT_SETUP' };
+      }
+
+      const configData = config as unknown as { credentialId: ArrayBuffer; appSalt: ArrayBuffer };
+      const appSalt = new Uint8Array(configData.appSalt);
+
+      // Get assertion with PRF
+      const credential = (await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rpId: rpId,
+          allowCredentials: [
+            {
+              type: 'public-key',
+              id: configData.credentialId,
+            },
+          ],
+          userVerification: 'required',
+          extensions: {
+            prf: {
+              eval: {
+                first: appSalt,
+              },
+            },
+          },
+        },
+      })) as PublicKeyCredential | null;
+
+      if (!credential) {
+        return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+      }
+
+      const extensions = credential.getClientExtensionResults();
+      const prfResults = extensions.prf;
+      if (!prfResults?.results?.first) {
+        return { success: false, error: 'PASSKEY_PRF_NOT_SUPPORTED' };
+      }
+
+      // Send PRF output to worker
+      return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyPRF', {
+        prfOutput: prfResults.results.first,
+      });
+    } catch (error) {
+      console.error('[KMS Client] Passkey unlock failed:', error);
+      return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+    }
   }
 
   /**
    * Setup passkey in gate-only mode (fallback)
    */
-  setupPasskeyGate(
+  async setupPasskeyGate(
     rpId: string,
     rpName: string
   ): Promise<{ success: boolean; error?: string }> {
-    return this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
-      rpId,
-      rpName,
-    });
+    if (typeof navigator === 'undefined' || !navigator.credentials) {
+      return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+    }
+
+    try {
+      // Create passkey without PRF extension
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { id: rpId, name: rpName },
+          user: {
+            id: crypto.getRandomValues(new Uint8Array(16)),
+            name: 'kms-user',
+            displayName: 'KMS User',
+          },
+          pubKeyCredParams: [
+            { type: 'public-key', alg: -7 },   // ES256 (preferred)
+            { type: 'public-key', alg: -257 }, // RS256 (fallback)
+          ],
+          authenticatorSelection: {
+            userVerification: 'required',
+            residentKey: 'required',
+          },
+        },
+      })) as PublicKeyCredential | null;
+
+      if (!credential) {
+        return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+      }
+
+      // Send credential ID to worker
+      return this.request<{ success: boolean; error?: string }>('setupPasskeyGate', {
+        credentialId: credential.rawId,
+      });
+    } catch (error) {
+      console.error('[KMS Client] Passkey gate setup failed:', error);
+      return { success: false, error: 'PASSKEY_CREATION_FAILED' };
+    }
   }
 
   /**
    * Unlock with passkey in gate-only mode (fallback)
    */
-  unlockWithPasskeyGate(
+  async unlockWithPasskeyGate(
     rpId: string
   ): Promise<{ success: boolean; error?: string }> {
-    return this.request<{ success: boolean; error?: string }>(
-      'unlockWithPasskeyGate',
-      { rpId }
-    );
+    if (typeof navigator === 'undefined' || !navigator.credentials) {
+      return { success: false, error: 'PASSKEY_NOT_AVAILABLE' };
+    }
+
+    try {
+      // Retrieve stored credential ID
+      const { getMeta } = await import('./storage.js');
+      const config = await getMeta<unknown>('unlockSalt');
+      if (!config || typeof config !== 'object' || !('method' in config) || config.method !== 'passkey-gate') {
+        return { success: false, error: 'NOT_SETUP' };
+      }
+
+      const configData = config as unknown as { credentialId: ArrayBuffer };
+
+      // Get assertion (user verification is the gate)
+      const credential = (await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rpId: rpId,
+          allowCredentials: [
+            {
+              type: 'public-key',
+              id: configData.credentialId,
+            },
+          ],
+          userVerification: 'required',
+        },
+      })) as PublicKeyCredential | null;
+
+      if (!credential) {
+        return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+      }
+
+      // Send unlock request to worker (no PRF output needed)
+      return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyGate', {});
+    } catch (error) {
+      console.error('[KMS Client] Passkey gate unlock failed:', error);
+      return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
+    }
   }
 
   // ============================================================================

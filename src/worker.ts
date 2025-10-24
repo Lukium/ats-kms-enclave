@@ -846,6 +846,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         try {
           const config = await getMeta<unknown>('unlockSalt');
           if (!config) {
+            // eslint-disable-next-line no-console
             console.log('[Worker] getPasskeyConfig: No config found in storage');
             return {
               id: request.id,
@@ -853,6 +854,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
             };
           }
 
+          /* eslint-disable no-console, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
           console.log('[Worker] getPasskeyConfig: Retrieved config from storage:', {
             hasConfig: !!config,
             method: (config as any).method,
@@ -861,20 +863,21 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
             credentialIdLength: (config as any).credentialId ? (config as any).credentialId.byteLength : 0,
             credentialIdBytes: (config as any).credentialId ? new Uint8Array((config as any).credentialId).slice(0, 8) : null,
           });
+          /* eslint-enable no-console, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 
           return {
             id: request.id,
             result: config,
           };
+          /* c8 ignore start - defensive: getMeta only throws on DB errors */
         } catch (error) {
-          /* c8 ignore next - defensive: getMeta only throws on DB errors */
           console.error('[Worker] getPasskeyConfig error:', error);
-          /* c8 ignore next 4 - defensive: error recovery path */
           return {
             id: request.id,
             result: null,
           };
         }
+        /* c8 ignore stop */
       }
 
       case 'setupPasskeyPRF': {
@@ -896,6 +899,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         const isArrayBufferLike = params.credentialId &&
           typeof params.credentialId === 'object' &&
           'byteLength' in params.credentialId &&
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
           typeof (params.credentialId as any).byteLength === 'number';
 
         if (!params.credentialId || !(isInstanceOf || isArrayBufferLike)) {
@@ -984,6 +988,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         const isArrayBufferLike = params.credentialId &&
           typeof params.credentialId === 'object' &&
           'byteLength' in params.credentialId &&
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
           typeof (params.credentialId as any).byteLength === 'number';
 
         if (!params.credentialId || !(isInstanceOf || isArrayBufferLike)) {

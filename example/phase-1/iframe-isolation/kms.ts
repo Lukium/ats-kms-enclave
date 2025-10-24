@@ -6,7 +6,7 @@
  */
 
 import { KMSClient } from '@/client';
-import type { ChainVerificationResult } from '@/client';
+import { getAllAuditEntries } from '@/storage';
 
 // Origin validation
 const ALLOWED_PARENT_ORIGIN = 'http://localhost:5176';
@@ -37,7 +37,7 @@ window.addEventListener('message', async (event) => {
       ALLOWED_PARENT_ORIGIN
     );
 
-    // Update UI
+    // Update UI after operation
     await updateUI();
 
   } catch (error) {
@@ -58,17 +58,17 @@ window.addEventListener('message', async (event) => {
 // Update UI based on KMS state
 async function updateUI(): Promise<void> {
   try {
-    // Get current status from KMS
-    const status = await kmsClient.getStatus();
+    // Check if setup is complete
+    const setupStatus = await kmsClient.isUnlockSetup();
 
-    // Update lock status indicator
+    // Update lock status (simple heuristic - if setup, assume unlocked after operation)
     const lockStatusEl = document.getElementById('lock-status')!;
-    if (status.locked) {
-      lockStatusEl.textContent = '🔒 Locked';
-      lockStatusEl.className = 'status-locked';
-    } else {
+    if (setupStatus.isSetup) {
       lockStatusEl.textContent = '🔓 Unlocked';
       lockStatusEl.className = 'status-unlocked';
+    } else {
+      lockStatusEl.textContent = '🔒 Not Setup';
+      lockStatusEl.className = 'status-locked';
     }
 
     // Refresh audit log
@@ -81,21 +81,24 @@ async function updateUI(): Promise<void> {
 // Display audit log with chain verification
 async function refreshAuditLog(): Promise<void> {
   try {
-    // Get audit log via KMSClient (production code)
-    const result = await kmsClient.getAuditLog();
+    // Get audit entries directly from storage (same origin = can access IndexedDB)
+    const entries = await getAllAuditEntries();
+
+    // Verify chain integrity
+    const verification = await kmsClient.verifyAuditChain();
 
     // Display chain verification status
     const chainStatusEl = document.getElementById('chain-status')!;
-    if (result.verification.valid) {
-      chainStatusEl.textContent = `✅ Chain verified (${result.verification.verified} entries)`;
+    if (verification.valid) {
+      chainStatusEl.textContent = `✅ Chain verified (${verification.verified} entries)`;
       chainStatusEl.className = 'chain-valid';
     } else {
-      chainStatusEl.textContent = `❌ Chain broken: ${result.verification.errors.join(', ')}`;
+      chainStatusEl.textContent = `❌ Chain broken: ${verification.errors.join(', ')}`;
       chainStatusEl.className = 'chain-invalid';
     }
 
     // Display audit entries
-    displayAuditEntries(result.entries);
+    displayAuditEntries(entries);
   } catch (error) {
     console.error('[KMS] Failed to refresh audit log:', error);
   }

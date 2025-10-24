@@ -70,16 +70,12 @@ async function sendToKMS(method: string, params?: any): Promise<any> {
 function enableInitialControls(): void {
   document.getElementById('setup-passphrase')!.removeAttribute('disabled');
   document.getElementById('setup-passkey')!.removeAttribute('disabled');
-  document.getElementById('get-status')!.removeAttribute('disabled');
-  document.getElementById('view-audit')!.removeAttribute('disabled');
 }
 
 // Enable operation controls (after setup)
 function enableOperationControls(): void {
-  document.getElementById('unlock-kms')!.removeAttribute('disabled');
   document.getElementById('generate-vapid')!.removeAttribute('disabled');
   document.getElementById('sign-jwt')!.removeAttribute('disabled');
-  document.getElementById('lock-kms')!.removeAttribute('disabled');
 }
 
 // Display output
@@ -134,7 +130,10 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
 
 document.getElementById('setup-passkey')!.addEventListener('click', async () => {
   try {
-    const result = await sendToKMS('setupPasskey', {});
+    const result = await sendToKMS('setupPasskeyPRF', {
+      rpId: window.location.hostname,
+      rpName: 'ATS KMS Demo'
+    });
     displayOutput('✅ Passkey Setup Complete', result);
     enableOperationControls();
   } catch (error) {
@@ -142,33 +141,12 @@ document.getElementById('setup-passkey')!.addEventListener('click', async () => 
   }
 });
 
-document.getElementById('unlock-kms')!.addEventListener('click', async () => {
-  try {
-    // Get current status first to determine unlock method
-    const status = await sendToKMS('getStatus', {});
-
-    if (status.setupMethod === 'passphrase') {
-      const passphrase = prompt('Enter passphrase to unlock:');
-      if (!passphrase) return;
-      const result = await sendToKMS('unlockWithPassphrase', { passphrase });
-      displayOutput('✅ KMS Unlocked (Passphrase)', result);
-    } else if (status.setupMethod === 'passkey') {
-      const result = await sendToKMS('unlockWithPasskey', {});
-      displayOutput('✅ KMS Unlocked (Passkey)', result);
-    } else {
-      throw new Error('No setup method configured');
-    }
-  } catch (error) {
-    displayError(error as Error);
-  }
-});
-
 document.getElementById('generate-vapid')!.addEventListener('click', async () => {
   try {
-    const result = await sendToKMS('generateVAPIDKeypair', {});
+    const result = await sendToKMS('generateVAPID', {});
     displayOutput('✅ VAPID Keypair Generated', {
       publicKey: result.publicKey,
-      keyId: result.keyId,
+      kid: result.kid,
       note: 'Private key is non-extractable and isolated in KMS'
     });
   } catch (error) {
@@ -180,45 +158,23 @@ document.getElementById('sign-jwt')!.addEventListener('click', async () => {
   const endpoint = prompt('Enter push endpoint URL:', 'https://fcm.googleapis.com/fcm/send/example');
   if (!endpoint) return;
 
+  // Get VAPID kid first
+  const kidInput = prompt('Enter VAPID kid (key ID):', 'vapid-1');
+  if (!kidInput) return;
+
   try {
-    const result = await sendToKMS('signVAPIDJWT', {
-      audience: new URL(endpoint).origin,
-      subject: 'mailto:admin@allthe.services'
+    const payload = {
+      aud: new URL(endpoint).origin,
+      sub: 'mailto:admin@allthe.services',
+      exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60 // 12 hours
+    };
+    const result = await sendToKMS('signJWT', {
+      kid: kidInput,
+      payload
     });
     displayOutput('✅ JWT Signed', {
       jwt: result.jwt,
       note: 'Signed with non-extractable private key in KMS'
-    });
-  } catch (error) {
-    displayError(error as Error);
-  }
-});
-
-document.getElementById('lock-kms')!.addEventListener('click', async () => {
-  try {
-    const result = await sendToKMS('lock', {});
-    displayOutput('✅ KMS Locked', result);
-  } catch (error) {
-    displayError(error as Error);
-  }
-});
-
-document.getElementById('get-status')!.addEventListener('click', async () => {
-  try {
-    const result = await sendToKMS('getStatus', {});
-    displayOutput('📊 KMS Status', result);
-  } catch (error) {
-    displayError(error as Error);
-  }
-});
-
-document.getElementById('view-audit')!.addEventListener('click', async () => {
-  try {
-    const result = await sendToKMS('getAuditLog', {});
-    displayOutput('📋 Audit Log', {
-      entries: result.entries.length,
-      chainValid: result.verification.valid,
-      verification: result.verification
     });
   } catch (error) {
     displayError(error as Error);

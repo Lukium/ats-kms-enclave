@@ -234,11 +234,10 @@ export class KMSClient {
         },
       })) as PublicKeyCredential | null;
 
-      console.log('[KMS Client] Credential created:', {
-        hasCredential: !!credential,
-        credentialId: credential ? credential.id : null,
-        rawIdLength: credential ? credential.rawId.byteLength : 0,
-      });
+      console.log('[KMS Client] ========================================');
+      console.log('[KMS Client] SETUP CREDENTIAL ID (base64url):', credential ? credential.id : null);
+      console.log('[KMS Client] SETUP CREDENTIAL BYTES (all 32):', credential ? Array.from(new Uint8Array(credential.rawId)) : null);
+      console.log('[KMS Client] ========================================');
 
       if (!credential) {
         console.log('[KMS Client] Credential creation returned null');
@@ -378,17 +377,17 @@ export class KMSClient {
 
       const appSalt = new Uint8Array(config.appSalt);
 
-      // Get assertion with PRF
+      console.log('[KMS Client] Unlocking with PRF, credential info:', {
+        credentialIdType: Object.prototype.toString.call(config.credentialId),
+        credentialIdLength: config.credentialId.byteLength,
+        credentialIdIsArrayBuffer: config.credentialId instanceof ArrayBuffer,
+      });
+
+      // Get assertion with PRF (no allowCredentials - Windows Hello needs this)
       const credential = (await navigator.credentials.get({
         publicKey: {
           challenge: crypto.getRandomValues(new Uint8Array(32)),
           rpId: rpId,
-          allowCredentials: [
-            {
-              type: 'public-key',
-              id: config.credentialId,
-            },
-          ],
           userVerification: 'required',
           extensions: {
             prf: {
@@ -484,6 +483,9 @@ export class KMSClient {
         hasConfig: !!config,
         method: config?.method,
         hasCredentialId: !!(config?.credentialId),
+        credentialIdType: config?.credentialId ? Object.prototype.toString.call(config.credentialId) : 'undefined',
+        credentialIdLength: config?.credentialId ? config.credentialId.byteLength : 0,
+        credentialIdBytesAfterRPC: config?.credentialId ? new Uint8Array(config.credentialId).slice(0, 8) : null,
       });
 
       if (!config || config.method !== 'passkey-gate' || !config.credentialId) {
@@ -491,29 +493,48 @@ export class KMSClient {
         return { success: false, error: 'NOT_SETUP' };
       }
 
-      // Get assertion (user verification is the gate)
+      const fullBytes = new Uint8Array(config.credentialId);
+      const base64url = btoa(String.fromCharCode(...fullBytes))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+
+      console.log('[KMS Client] ========================================');
+      console.log('[KMS Client] UNLOCK CREDENTIAL ID (base64url):', base64url);
+      console.log('[KMS Client] UNLOCK CREDENTIAL BYTES (all 32):', Array.from(fullBytes));
+      console.log('[KMS Client] ========================================');
+
+      // Get credential without allowCredentials filter (Windows Hello needs this)
       const credential = (await navigator.credentials.get({
         publicKey: {
           challenge: crypto.getRandomValues(new Uint8Array(32)),
           rpId: rpId,
-          allowCredentials: [
-            {
-              type: 'public-key',
-              id: config.credentialId,
-            },
-          ],
           userVerification: 'required',
         },
       })) as PublicKeyCredential | null;
 
+      console.log('[KMS Client] credentials.get() result:', {
+        hasCredential: !!credential,
+        credentialId: credential?.id,
+        matchesExpected: credential?.id === base64url,
+      });
+
       if (!credential) {
+        console.error('[KMS Client] No credential returned from get()');
         return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
       }
 
+      console.log('[KMS Client] Sending unlock request to worker...');
       // Send unlock request to worker (no PRF output needed)
-      return this.request<{ success: boolean; error?: string }>('unlockWithPasskeyGate', {});
+      const result = await this.request<{ success: boolean; error?: string }>('unlockWithPasskeyGate', {});
+      console.log('[KMS Client] Unlock result:', result);
+      return result;
     } catch (error) {
       console.error('[KMS Client] Passkey gate unlock failed:', error);
+      if (error instanceof Error) {
+        console.error('  Error name:', error.name);
+        console.error('  Error message:', error.message);
+      }
       return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
     }
   }

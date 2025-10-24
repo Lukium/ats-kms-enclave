@@ -429,6 +429,12 @@ export async function setupPasskeyGate(
     );
 
     // Store unlock configuration
+    console.log('[unlock.ts] Storing passkey gate config:', {
+      credentialIdLength: credentialId.byteLength,
+      credentialIdBytes: new Uint8Array(credentialId).slice(0, 8),
+      credentialIdType: Object.prototype.toString.call(credentialId),
+    });
+
     await putMeta<UnlockPasskeyGateConfig>('unlockSalt', {
       method: 'passkey-gate',
       credentialId: credentialId,

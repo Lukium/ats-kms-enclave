@@ -292,10 +292,58 @@ export class KMSUser {
   /**
    * Unlock with passphrase
    */
-  unlockWithPassphrase(passphrase: string): Promise<{ success: boolean; error?: string }> {
-    return this.request<{ success: boolean; error?: string }>('unlockWithPassphrase', {
+  unlockWithPassphrase(passphrase: string): Promise<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }> {
+    return this.request<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }>('unlockWithPassphrase', {
       passphrase,
     });
+  }
+
+  /**
+   * Unified unlock method with passkey-first fallback
+   *
+   * Automatically tries passkey unlock first (if configured), then falls back
+   * to passphrase unlock (if configured and passphrase provided).
+   *
+   * @param rpId - Relying Party ID for passkey authentication
+   * @param passphrase - Optional passphrase for fallback unlock
+   * @returns Result with keys and metadata on success
+   */
+  async unlock(
+    rpId: string,
+    passphrase?: string
+  ): Promise<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }> {
+    // Check which methods are configured
+    const status = await this.isUnlockSetup();
+    if (!status.isSetup) {
+      return { success: false, error: 'NOT_SETUP' };
+    }
+
+    // Try passkey first if configured
+    const passkeyConfig = await this.getPasskeyConfig();
+    if (passkeyConfig) {
+      try {
+        const passkeyResult = await this.unlockWithPasskey(rpId);
+        if (passkeyResult.success) {
+          return passkeyResult;
+        }
+        // Passkey failed - fall back to passphrase if available
+      } catch {
+        // Passkey unlock threw error - fall back to passphrase if available
+      }
+    }
+
+    // Fall back to passphrase if provided
+    if (passphrase) {
+      return await this.unlockWithPassphrase(passphrase);
+    }
+
+    // No passphrase provided and passkey failed/unavailable
+    return {
+      success: false,
+      error: passkeyConfig
+        ? 'PASSKEY_FAILED_PASSPHRASE_REQUIRED'
+        : 'PASSPHRASE_REQUIRED',
+    };
   }
 
   /**
@@ -304,7 +352,7 @@ export class KMSUser {
    * Checks stored config to determine unlock method (PRF vs gate-only),
    * performs WebAuthn ceremony in parent window, sends data to iframe.
    */
-  async unlockWithPasskey(rpId: string): Promise<{ success: boolean; error?: string }> {
+  async unlockWithPasskey(rpId: string): Promise<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }> {
     /* c8 ignore start - browser WebAuthn API */
     if (!window.PublicKeyCredential) {
       return {

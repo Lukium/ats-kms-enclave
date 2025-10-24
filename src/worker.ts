@@ -26,6 +26,9 @@ import {
   setupPasskeyGate,
   unlockWithPasskeyGate,
   isSetup,
+  isPassphraseSetup,
+  isPasskeySetup,
+  deriveMKEKFromMS,
 } from './unlock.js';
 import {
   derToP1363,
@@ -66,6 +69,18 @@ interface JWTPayload {
   exp: number;
 }
 
+/**
+ * Authentication credentials for per-operation auth
+ *
+ * These credentials are provided by the client (kms-user.ts) with each
+ * operation request to enable per-operation authentication without
+ * persistent unlock state.
+ */
+type AuthCredentials =
+  | { method: 'passphrase'; passphrase: string }
+  | { method: 'passkey-prf'; rpId: string; prfOutput: ArrayBuffer }
+  | { method: 'passkey-gate' };
+
 // ============================================================================
 // State Management
 // ============================================================================
@@ -73,9 +88,24 @@ interface JWTPayload {
 // Initialization state
 let isInitialized = false;
 
-// Unlock state (replaces temporary wrapping key)
-let wrappingKey: CryptoKey | null = null;
-let isUnlocked = false;
+/**
+ * PER-OPERATION AUTHENTICATION ARCHITECTURE
+ *
+ * Every operation performs an atomic unlock→operate→lock sequence.
+ * MS is decrypted momentarily, used, and immediately cleared.
+ *
+ * "Unlock" is an action (verb), not a state:
+ * - Operations unlock momentarily to decrypt MS
+ * - Perform their work
+ * - Lock immediately (clear MS)
+ * - Audit logs track unlock/lock timestamps and duration
+ *
+ * Security benefits:
+ * - No persistent attack surface (MS lifetime: milliseconds per operation)
+ * - Each operation requires authentication
+ * - Memory dumps have minimal exposure window
+ * - Audit trail shows exact timing of each unlock event
+ */
 
 /**
  * Initialize worker storage and audit logging
@@ -92,14 +122,49 @@ async function init(): Promise<void> {
 }
 
 /**
- * Get the current wrapping key
- * @throws {Error} if worker is not unlocked
+ * Decrypt Master Secret from authentication credentials
+ *
+ * This function enables per-operation authentication by allowing operations
+ * to decrypt MS on-demand using provided credentials, without relying on
+ * persistent unlock state.
+ *
+ * @param credentials - Authentication credentials (passphrase or passkey)
+ * @returns Decrypted Master Secret bytes
+ * @throws {Error} if decryption fails or credentials are invalid
  */
-function getWrappingKey(): CryptoKey {
-  if (!isUnlocked || !wrappingKey) {
-    throw new Error('Worker not unlocked');
+async function decryptMSFromCredentials(
+  credentials: AuthCredentials
+): Promise<Uint8Array<ArrayBuffer>> {
+  await init();
+
+  switch (credentials.method) {
+    case 'passphrase': {
+      const result = await unlockWithPassphrase(credentials.passphrase);
+      if (!result.success) {
+        throw new Error(result.error || 'Passphrase unlock failed');
+      }
+      return result.ms;
+    }
+
+    case 'passkey-prf': {
+      const result = await unlockWithPasskeyPRF(credentials.prfOutput);
+      if (!result.success) {
+        throw new Error(result.error || 'Passkey PRF unlock failed');
+      }
+      return result.ms;
+    }
+
+    case 'passkey-gate': {
+      const result = await unlockWithPasskeyGate();
+      if (!result.success) {
+        throw new Error(result.error || 'Passkey gate unlock failed');
+      }
+      return result.ms;
+    }
+
+    default:
+      throw new Error('Unknown authentication method');
   }
-  return wrappingKey;
 }
 
 /**
@@ -108,8 +173,6 @@ function getWrappingKey(): CryptoKey {
  */
 export function resetWorkerState(): void {
   isInitialized = false;
-  wrappingKey = null;
-  isUnlocked = false;
   resetAuditLogger();
 }
 
@@ -140,25 +203,48 @@ async function generateKidFromPublicKey(publicKeyRaw: Uint8Array): Promise<strin
 
 /**
  * Setup passphrase for first-time unlock
+ *
+ * For adding a second method, credentials from first method must be provided
+ * to decrypt the existing MS.
  */
 async function setupPassphraseMethod(
   passphrase: string,
   requestId: string,
-  origin?: string
+  origin?: string,
+  credentials?: AuthCredentials
 ): Promise<{ success: boolean; error?: string }> {
   // Ensure worker is initialized
   await init();
 
+  // Setup flow validation: Check if adding second method
+  const passkeyExists = await isPasskeySetup();
+  let existingMS: Uint8Array<ArrayBuffer> | undefined;
+
+  if (passkeyExists) {
+    // Adding second method - require credentials to decrypt existing MS
+    if (!credentials) {
+      return { success: false, error: 'CREDENTIALS_REQUIRED_FOR_SECOND_METHOD' };
+    }
+    // Decrypt existing MS from first method's credentials
+    existingMS = await decryptMSFromCredentials(credentials);
+  }
+
   // Call unlock manager to setup
-  const result = await setupPassphrase(passphrase);
+  const result = await setupPassphrase(passphrase, existingMS);
 
   if (!result.success) {
+    // Clear MS if we decrypted it
+    if (existingMS) {
+      existingMS.fill(0);
+    }
     return { success: false, error: result.error };
   }
 
-  // Store the wrapping key and mark as unlocked
-  wrappingKey = result.key;
-  isUnlocked = true;
+  // Clear MS immediately (per-operation auth - no persistent state)
+  result.ms.fill(0);
+  if (existingMS) {
+    existingMS.fill(0);
+  }
 
   // Log operation to audit log
   const auditOp: AuditOperation = {
@@ -174,30 +260,33 @@ async function setupPassphraseMethod(
 }
 
 /**
- * Unlock with passphrase
+ * Validate passphrase credentials
+ *
+ * This validates credentials without changing worker state.
+ * Returns key list for UX. Client should store credentials
+ * and pass them with subsequent operations.
  */
 async function unlockWithPassphraseMethod(
   passphrase: string,
   requestId: string,
   origin?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }> {
   // Ensure worker is initialized
   await init();
 
-  // Call unlock manager to unlock
+  // Validate credentials by attempting to decrypt MS
   const result = await unlockWithPassphrase(passphrase);
 
   if (!result.success) {
     return { success: false, error: result.error };
   }
 
-  // Store the wrapping key and mark as unlocked
-  wrappingKey = result.key;
-  isUnlocked = true;
+  // IMPORTANT: Clear MS immediately - no persistent unlock state
+  result.ms.fill(0);
 
-  // Log operation to audit log
+  // Log validation event
   const auditOp: AuditOperation = {
-    op: 'unlock',
+    op: 'validate_credentials',
     kid: 'unlock',
     requestId,
     /* c8 ignore next */
@@ -205,7 +294,15 @@ async function unlockWithPassphraseMethod(
   };
   await logOperation(auditOp);
 
-  return { success: true };
+  // Return list of stored keys for UX
+  const storedKeys = await getAllWrappedKeys();
+  const keys = storedKeys.map(wk => ({
+    kid: wk.kid,
+    publicKey: wk.publicKeyRaw ? arrayBufferToBase64url(wk.publicKeyRaw) : '',
+    purpose: wk.purpose || 'unknown',
+  }));
+
+  return { success: true, keys };
 }
 
 /**
@@ -226,33 +323,36 @@ async function setupPasskeyPRFMethod(
   credentialId: ArrayBuffer,
   prfOutput: ArrayBuffer,
   requestId: string,
-  origin?: string
-): Promise<{ success: boolean; error?: string }> {
+  origin?: string,
+  credentials?: AuthCredentials
+): Promise<{ success: boolean; error?: string; method?: 'prf' | 'gate' }> {
   // Ensure worker is initialized
   await init();
 
-  // Generate a temporary KEK that will be wrapped with the passkey-derived K_wrap
-  // Note: Must be extractable to allow wrapping, but will be stored non-extractable when unwrapped
-  const kek = await crypto.subtle.generateKey(
-    {
-      name: 'AES-GCM',
-      length: 256,
-    },
-    true, // extractable (required for wrapKey operation)
-    ['wrapKey', 'unwrapKey']
-  );
+  // Setup flow validation: Check if adding second method
+  const passphraseExists = await isPassphraseSetup();
+  let existingMS: Uint8Array<ArrayBuffer> | undefined;
+
+  if (passphraseExists) {
+    // Adding second method - require credentials to decrypt existing MS
+    if (!credentials) {
+      return { success: false, error: 'CREDENTIALS_REQUIRED_FOR_SECOND_METHOD' };
+    }
+    // Decrypt existing MS from first method's credentials
+    existingMS = await decryptMSFromCredentials(credentials);
+  }
 
   // Call unlock manager to setup passkey with PRF
   // WebAuthn ceremony was performed by client, this accepts the results
-  const result = await setupPasskeyPRF(credentialId, prfOutput, kek);
+  const result = await setupPasskeyPRF(credentialId, prfOutput, existingMS);
 
   if (!result.success) {
     return { success: false, error: result.error };
   }
 
-  // Store the KEK as wrapping key and mark as unlocked
-  wrappingKey = kek;
-  isUnlocked = true;
+  // Store the MS and mark as unlocked
+  // Per-operation auth: Clear MS immediately
+  result.ms.fill(0);
 
   // Log operation to audit log
   const auditOp: AuditOperation = {
@@ -263,7 +363,7 @@ async function setupPasskeyPRFMethod(
   };
   await logOperation(auditOp);
 
-  return { success: true };
+  return { success: true, method: 'prf' };
 }
 
 /**
@@ -273,7 +373,7 @@ async function unlockWithPasskeyPRFMethod(
   prfOutput: ArrayBuffer,
   requestId: string,
   origin?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }> {
   // Ensure worker is initialized
   await init();
 
@@ -285,9 +385,9 @@ async function unlockWithPasskeyPRFMethod(
     return { success: false, error: result.error };
   }
 
-  // Store the unwrapped KEK as wrapping key and mark as unlocked
-  wrappingKey = result.key;
-  isUnlocked = true;
+  // Store the MS and mark as unlocked
+  // Per-operation auth: Clear MS immediately
+  result.ms.fill(0);
 
   // Log operation to audit log
   const auditOp: AuditOperation = {
@@ -298,7 +398,15 @@ async function unlockWithPasskeyPRFMethod(
   };
   await logOperation(auditOp);
 
-  return { success: true };
+  // Return list of stored keys for UX
+  const storedKeys = await getAllWrappedKeys();
+  const keys = storedKeys.map(wk => ({
+    kid: wk.kid,
+    publicKey: wk.publicKeyRaw ? arrayBufferToBase64url(wk.publicKeyRaw) : '',
+    purpose: wk.purpose || 'unknown',
+  }));
+
+  return { success: true, keys };
 }
 
 /**
@@ -307,32 +415,42 @@ async function unlockWithPasskeyPRFMethod(
 async function setupPasskeyGateMethod(
   credentialId: ArrayBuffer,
   requestId: string,
-  origin?: string
-): Promise<{ success: boolean; error?: string }> {
+  origin?: string,
+  credentials?: AuthCredentials
+): Promise<{ success: boolean; error?: string; method?: 'prf' | 'gate' }> {
   // Ensure worker is initialized
   await init();
 
-  // Generate a temporary KEK that will be wrapped
-  const kek = await crypto.subtle.generateKey(
-    {
-      name: 'AES-GCM',
-      length: 256,
-    },
-    true, // extractable (required for wrapKey operation)
-    ['wrapKey', 'unwrapKey']
-  );
+  // Setup flow validation: Check if adding second method
+  const passphraseExists = await isPassphraseSetup();
+  let existingMS: Uint8Array<ArrayBuffer> | undefined;
+
+  if (passphraseExists) {
+    // Adding second method - require credentials to decrypt existing MS
+    if (!credentials) {
+      return { success: false, error: 'CREDENTIALS_REQUIRED_FOR_SECOND_METHOD' };
+    }
+    // Decrypt existing MS from first method's credentials
+    existingMS = await decryptMSFromCredentials(credentials);
+  }
 
   // Call unlock manager to setup passkey in gate-only mode
   // WebAuthn ceremony was performed by client, this accepts the credential ID
-  const result = await setupPasskeyGate(credentialId, kek);
+  const result = await setupPasskeyGate(credentialId, existingMS);
 
   if (!result.success) {
+    // Clear MS if we decrypted it
+    if (existingMS) {
+      existingMS.fill(0);
+    }
     return { success: false, error: result.error };
   }
 
-  // Store the session KEK as wrapping key and mark as unlocked
-  wrappingKey = kek;
-  isUnlocked = true;
+  // Per-operation auth: Clear MS immediately
+  result.ms.fill(0);
+  if (existingMS) {
+    existingMS.fill(0);
+  }
 
   // Log operation to audit log
   const auditOp: AuditOperation = {
@@ -343,7 +461,7 @@ async function setupPasskeyGateMethod(
   };
   await logOperation(auditOp);
 
-  return { success: true };
+  return { success: true, method: 'gate' };
 }
 
 /**
@@ -352,7 +470,7 @@ async function setupPasskeyGateMethod(
 async function unlockWithPasskeyGateMethod(
   requestId: string,
   origin?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; keys?: Array<{ kid: string; publicKey: string; purpose: string }> }> {
   // Ensure worker is initialized
   await init();
 
@@ -364,9 +482,9 @@ async function unlockWithPasskeyGateMethod(
     return { success: false, error: result.error };
   }
 
-  // Store the session KEK as wrapping key and mark as unlocked
-  wrappingKey = result.key;
-  isUnlocked = true;
+  // Store the MS and mark as unlocked
+  // Per-operation auth: Clear MS immediately
+  result.ms.fill(0);
 
   // Log operation to audit log
   const auditOp: AuditOperation = {
@@ -377,68 +495,108 @@ async function unlockWithPasskeyGateMethod(
   };
   await logOperation(auditOp);
 
-  return { success: true };
+  // Return list of stored keys for UX
+  const storedKeys = await getAllWrappedKeys();
+  const keys = storedKeys.map(wk => ({
+    kid: wk.kid,
+    publicKey: wk.publicKeyRaw ? arrayBufferToBase64url(wk.publicKeyRaw) : '',
+    purpose: wk.purpose || 'unknown',
+  }));
+
+  return { success: true, keys };
 }
 
 /**
  * Generate a VAPID keypair
+ *
+ * @param requestId - Request ID for audit logging
+ * @param origin - Optional origin for audit logging
+ * @param credentials - Authentication credentials (REQUIRED for per-operation auth)
  */
-async function generateVAPID(requestId: string, origin?: string): Promise<VAPIDKeyPair> {
+async function generateVAPID(
+  requestId: string,
+  origin?: string,
+  credentials?: AuthCredentials
+): Promise<VAPIDKeyPair> {
   // Ensure worker is initialized
   await init();
 
-  // Generate P-256 ECDSA keypair
-  // Note: Generated as extractable for wrapping (happy-dom limitation)
-  // When unwrapped, they'll be non-extractable for security
-  const keypair = await crypto.subtle.generateKey(
-    {
-      name: 'ECDSA',
-      namedCurve: 'P-256',
-    },
-    true, // temporarily extractable for wrapping (will be non-extractable when unwrapped)
-    ['sign', 'verify']
-  );
+  // Require credentials for per-operation authentication
+  if (!credentials) {
+    throw new Error('Credentials required - no persistent unlock state');
+  }
 
-  // Export public key in raw format
-  const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
-  const publicKeyBase64url = arrayBufferToBase64url(publicKeyRaw);
+  // Decrypt MS from credentials
+  const ms = await decryptMSFromCredentials(credentials);
 
-  // Generate kid from JWK thumbprint (RFC 7638)
-  // This ensures the kid is content-derived and verifiable
-  const kid = await generateKidFromPublicKey(new Uint8Array(publicKeyRaw));
+  try {
+    // Derive MKEK from MS
+    const mkek = await deriveMKEKFromMS(ms);
+    // Generate P-256 ECDSA keypair
+    // Note: Generated as extractable for wrapping (happy-dom limitation)
+    // When unwrapped, they'll be non-extractable for security
+    const keypair = await crypto.subtle.generateKey(
+      {
+        name: 'ECDSA',
+        namedCurve: 'P-256',
+      },
+      true, // temporarily extractable for wrapping (will be non-extractable when unwrapped)
+      ['sign', 'verify']
+    );
 
-  // Wrap and store keypair
-  await wrapKey(keypair.privateKey, getWrappingKey(), kid, undefined, undefined, {
-    publicKeyRaw: publicKeyRaw,
-    alg: 'ES256',
-    purpose: 'vapid',
-  });
+    // Export public key in raw format
+    const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
+    const publicKeyBase64url = arrayBufferToBase64url(publicKeyRaw);
 
-  // Log operation to audit log
-  const auditOp: AuditOperation = {
-    op: 'generate_vapid',
-    kid,
-    requestId,
-    /* c8 ignore next */
-    ...(origin && { origin }),
-  };
+    // Generate kid from JWK thumbprint (RFC 7638)
+    // This ensures the kid is content-derived and verifiable
+    const kid = await generateKidFromPublicKey(new Uint8Array(publicKeyRaw));
 
-  await logOperation(auditOp);
+    // Wrap and store keypair
+    await wrapKey(keypair.privateKey, mkek, kid, undefined, undefined, {
+      publicKeyRaw: publicKeyRaw,
+      alg: 'ES256',
+      purpose: 'vapid',
+    });
 
-  return {
-    kid,
-    publicKey: publicKeyBase64url,
-  };
+    // Log operation to audit log
+    const auditOp: AuditOperation = {
+      op: 'generate_vapid',
+      kid,
+      requestId,
+      /* c8 ignore next */
+      ...(origin && { origin }),
+    };
+
+    await logOperation(auditOp);
+
+    return {
+      kid,
+      publicKey: publicKeyBase64url,
+    };
+  } finally {
+    // CRITICAL: Clear MS from memory immediately if per-operation auth was used
+    if (ms) {
+      ms.fill(0);
+    }
+  }
 }
 
 /**
  * Sign a JWT with a stored VAPID key
+ *
+ * @param kid - Key ID to use for signing
+ * @param payload - JWT payload
+ * @param requestId - Request ID for audit logging
+ * @param origin - Optional origin for audit logging
+ * @param credentials - Authentication credentials (REQUIRED for per-operation auth)
  */
 async function signJWT(
   kid: string,
   payload: JWTPayload,
   requestId: string,
-  origin?: string
+  origin?: string,
+  credentials?: AuthCredentials
 ): Promise<{
   jwt: string;
   debug?: {
@@ -452,6 +610,11 @@ async function signJWT(
 }> {
   // Ensure worker is initialized
   await init();
+
+  // Require credentials for per-operation authentication
+  if (!credentials) {
+    throw new Error('Credentials required - no persistent unlock state');
+  }
 
   // ============================================================================
   // JWT Policy Validation (VAPID Requirements)
@@ -517,11 +680,18 @@ async function signJWT(
   // JWT Signing
   // ============================================================================
 
-  // Unwrap private key from storage
-  const privateKey = await unwrapKey(kid, getWrappingKey(), {
-    name: 'ECDSA',
-    namedCurve: 'P-256',
-  });
+  // Decrypt MS from credentials
+  const ms = await decryptMSFromCredentials(credentials);
+
+  try {
+    // Derive MKEK from MS
+    const mkek = await deriveMKEKFromMS(ms);
+
+    // Unwrap private key from storage
+    const privateKey = await unwrapKey(kid, mkek, {
+      name: 'ECDSA',
+      namedCurve: 'P-256',
+    });
 
   // Create JWT header
   const header = {
@@ -585,21 +755,27 @@ async function signJWT(
     },
   };
 
-  await logOperation(auditOp);
+    await logOperation(auditOp);
 
-  // Return JWT with optional debug information for demo purposes
-  return {
-    jwt,
-    // Debug information (for demo visualization)
-    debug: {
-      signatureConversion: {
-        originalFormat: format,
-        originalBytes: Array.from(signatureBytes),
-        convertedBytes: Array.from(signatureP1363),
-        wasConverted: format === 'DER',
+    // Return JWT with optional debug information for demo purposes
+    return {
+      jwt,
+      // Debug information (for demo visualization)
+      debug: {
+        signatureConversion: {
+          originalFormat: format,
+          originalBytes: Array.from(signatureBytes),
+          convertedBytes: Array.from(signatureP1363),
+          wasConverted: format === 'DER',
+        },
       },
-    },
-  };
+    };
+  } finally {
+    // CRITICAL: Clear MS from memory immediately if per-operation auth was used
+    if (ms) {
+      ms.fill(0);
+    }
+  }
 }
 
 /**
@@ -663,7 +839,11 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
     // Route to appropriate handler
     switch (request.method) {
       case 'generateVAPID': {
-        const result = await generateVAPID(request.id, request.origin);
+        // Extract optional credentials for per-operation auth
+        const params = request.params as { credentials?: AuthCredentials } | undefined;
+        const credentials = params?.credentials;
+
+        const result = await generateVAPID(request.id, request.origin, credentials);
         return {
           id: request.id,
           result,
@@ -682,7 +862,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           };
         }
 
-        const params = request.params as { kid?: string; payload?: JWTPayload };
+        const params = request.params as { kid?: string; payload?: JWTPayload; credentials?: AuthCredentials };
 
         if (!params.kid || typeof params.kid !== 'string') {
           return {
@@ -705,11 +885,15 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         }
 
         try {
+          // Extract optional credentials for per-operation auth
+          const credentials = params.credentials;
+
           const result = await signJWT(
             params.kid,
             params.payload,
             request.id,
-            request.origin
+            request.origin,
+            credentials
           );
           return {
             id: request.id,

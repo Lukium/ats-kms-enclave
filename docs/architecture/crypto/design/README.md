@@ -56,6 +56,17 @@ This directory contains the detailed design documentation for the KMS enclave, b
 - Integration with ATS features
 - Implementation checklist
 
+### [07-master-secret-and-per-operation-auth.md](./07-master-secret-and-per-operation-auth.md)
+**Architecture Decision Record: Security improvements** (~370 lines)
+- Master Secret (MS) encryption pattern vs. wrapped CryptoKeys
+- Per-operation authentication (no persistent unlock state)
+- **Rationale**: Eliminates `extractable:true` keys, minimizes key lifetime
+- Implementation details for MS encryption/decryption
+- Operation flow with authentication per request
+- Operation batching for UX (e.g., generate + sign in one auth)
+- Security guarantees and trade-offs
+- Migration path from previous architecture
+
 ## How to Use This Documentation
 
 ### For Understanding the System
@@ -116,5 +127,6 @@ This directory contains the detailed design documentation for the KMS enclave, b
 - 04-build-pipeline.md: ~175 lines (build scripts)
 - 05-security-model.md: ~185 lines (threat model + design questions)
 - 06-implementation-guide.md: ~1440 lines (production guide + VAPID utilities)
+- 07-master-secret-and-per-operation-auth.md: ~370 lines (ADR for MS pattern + per-op auth)
 
-**Total**: ~2500 lines of detailed design documentation
+**Total**: ~2870 lines of detailed design documentation

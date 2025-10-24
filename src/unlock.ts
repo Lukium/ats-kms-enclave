@@ -15,9 +15,12 @@ import { getMeta, putMeta, deleteMeta, initDB } from './storage.js';
 
 /**
  * Result type for setup/unlock operations
+ *
+ * New architecture: Returns Master Secret (MS) bytes, not CryptoKey
+ * Worker derives MKEK from MS using HKDF
  */
 export type UnlockResult =
-  | { success: true; key: CryptoKey }
+  | { success: true; ms: Uint8Array<ArrayBuffer> } // Master Secret bytes (32 bytes)
   | {
       success: false;
       error:
@@ -33,16 +36,25 @@ export type UnlockResult =
         | 'PASSKEY_AUTHENTICATION_FAILED'
         | 'PASSKEY_PRF_NOT_SUPPORTED'
         | 'INCORRECT_PASSKEY'
-        | 'SESSION_EXPIRED';
+        | 'SESSION_EXPIRED'
+        | 'MUST_UNLOCK_FIRST'; // Must be unlocked before adding second unlock method
     };
 
 /**
  * Unlock configuration stored in meta store
+ *
+ * New architecture: Store encrypted Master Secret (MS) bytes, not wrapped CryptoKeys
+ * - MS is random bytes (32 bytes) never stored unencrypted
+ * - Each unlock method encrypts the same MS with its own KEK
+ * - On unlock: decrypt MS, derive MKEK from MS using HKDF
+ * - Adding second method: just encrypt MS with new KEK (no key export needed)
  */
 type UnlockPassphraseConfig = {
   method: 'passphrase';
   salt: ArrayBuffer;
   iterations: number;
+  encryptedMS: ArrayBuffer; // Master Secret encrypted with passphrase-derived KEK
+  msIV: ArrayBuffer; // IV for AES-GCM encryption of MS
   verificationHash: string; // Hash of derived key for verification
 };
 
@@ -50,16 +62,16 @@ type UnlockPasskeyPRFConfig = {
   method: 'passkey-prf';
   credentialId: ArrayBuffer;
   appSalt: ArrayBuffer;
-  wrappedKEK: ArrayBuffer;
-  wrapIV: ArrayBuffer;
+  encryptedMS: ArrayBuffer; // Master Secret encrypted with PRF-derived KEK
+  msIV: ArrayBuffer; // IV for AES-GCM encryption of MS
 };
 
 type UnlockPasskeyGateConfig = {
   method: 'passkey-gate';
   credentialId: ArrayBuffer;
   appSalt: ArrayBuffer;
-  wrappedKEK: ArrayBuffer;
-  wrapIV: ArrayBuffer;
+  encryptedMS: ArrayBuffer; // Master Secret encrypted with gate-derived KEK
+  msIV: ArrayBuffer; // IV for AES-GCM encryption of MS
 };
 
 // ============================================================================
@@ -70,7 +82,9 @@ const MIN_PASSPHRASE_LENGTH = 8;
 const PBKDF2_ITERATIONS = 600000; // OWASP recommendation for 2024
 const SALT_LENGTH = 16; // 128 bits
 const APP_SALT_LENGTH = 32; // 256 bits
-const HKDF_INFO = 'ATS/KMS/KEK-wrap/v1'; // HKDF purpose label
+const MS_LENGTH = 32; // Master Secret length (256 bits)
+const HKDF_INFO_KEK = 'ATS/KMS/KEK-wrap/v1'; // HKDF purpose label for KEK derivation
+const HKDF_INFO_MKEK = 'ATS/KMS/MKEK/v1'; // HKDF purpose label for MKEK derivation from MS
 
 // ============================================================================
 // Module State
@@ -78,19 +92,18 @@ const HKDF_INFO = 'ATS/KMS/KEK-wrap/v1'; // HKDF purpose label
 
 let isInitialized = false;
 
-// Wrapping key reference (stored in memory during unlocked session)
-// @ts-expect-error - Reserved for future session management
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-let _wrappingKeyRef: CryptoKey | null = null;
-
-// Gate session state (for future session management)
-// @ts-expect-error - Reserved for future session management
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-let _gateSessionKey: CryptoKey | null = null;
-// @ts-expect-error - Reserved for future session management
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-let _gateSessionExpiry: number | null = null;
-let _gateSessionTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * NEW ARCHITECTURE: No persistent unlock state
+ *
+ * Previously stored _wrappingKeyRef (MKEK) in memory after unlock.
+ * New approach: Return MS bytes from unlock functions, worker derives MKEK per operation.
+ *
+ * Benefits:
+ * - Eliminates persistent in-memory keys
+ * - Requires authentication per operation
+ * - Minimizes key lifetime (milliseconds vs. session duration)
+ * - Reduces attack surface for code execution in Worker
+ */
 
 /**
  * Initialize the unlock manager
@@ -137,12 +150,16 @@ export async function isPasskeySetup(): Promise<boolean> {
 /**
  * Setup passphrase-based unlock
  *
- * This should be called on first use to configure the unlock mechanism.
+ * NEW ARCHITECTURE: Encrypts Master Secret (MS) with passphrase-derived KEK
  *
  * @param passphrase - User's passphrase (min 8 characters)
- * @returns Result with derived wrapping key or error
+ * @param existingMS - Optional: MS from another unlock method (for adding second method)
+ * @returns Result with MS bytes or error
  */
-export async function setupPassphrase(passphrase: string): Promise<UnlockResult> {
+export async function setupPassphrase(
+  passphrase: string,
+  existingMS?: Uint8Array<ArrayBuffer>
+): Promise<UnlockResult> {
   await ensureInitialized();
 
   // Validate passphrase
@@ -156,38 +173,49 @@ export async function setupPassphrase(passphrase: string): Promise<UnlockResult>
     return { success: false, error: 'PASSPHRASE_ALREADY_SETUP' };
   }
 
-  // Generate random salt
+  // Generate random salt for PBKDF2
   const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
 
-  // Derive bits for both key and verification
-  const result = await deriveKeyWithVerification(
+  // Derive KEK from passphrase
+  const { key: kek, verificationHash } = await deriveKeyWithVerification(
     passphrase,
     salt,
     PBKDF2_ITERATIONS
   );
-  const key = result.key;
-  const verificationHash = result.verificationHash;
+
+  // Get or generate Master Secret (MS)
+  const ms = existingMS || crypto.getRandomValues(new Uint8Array(MS_LENGTH));
+
+  // Encrypt MS with KEK (not wrapKey - MS is bytes, not CryptoKey)
+  const msIV = crypto.getRandomValues(new Uint8Array(12));
+  const encryptedMS = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: msIV },
+    kek,
+    ms
+  );
 
   // Store unlock configuration
   const config: UnlockPassphraseConfig = {
     method: 'passphrase',
     salt: salt.buffer,
     iterations: PBKDF2_ITERATIONS,
+    encryptedMS,
+    msIV: msIV.buffer,
     verificationHash,
   };
 
   await putMeta('passphraseConfig', config);
 
-  return { success: true, key };
+  return { success: true, ms };
 }
 
 /**
  * Unlock with passphrase
  *
- * Derives the wrapping key from the user's passphrase.
+ * NEW ARCHITECTURE: Decrypts Master Secret (MS) using passphrase-derived KEK
  *
  * @param passphrase - User's passphrase
- * @returns Result with derived wrapping key or error
+ * @returns Result with MS bytes or error
  */
 export async function unlockWithPassphrase(
   passphrase: string
@@ -206,9 +234,9 @@ export async function unlockWithPassphrase(
     return { success: false, error: 'NOT_SETUP' };
   }
 
-  // Derive key and verification hash from passphrase
+  // Derive KEK from passphrase
   const salt = new Uint8Array(config.salt);
-  const { key, verificationHash } = await deriveKeyWithVerification(
+  const { key: kek, verificationHash } = await deriveKeyWithVerification(
     passphrase,
     salt,
     config.iterations
@@ -219,7 +247,21 @@ export async function unlockWithPassphrase(
     return { success: false, error: 'INCORRECT_PASSPHRASE' };
   }
 
-  return { success: true, key };
+  // Decrypt MS with KEK
+  try {
+    const msIV = new Uint8Array(config.msIV);
+    const msBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: msIV },
+      kek,
+      config.encryptedMS
+    );
+
+    const ms = new Uint8Array(msBuffer);
+
+    return { success: true, ms };
+  } catch {
+    return { success: false, error: 'INCORRECT_PASSPHRASE' };
+  }
 }
 
 /**
@@ -230,27 +272,26 @@ export async function unlockWithPassphrase(
  */
 export async function resetUnlock(): Promise<void> {
   await ensureInitialized();
+  await deleteMeta('passphraseConfig');
+  await deleteMeta('passkeyConfig');
+  // Deprecated: unlockSalt is from old architecture
   await deleteMeta('unlockSalt');
-  // Clear gate session if active
-  _clearGateSession();
 }
 
 /**
  * Setup passkey-based unlock with PRF extension
  *
- * This uses the WebAuthn PRF (hmac-secret) extension to derive a deterministic
- * key from the passkey. The derived key is used with HKDF to create a wrapping key
- * that protects the provided KEK.
+ * NEW ARCHITECTURE: Encrypts Master Secret (MS) with PRF-derived KEK
  *
- * @param rpId - Relying Party ID (domain)
- * @param rpName - Relying Party display name
- * @param kek - Key Encryption Key to wrap (must be extractable)
- * @returns Result with derived wrapping key or error
+ * @param credentialId - Raw credential ID from PublicKeyCredential.rawId
+ * @param prfOutput - PRF output from WebAuthn (32 bytes)
+ * @param existingMS - Optional: MS from another unlock method (for adding second method)
+ * @returns Result with MS bytes or error
  */
 export async function setupPasskeyPRF(
   credentialId: ArrayBuffer,
   prfOutput: ArrayBuffer,
-  kek: CryptoKey
+  existingMS?: Uint8Array<ArrayBuffer>
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
@@ -276,19 +317,18 @@ export async function setupPasskeyPRF(
   try {
     const prfOutputBytes = new Uint8Array(prfOutput);
 
-    // Derive wrapping key from PRF output using HKDF
-    const wrappingKey = await hkdfDeriveKey(prfOutputBytes, appSalt, HKDF_INFO);
+    // Derive KEK from PRF output using HKDF
+    const kek = await hkdfDeriveKey(prfOutputBytes, appSalt, HKDF_INFO_KEK);
 
-    // Wrap KEK with wrapping key
-    const wrapIV = crypto.getRandomValues(new Uint8Array(12));
-    const wrappedKEK = await crypto.subtle.wrapKey(
-      'raw',
+    // Get or generate Master Secret (MS)
+    const ms = existingMS || crypto.getRandomValues(new Uint8Array(MS_LENGTH));
+
+    // Encrypt MS with KEK
+    const msIV = crypto.getRandomValues(new Uint8Array(12));
+    const encryptedMS = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: msIV },
       kek,
-      wrappingKey,
-      {
-        name: 'AES-GCM',
-        iv: wrapIV,
-      }
+      ms
     );
 
     // Store unlock configuration
@@ -296,15 +336,12 @@ export async function setupPasskeyPRF(
       method: 'passkey-prf',
       credentialId: credentialId,
       appSalt: appSalt.buffer,
-      wrappedKEK: wrappedKEK,
-      wrapIV: wrapIV.buffer,
+      encryptedMS,
+      msIV: msIV.buffer,
     });
 
-    // Store the wrapping key in memory
-    _wrappingKeyRef = wrappingKey;
-
-    return { success: true, key: wrappingKey };
-    /* c8 ignore start - defensive: crypto operation failures (wrapKey, HKDF) are not testable without mocking crypto subsystem */
+    return { success: true, ms };
+    /* c8 ignore start - defensive: crypto operation failures are not testable without mocking crypto subsystem */
   } catch {
     return { success: false, error: 'PASSKEY_CREATION_FAILED' };
   }
@@ -312,22 +349,12 @@ export async function setupPasskeyPRF(
 }
 
 /**
- * Unlock with passkey (PRF mode)
- *
- * NOTE: WebAuthn ceremony must be performed by the CLIENT (main window context).
- * This function accepts the PRF output from the client's WebAuthn get() call.
- *
- * @param prfOutput - PRF output from PRF extension (32 bytes)
- * @returns Result with derived wrapping key or error
- */
-
-/**
  * Unlock with passkey PRF extension
  *
- * Authenticates with the passkey and derives the wrapping key using PRF + HKDF.
+ * NEW ARCHITECTURE: Decrypts Master Secret (MS) using PRF-derived KEK
  *
- * @param rpId - Relying Party ID (domain)
- * @returns Result with derived wrapping key or error
+ * @param prfOutput - PRF output from WebAuthn (32 bytes)
+ * @returns Result with MS bytes or error
  */
 export async function unlockWithPasskeyPRF(
   prfOutput: ArrayBuffer
@@ -350,26 +377,24 @@ export async function unlockWithPasskeyPRF(
   try {
     const prfOutputBytes = new Uint8Array(prfOutput);
 
-    // Derive wrapping key from PRF output using HKDF
-    const wrappingKey = await hkdfDeriveKey(prfOutputBytes, appSalt, HKDF_INFO);
+    // Derive KEK from PRF output using HKDF
+    const kek = await hkdfDeriveKey(prfOutputBytes, appSalt, HKDF_INFO_KEK);
 
-    // Try to unwrap KEK to verify correctness
+    // Decrypt MS with KEK
     try {
-      const wrapIV = new Uint8Array(config.wrapIV);
-      await crypto.subtle.unwrapKey(
-        'raw',
-        config.wrappedKEK,
-        wrappingKey,
-        { name: 'AES-GCM', iv: wrapIV },
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['wrapKey', 'unwrapKey']
+      const msIV = new Uint8Array(config.msIV);
+      const msBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: msIV },
+        kek,
+        config.encryptedMS
       );
+
+      const ms = new Uint8Array(msBuffer);
+
+      return { success: true, ms };
     } catch {
       return { success: false, error: 'INCORRECT_PASSKEY' };
     }
-
-    return { success: true, key: wrappingKey };
   /* c8 ignore start - defensive: WebAuthn failures tested by Playwright */
   } catch {
     return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
@@ -378,30 +403,20 @@ export async function unlockWithPasskeyPRF(
 }
 
 /**
- * Setup unlock with passkey (gate-only mode, no PRF)
- *
- * NOTE: WebAuthn ceremony must be performed by the CLIENT (main window context).
- * This function accepts the credential data from the client.
- *
- * @param credentialId - Raw credential ID from PublicKeyCredential.rawId
- * @param kek - Key Encryption Key to wrap (must be extractable)
- * @returns Result with derived wrapping key or error
- */
-
-/**
  * Setup passkey-based unlock with gate-only mode
  *
- * This is a fallback mode for when PRF is not supported. The passkey acts as
- * a gate/authenticator - on successful authentication, we generate a temporary
- * KEK that expires after a fixed duration.
+ * NEW ARCHITECTURE: Encrypts Master Secret (MS) with gate-derived KEK
  *
- * @param rpId - Relying Party ID (domain)
- * @param rpName - Relying Party display name
- * @returns Result with temporary KEK or error
+ * Fallback mode when PRF is not supported. The passkey gates access;
+ * security comes from WebAuthn user verification, not from PRF entropy.
+ *
+ * @param credentialId - Raw credential ID from PublicKeyCredential.rawId
+ * @param existingMS - Optional: MS from another unlock method (for adding second method)
+ * @returns Result with MS bytes or error
  */
 export async function setupPasskeyGate(
   credentialId: ArrayBuffer,
-  kek: CryptoKey
+  existingMS?: Uint8Array<ArrayBuffer>
 ): Promise<UnlockResult> {
   await ensureInitialized();
 
@@ -419,25 +434,24 @@ export async function setupPasskeyGate(
 
   try {
     // Generate deterministic salt from credential ID
-    // In gate-only mode, user verification gates access, not the PRF output
+    // In gate-only mode, user verification gates access, not PRF entropy
     const credIdBytes = new Uint8Array(credentialId);
     const saltHash = await crypto.subtle.digest('SHA-256', credIdBytes);
     const appSalt = new Uint8Array(saltHash);
 
-    // Derive wrapping key from deterministic salt using HKDF
+    // Derive KEK from deterministic salt using HKDF
     // This is secure because access is gated by user verification
-    const wrappingKey = await hkdfDeriveKey(appSalt, appSalt, HKDF_INFO);
+    const kek = await hkdfDeriveKey(appSalt, appSalt, HKDF_INFO_KEK);
 
-    // Wrap KEK with wrapping key
-    const wrapIV = crypto.getRandomValues(new Uint8Array(12));
-    const wrappedKEK = await crypto.subtle.wrapKey(
-      'raw',
+    // Get or generate Master Secret (MS)
+    const ms = existingMS || crypto.getRandomValues(new Uint8Array(MS_LENGTH));
+
+    // Encrypt MS with KEK
+    const msIV = crypto.getRandomValues(new Uint8Array(12));
+    const encryptedMS = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: msIV },
       kek,
-      wrappingKey,
-      {
-        name: 'AES-GCM',
-        iv: wrapIV,
-      }
+      ms
     );
 
     // Store unlock configuration
@@ -452,15 +466,12 @@ export async function setupPasskeyGate(
       method: 'passkey-gate',
       credentialId: credentialId,
       appSalt: appSalt.buffer,
-      wrappedKEK: wrappedKEK,
-      wrapIV: wrapIV.buffer,
+      encryptedMS,
+      msIV: msIV.buffer,
     });
 
-    // Store the wrapping key in memory
-    _wrappingKeyRef = wrappingKey;
-
-    return { success: true, key: wrappingKey };
-    /* c8 ignore start - defensive: crypto operation failures (wrapKey, HKDF) are not testable without mocking crypto subsystem */
+    return { success: true, ms };
+    /* c8 ignore start - defensive: crypto operation failures are not testable without mocking crypto subsystem */
   } catch {
     return { success: false, error: 'PASSKEY_CREATION_FAILED' };
   }
@@ -468,23 +479,15 @@ export async function setupPasskeyGate(
 }
 
 /**
- * Unlock with passkey (gate-only mode, no PRF)
- *
- * NOTE: WebAuthn ceremony must be performed by the CLIENT (main window context).
- * This function derives the key deterministically once authentication succeeds.
- * The security comes from the client only calling this after successful WebAuthn.
- *
- * @returns Result with derived wrapping key or error
- */
-
-/**
  * Unlock with passkey gate-only mode
  *
- * Authenticates with the passkey and returns a temporary KEK that expires
- * after the configured session duration.
+ * NEW ARCHITECTURE: Decrypts Master Secret (MS) using gate-derived KEK
  *
- * @param rpId - Relying Party ID (domain)
- * @returns Result with temporary KEK or error
+ * NOTE: WebAuthn ceremony must be performed by CLIENT (main window context).
+ * This function derives the KEK deterministically once authentication succeeds.
+ * Security comes from client only calling this after successful WebAuthn.
+ *
+ * @returns Result with MS bytes or error
  */
 export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
   await ensureInitialized();
@@ -498,27 +501,25 @@ export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
   const appSalt = new Uint8Array(config.appSalt);
 
   try {
-    // Derive wrapping key deterministically from stored salt
+    // Derive KEK deterministically from stored salt
     // Security: This only runs if client successfully authenticated via WebAuthn
-    const wrappingKey = await hkdfDeriveKey(appSalt, appSalt, HKDF_INFO);
+    const kek = await hkdfDeriveKey(appSalt, appSalt, HKDF_INFO_KEK);
 
-    // Verify by attempting to unwrap KEK
+    // Decrypt MS with KEK
     try {
-      const wrapIV = new Uint8Array(config.wrapIV);
-      await crypto.subtle.unwrapKey(
-        'raw',
-        config.wrappedKEK,
-        wrappingKey,
-        { name: 'AES-GCM', iv: wrapIV },
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['wrapKey', 'unwrapKey']
+      const msIV = new Uint8Array(config.msIV);
+      const msBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: msIV },
+        kek,
+        config.encryptedMS
       );
+
+      const ms = new Uint8Array(msBuffer);
+
+      return { success: true, ms };
     } catch {
       return { success: false, error: 'INCORRECT_PASSKEY' };
     }
-
-    return { success: true, key: wrappingKey };
   /* c8 ignore start - defensive: WebAuthn failures tested by Playwright */
   } catch {
     return { success: false, error: 'PASSKEY_AUTHENTICATION_FAILED' };
@@ -563,7 +564,7 @@ export async function deriveKey(
       length: 256,
     },
     false, // non-extractable
-    ['wrapKey', 'unwrapKey']
+    ['encrypt', 'decrypt'] // Changed from wrapKey/unwrapKey for MS encryption
   );
 
   return key;
@@ -654,7 +655,7 @@ async function deriveKeyWithVerification(
   // Use first 256 bits to create AES-GCM key
   const keyBytes = new Uint8Array(derivedBits.slice(0, 32)); // First 32 bytes = 256 bits
 
-  // Import as AES-GCM key with wrapKey/unwrapKey usage
+  // Import as AES-GCM key with encrypt/decrypt usage (for MS encryption)
   const key = await crypto.subtle.importKey(
     'raw',
     keyBytes,
@@ -663,22 +664,22 @@ async function deriveKeyWithVerification(
       length: 256,
     },
     false, // non-extractable
-    ['wrapKey', 'unwrapKey']
+    ['encrypt', 'decrypt'] // Changed from wrapKey/unwrapKey for MS encryption
   );
 
   return { key, verificationHash };
 }
 
 /**
- * Derive AES-GCM wrapping key from PRF output using HKDF
+ * Derive AES-GCM KEK from PRF output using HKDF
  *
  * This provides cryptographic separation between the PRF output and the
- * final wrapping key, with purpose labeling via the info parameter.
+ * final KEK, with purpose labeling via the info parameter.
  *
  * @param prfOutput - Output from WebAuthn PRF extension (32 bytes)
  * @param salt - Application salt for HKDF
  * @param info - Purpose label (e.g., 'ATS/KMS/KEK-wrap/v1')
- * @returns AES-GCM key for wrapping/unwrapping
+ * @returns AES-GCM key for encrypting/decrypting MS
  */
 async function hkdfDeriveKey(
   prfOutput: Uint8Array<ArrayBuffer>,
@@ -708,47 +709,156 @@ async function hkdfDeriveKey(
       length: 256,
     },
     false, // non-extractable
-    ['wrapKey', 'unwrapKey']
+    ['encrypt', 'decrypt'] // Changed from wrapKey/unwrapKey for MS encryption
   );
 
   return key;
 }
 
-/* c8 ignore start - Reserved for future session management */
+// ============================================================================
+// MKEK Derivation (for worker.ts)
+// ============================================================================
+
 /**
- * Start a gate session with automatic expiry
+ * Derive Master KEK (MKEK) from Master Secret (MS) using HKDF
  *
- * @param kek - Key Encryption Key for this session
- * @param duration - Session duration in milliseconds
+ * NEW ARCHITECTURE: Worker calls this after unlocking to derive MKEK from MS
+ *
+ * The MKEK is used to wrap/unwrap application keys. It is derived deterministically
+ * from the MS, so the same MS always produces the same MKEK.
+ *
+ * @param ms - Master Secret bytes (32 bytes)
+ * @param salt - Optional salt for HKDF (default: zero bytes for determinism)
+ * @returns Non-extractable AES-GCM key for wrapping/unwrapping
  */
-// @ts-expect-error - Reserved for future session management
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _startGateSession(kek: CryptoKey, duration: number): void {
-  // Clear any existing session
-  _clearGateSession();
+export async function deriveMKEKFromMS(
+  ms: Uint8Array<ArrayBuffer>,
+  salt?: Uint8Array<ArrayBuffer>
+): Promise<CryptoKey> {
+  // Use zero salt by default for deterministic derivation
+  const hkdfSalt = salt || new Uint8Array(32);
 
-  // Set new session
-  _gateSessionKey = kek;
-  _gateSessionExpiry = Date.now() + duration;
+  // Import MS as HKDF key material
+  const msKey = await crypto.subtle.importKey(
+    'raw',
+    ms,
+    'HKDF',
+    false,
+    ['deriveKey']
+  );
 
-  // Set timer to clear session on expiry
-  _gateSessionTimer = setTimeout(() => {
-    _clearGateSession();
-  }, duration);
+  // Derive MKEK using HKDF
+  const mkek = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt: hkdfSalt,
+      info: new TextEncoder().encode(HKDF_INFO_MKEK),
+      hash: 'SHA-256',
+    },
+    msKey,
+    {
+      name: 'AES-GCM',
+      length: 256,
+    },
+    false, // non-extractable (never needs to be exported)
+    ['wrapKey', 'unwrapKey']
+  );
+
+  return mkek;
 }
-/* c8 ignore stop */
+
+// ============================================================================
+// Per-Operation Unlock Pattern
+// ============================================================================
 
 /**
- * Clear the active gate session
+ * Authentication credentials for per-operation unlock
  */
-function _clearGateSession(): void {
-  _gateSessionKey = null;
-  _gateSessionExpiry = null;
+export type AuthCredentials =
+  | { method: 'passphrase'; passphrase: string }
+  | { method: 'passkey-prf'; prfOutput: ArrayBuffer }
+  | { method: 'passkey-gate' };
 
-  /* c8 ignore start - defensive: timer cleanup, tested by resetUnlock test */
-  if (_gateSessionTimer) {
-    clearTimeout(_gateSessionTimer);
-    _gateSessionTimer = null;
+/**
+ * Result of an operation with unlock timing
+ */
+export interface UnlockOperationResult<T> {
+  result: T;
+  unlockTime: number;
+  lockTime: number;
+  duration: number;
+}
+
+/**
+ * Execute an operation with momentary unlock
+ *
+ * This is the SINGLE unlock mechanism all operations must use.
+ * Ensures consistent behavior: unlock → operate → lock (cleanup)
+ *
+ * @param credentials - Authentication credentials
+ * @param operation - Function to execute with MKEK
+ * @returns Operation result with timing information
+ */
+export async function withUnlock<T>(
+  credentials: AuthCredentials,
+  operation: (mkek: CryptoKey) => Promise<T>
+): Promise<UnlockOperationResult<T>> {
+  const unlockTime = Date.now();
+  let ms: Uint8Array<ArrayBuffer> | null = null;
+
+  try {
+    // Unlock: Decrypt MS from credentials
+    switch (credentials.method) {
+      case 'passphrase': {
+        const result = await unlockWithPassphrase(credentials.passphrase);
+        if (!result.success) {
+          throw new Error(result.error || 'Passphrase unlock failed');
+        }
+        ms = result.ms;
+        break;
+      }
+
+      case 'passkey-prf': {
+        const result = await unlockWithPasskeyPRF(credentials.prfOutput);
+        if (!result.success) {
+          throw new Error(result.error || 'Passkey PRF unlock failed');
+        }
+        ms = result.ms;
+        break;
+      }
+
+      case 'passkey-gate': {
+        const result = await unlockWithPasskeyGate();
+        if (!result.success) {
+          throw new Error(result.error || 'Passkey gate unlock failed');
+        }
+        ms = result.ms;
+        break;
+      }
+
+      default:
+        throw new Error('Unknown authentication method');
+    }
+
+    // Derive MKEK from MS
+    const mkek = await deriveMKEKFromMS(ms);
+
+    // Operate: Execute operation with MKEK
+    const operationResult = await operation(mkek);
+
+    const lockTime = Date.now();
+    const duration = lockTime - unlockTime;
+
+    return {
+      result: operationResult,
+      unlockTime,
+      lockTime,
+      duration,
+    };
+  } finally {
+    // Lock: ALWAYS clear MS (guaranteed cleanup)
+    if (ms) {
+      ms.fill(0);
+    }
   }
-  /* c8 ignore stop */
 }

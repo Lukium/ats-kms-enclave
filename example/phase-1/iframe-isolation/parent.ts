@@ -179,50 +179,40 @@ document.getElementById('unlock-kms')!.addEventListener('click', async () => {
   }
 
   try {
+    // Prompt for optional passphrase (for passphrase-only or fallback)
+    let passphrase: string | null = null;
     if (setupMethod === 'passphrase') {
-      const passphrase = prompt('Enter passphrase to unlock:');
+      // Passphrase-only: required
+      passphrase = prompt('Enter passphrase to unlock:');
       if (!passphrase) return;
-      const result = await kmsUser.unlockWithPassphrase(passphrase);
-
-      // Check if unlock was successful
-      if (result.success) {
-        isLocked = false; // Mark as unlocked
-
-        // Extract VAPID kid from unlock result
-        if (result.keys && result.keys.length > 0) {
-          const vapidKey = result.keys.find(k => k.purpose === 'vapid');
-          if (vapidKey) {
-            vapidKid = vapidKey.kid;
-            console.log('[Parent] Restored VAPID kid from unlock:', vapidKid);
-          }
-        }
-
-        displayOutput('✅ KMS Unlocked (Passphrase)', result);
-        updateLockButton(); // Update button state
-      } else {
-        displayError(new Error(result.error || 'Unlock failed'));
-      }
     } else {
-      const result = await kmsUser.unlockWithPasskey(window.location.hostname);
+      // Passkey or both: optional (for fallback)
+      passphrase = prompt('Enter passphrase (optional, for fallback if passkey fails):') || undefined;
+    }
 
-      // Check if unlock was successful
-      if (result.success) {
-        isLocked = false; // Mark as unlocked
+    // Use unified unlock() method with automatic passkey-first fallback
+    const result = await kmsUser.unlock(
+      window.location.hostname,
+      passphrase || undefined
+    );
 
-        // Extract VAPID kid from unlock result
-        if (result.keys && result.keys.length > 0) {
-          const vapidKey = result.keys.find(k => k.purpose === 'vapid');
-          if (vapidKey) {
-            vapidKid = vapidKey.kid;
-            console.log('[Parent] Restored VAPID kid from unlock:', vapidKid);
-          }
+    // Check if unlock was successful
+    if (result.success) {
+      isLocked = false; // Mark as unlocked
+
+      // Extract VAPID kid from unlock result
+      if (result.keys && result.keys.length > 0) {
+        const vapidKey = result.keys.find(k => k.purpose === 'vapid');
+        if (vapidKey) {
+          vapidKid = vapidKey.kid;
+          console.log('[Parent] Restored VAPID kid from unlock:', vapidKid);
         }
-
-        displayOutput('✅ KMS Unlocked (Passkey)', result);
-        updateLockButton(); // Update button state
-      } else {
-        displayError(new Error(result.error || 'Unlock failed'));
       }
+
+      displayOutput('✅ KMS Unlocked', result);
+      updateLockButton(); // Update button state
+    } else {
+      displayError(new Error(result.error || 'Unlock failed'));
     }
   } catch (error) {
     displayError(error as Error);

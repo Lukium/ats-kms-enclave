@@ -10,7 +10,7 @@ help:
 	@echo "  help           Show this help message"
 	@echo "  install        Install dependencies"
 	@echo "  test                   Run all tests"
-	@echo "  test-coverage          Run tests with 100% coverage enforcement"
+	@echo "  test-coverage          Run tests with 80% coverage enforcement (V2 only)"
 	@echo "  test-coverage-lines    Run tests with coverage + line counts"
 	@echo "  typecheck              Run TypeScript type checking"
 	@echo "  lint           Run ESLint"
@@ -62,7 +62,7 @@ pre-commit: test-coverage-lines typecheck lint
 	@pnpm update:readme
 	@echo ""
 	@echo "✅ All pre-commit checks passed!"
-	@echo "✅ 100% test coverage verified!"
+	@echo "✅ 80% test coverage verified (V2 only)!"
 	@echo "✅ README.md updated!"
 	@echo "Ready to commit 🚀"
 

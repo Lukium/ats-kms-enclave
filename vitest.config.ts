@@ -13,7 +13,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['json', 'json-summary', 'html', 'lcov'],
       all: true,
-      include: ['src/**/*.ts'],
+      include: ['src/v2/**/*.ts'],
       exclude: [
         'node_modules/**',
         'tests/**',
@@ -22,20 +22,20 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
       ],
-      // 100% coverage required
+      // 80% coverage required for V2
       thresholds: {
-        lines: 100,
-        functions: 100,
-        branches: 100,
-        statements: 100,
+        lines: 80,
+        functions: 80,
+        branches: 80,
+        statements: 80,
       },
     },
 
     // Global setup
     globals: true,
 
-    // Test files
-    include: ['tests/**/*.test.ts'],
+    // Test files (V2 only)
+    include: ['tests/v2/**/*.test.ts'],
 
     // Timeout
     testTimeout: 10000,

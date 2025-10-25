@@ -13,11 +13,10 @@
 
 import type { AuditOperation, AuditEntryV2, VerificationResult, AuthCredentials } from './types';
 import { storeAuditEntry, getAllAuditEntries, getLastAuditEntry } from './storage';
+import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils';
 
-// Node.js crypto is used to generate Ed25519 keys and sign/verify
-const nodeCrypto = require('crypto');
-
-let auditKeyPair: { publicKey: any; privateKey: any } | null = null;
+// WebCrypto is used to generate Ed25519 keys and sign/verify
+let auditKeyPair: CryptoKeyPair | null = null;
 let auditKeyId = '';
 let seqCounter = 0;
 
@@ -30,11 +29,15 @@ let seqCounter = 0;
 export async function initAuditLogger(): Promise<void> {
   if (auditKeyPair) return;
   // Generate Ed25519 key pair
-  auditKeyPair = nodeCrypto.generateKeyPairSync('ed25519');
-  // Derive auditKeyId by hashing the public key DER
-  const pubDer: Buffer = auditKeyPair.publicKey.export({ type: 'spki', format: 'der' });
-  const hash = nodeCrypto.createHash('sha256').update(pubDer).digest();
-  auditKeyId = hash.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  auditKeyPair = await crypto.subtle.generateKey(
+    { name: 'Ed25519' },
+    true, // extractable: true (needed for export)
+    ['sign', 'verify']
+  ) as CryptoKeyPair;
+  // Derive auditKeyId by hashing the public key SPKI
+  const pubSpki = await crypto.subtle.exportKey('spki', auditKeyPair.publicKey);
+  const hashBuf = await crypto.subtle.digest('SHA-256', pubSpki);
+  auditKeyId = arrayBufferToBase64url(hashBuf);
 }
 
 /**
@@ -70,15 +73,27 @@ export async function logOperation(op: AuditOperation): Promise<void> {
   // Canonical JSON representation for hashing
   const payloadString = JSON.stringify(payload);
   // Compute chain hash = SHA256(previousHash + payloadString)
-  const chainHashBuffer = nodeCrypto.createHash('sha256')
-    .update(previousHash + payloadString)
-    .digest();
-  const chainHash = chainHashBuffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const chainInput = new TextEncoder().encode(previousHash + payloadString);
+  const chainHashBuf = await crypto.subtle.digest('SHA-256', chainInput);
+  const chainHash = arrayBufferToBase64url(chainHashBuf);
   // Sign the chain hash. For Ed25519 the input is signed directly.
-  const signatureBuffer: Buffer = nodeCrypto.sign(null, Buffer.from(chainHash, 'utf8'), auditKeyPair!.privateKey);
-  const signature = signatureBuffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const chainHashBytes = new TextEncoder().encode(chainHash);
+  const signatureBuf = await crypto.subtle.sign('Ed25519', auditKeyPair!.privateKey, chainHashBytes);
+  const signature = arrayBufferToBase64url(signatureBuf);
   const entry: AuditEntryV2 = {
-    ...payload,
+    kmsVersion: payload.kmsVersion,
+    seqNum: payload.seqNum,
+    timestamp: payload.timestamp,
+    op: payload.op,
+    kid: payload.kid,
+    requestId: payload.requestId,
+    ...(payload.origin !== undefined && { origin: payload.origin }),
+    ...(payload.unlockTime !== undefined && { unlockTime: payload.unlockTime }),
+    ...(payload.lockTime !== undefined && { lockTime: payload.lockTime }),
+    ...(payload.duration !== undefined && { duration: payload.duration }),
+    ...(payload.details !== undefined && { details: payload.details }),
+    previousHash: payload.previousHash,
+    auditKeyId: payload.auditKeyId,
     chainHash,
     signature,
   };
@@ -95,7 +110,6 @@ export async function logOperation(op: AuditOperation): Promise<void> {
 export async function verifyAuditChain(): Promise<VerificationResult> {
   const entries = await getAllAuditEntries();
   const errors: string[] = [];
-  let previousHash = '';
   let verified = 0;
   for (const entry of entries) {
     // Reconstruct payload for hashing
@@ -115,20 +129,19 @@ export async function verifyAuditChain(): Promise<VerificationResult> {
       auditKeyId: entry.auditKeyId,
     };
     const payloadString = JSON.stringify(payload);
-    const expectedChain = nodeCrypto.createHash('sha256')
-      .update(entry.previousHash + payloadString)
-      .digest('base64')
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const chainInput = new TextEncoder().encode(entry.previousHash + payloadString);
+    const expectedChainBuf = await crypto.subtle.digest('SHA-256', chainInput);
+    const expectedChain = arrayBufferToBase64url(expectedChainBuf);
     if (expectedChain !== entry.chainHash) {
       errors.push(`Chain hash mismatch at seq ${entry.seqNum}`);
     }
     // Verify signature
-    const signatureBuf = Buffer.from(entry.signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-    const ok = nodeCrypto.verify(null, Buffer.from(entry.chainHash, 'utf8'), auditKeyPair!.publicKey, signatureBuf);
+    const signatureBuf = base64urlToArrayBuffer(entry.signature);
+    const chainHashBytes = new TextEncoder().encode(entry.chainHash);
+    const ok = await crypto.subtle.verify('Ed25519', auditKeyPair!.publicKey, signatureBuf, chainHashBytes);
     if (!ok) {
       errors.push(`Signature verification failed at seq ${entry.seqNum}`);
     }
-    previousHash = entry.chainHash;
     verified += 1;
   }
   return { valid: errors.length === 0, verified, errors };
@@ -142,8 +155,8 @@ export async function verifyAuditChain(): Promise<VerificationResult> {
  */
 export async function getAuditPublicKey(): Promise<{ publicKey: string }> {
   if (!auditKeyPair) await initAuditLogger();
-  const spki: Buffer = auditKeyPair!.publicKey.export({ type: 'spki', format: 'der' });
-  const pub = spki.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const spki = await crypto.subtle.exportKey('spki', auditKeyPair!.publicKey);
+  const pub = arrayBufferToBase64url(spki);
   return { publicKey: pub };
 }
 
@@ -156,8 +169,8 @@ export async function getAuditPublicKey(): Promise<{ publicKey: string }> {
  */
 export async function exportAuditKey(_credentials: AuthCredentials): Promise<string> {
   if (!auditKeyPair) await initAuditLogger();
-  const pkcs8: Buffer = auditKeyPair!.privateKey.export({ type: 'pkcs8', format: 'der' });
-  return pkcs8.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const pkcs8 = await crypto.subtle.exportKey('pkcs8', auditKeyPair!.privateKey);
+  return arrayBufferToBase64url(pkcs8);
 }
 
 /**

@@ -61,14 +61,14 @@ export async function initAuditLogger(): Promise<void> {
  * Based on: 05-audit-log.md § "Lease Root Key (LRK)"
  */
 async function ensureLRK(): Promise<CryptoKey> {
-  let lrk = await getMeta('LRK');
+  let lrk = await getMeta('LRK') as CryptoKey | undefined;
 
   if (!lrk) {
     lrk = await crypto.subtle.generateKey(
       { name: 'AES-GCM', length: 256 },
       false, // non-extractable
       ['wrapKey', 'unwrapKey']
-    );
+    ) as CryptoKey;
 
     await putMeta('LRK', lrk);
   }
@@ -135,37 +135,15 @@ export async function ensureAuditKey(mkek: CryptoKey): Promise<void> {
   // Export public key
   const publicKeyRaw = await crypto.subtle.exportKey('raw', uak.publicKey);
 
-  // Build AAD
-  const aad = buildAAD({
-    kmsVersion: 2,
-    kid: 'audit-user',
-    alg: 'EdDSA',
-    purpose: 'audit',
-    createdAt: Date.now(),
-    keyType: 'audit-user',
-  });
-
   // Wrap private key under MKEK
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const wrappedKey = await crypto.subtle.wrapKey(
-    'jwk',
+  await wrapKey(
     uak.privateKey,
     mkek,
-    { name: 'AES-GCM', iv, additionalData: aad }
+    'audit-user',
+    { name: 'Ed25519' },
+    ['sign'],
+    { alg: 'EdDSA', purpose: 'audit', publicKeyRaw }
   );
-
-  // Store
-  await storeWrappedKey({
-    kid: 'audit-user',
-    kmsVersion: 2,
-    wrappedKey,
-    iv,
-    aad,
-    publicKeyRaw,
-    alg: 'EdDSA',
-    purpose: 'audit',
-    createdAt: Date.now(),
-  });
 
   // Set as active signer
   const keyId = await computeKeyId(publicKeyRaw);
@@ -237,10 +215,12 @@ export async function generateLAK(
 
   // 5. Wrap LAK under LRK
   const lrk = await ensureLRK();
-  const aad = buildAAD({
+  const aad = buildKeyWrapAAD({
     kmsVersion: 2,
-    leaseId,
+    kid: `lak-${leaseId}`,
+    alg: 'EdDSA',
     purpose: 'lak',
+    createdAt: now,
     keyType: 'lease-audit-key',
   });
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -278,7 +258,17 @@ export async function generateLAK(
  */
 export async function loadLAK(leaseId: string, cert: AuditDelegationCert): Promise<void> {
   // Retrieve LAK record
-  const lakRecord = await getMeta(`lease-audit-key:${leaseId}`);
+  const lakRecord = await getMeta(`lease-audit-key:${leaseId}`) as {
+    leaseId: string;
+    wrappedKey: ArrayBuffer;
+    iv: ArrayBuffer;
+    aad: ArrayBuffer;
+    publicKeyRaw: ArrayBuffer;
+    delegationCert: AuditDelegationCert;
+    expiresAt: number;
+    createdAt: number;
+  } | undefined;
+
   if (!lakRecord) {
     throw new Error(`LAK not found for lease: ${leaseId}`);
   }
@@ -360,7 +350,6 @@ export async function ensureKIAK(): Promise<void> {
 
   // Generate new KIAK
   const lrk = await ensureLRK();
-  const instanceId = crypto.randomUUID();
 
   const kiak = await crypto.subtle.generateKey(
     { name: 'Ed25519' },
@@ -371,38 +360,18 @@ export async function ensureKIAK(): Promise<void> {
   // Export public key
   const publicKeyRaw = await crypto.subtle.exportKey('raw', kiak.publicKey);
 
-  // Build AAD
-  const aad = buildAAD({
-    kmsVersion: 2,
-    instanceId,
-    purpose: 'kiak',
-    keyType: 'audit-instance',
-  });
-
   // Wrap KIAK under LRK
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const wrappedKey = await crypto.subtle.wrapKey(
-    'jwk',
+  await wrapKey(
     kiak.privateKey,
     lrk,
-    { name: 'AES-GCM', iv, additionalData: aad }
+    'audit-instance',
+    { name: 'Ed25519' },
+    ['sign'],
+    { alg: 'EdDSA', purpose: 'audit-instance', publicKeyRaw }
   );
 
   // Compute key ID
   const keyId = await computeKeyId(publicKeyRaw);
-
-  // Store wrapped KIAK
-  await storeWrappedKey({
-    kid: 'audit-instance',
-    kmsVersion: 2,
-    wrappedKey,
-    iv,
-    aad,
-    publicKeyRaw,
-    alg: 'EdDSA',
-    purpose: 'audit-instance',
-    createdAt: Date.now(),
-  });
 
   // Set KIAK as active signer
   activeSigner = {

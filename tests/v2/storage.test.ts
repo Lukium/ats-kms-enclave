@@ -34,7 +34,27 @@ import {
   deleteLease,
   deleteExpiredLeases,
 } from '@/v2/storage';
-import type { AuditEntryV2, LeaseRecord } from '@/v2/types';
+import type { AuditEntryV2, LeaseRecord, AuditDelegationCert } from '@/v2/types';
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+// Dummy LAK delegation certificate for testing
+const DUMMY_LAK_CERT: AuditDelegationCert = {
+  type: 'audit-delegation',
+  version: 1,
+  signerKind: 'LAK',
+  leaseId: 'test-lease',
+  delegatePub: 'test-pub-key',
+  scope: ['vapid:issue'],
+  notBefore: Date.now(),
+  notAfter: Date.now() + 8 * 60 * 60 * 1000,
+  codeHash: 'test-code-hash',
+  manifestHash: 'test-manifest-hash',
+  kmsVersion: 'v2.0.0',
+  sig: 'test-signature',
+};
 
 // ============================================================================
 // Test Setup
@@ -562,6 +582,7 @@ describe('storeLease and getLease', () => {
       wrappedLeaseKeyIV: new ArrayBuffer(12),
       leaseSalt: new ArrayBuffer(32),
       kid: 'test-kid-1',
+      lakDelegationCert: DUMMY_LAK_CERT,
     };
 
     await storeLease(lease);
@@ -602,6 +623,7 @@ describe('getUserLeases', () => {
         wrappedLeaseKeyIV: new ArrayBuffer(12),
         leaseSalt: new ArrayBuffer(32),
         kid: 'test-kid',
+        lakDelegationCert: DUMMY_LAK_CERT,
       },
       {
         leaseId: 'lease-2',
@@ -620,6 +642,7 @@ describe('getUserLeases', () => {
         wrappedLeaseKeyIV: new ArrayBuffer(12),
         leaseSalt: new ArrayBuffer(32),
         kid: 'test-kid',
+        lakDelegationCert: DUMMY_LAK_CERT,
       },
       {
         leaseId: 'lease-3',
@@ -638,6 +661,7 @@ describe('getUserLeases', () => {
         wrappedLeaseKeyIV: new ArrayBuffer(12),
         leaseSalt: new ArrayBuffer(32),
         kid: 'test-kid',
+        lakDelegationCert: DUMMY_LAK_CERT,
       },
     ];
 
@@ -674,6 +698,7 @@ describe('deleteLease', () => {
       wrappedLeaseKeyIV: new ArrayBuffer(12),
       leaseSalt: new ArrayBuffer(32),
       kid: 'test-kid-1',
+      lakDelegationCert: DUMMY_LAK_CERT,
     };
 
     await storeLease(lease);
@@ -715,6 +740,7 @@ describe('deleteExpiredLeases', () => {
       wrappedLeaseKeyIV: new ArrayBuffer(12),
       leaseSalt: new ArrayBuffer(32),
       kid: 'test-kid-1',
+      lakDelegationCert: DUMMY_LAK_CERT,
     };
 
     await storeLease(lease);
@@ -746,6 +772,7 @@ describe('deleteExpiredLeases', () => {
       wrappedLeaseKeyIV: new ArrayBuffer(12),
       leaseSalt: new ArrayBuffer(32),
       kid: 'test-kid',
+      lakDelegationCert: DUMMY_LAK_CERT,
     };
 
     const expiredLease2: LeaseRecord = {
@@ -765,6 +792,7 @@ describe('deleteExpiredLeases', () => {
       wrappedLeaseKeyIV: new ArrayBuffer(12),
       leaseSalt: new ArrayBuffer(32),
       kid: 'test-kid',
+      lakDelegationCert: DUMMY_LAK_CERT,
     };
 
     const validLease: LeaseRecord = {
@@ -784,6 +812,7 @@ describe('deleteExpiredLeases', () => {
       wrappedLeaseKeyIV: new ArrayBuffer(12),
       leaseSalt: new ArrayBuffer(32),
       kid: 'test-kid',
+      lakDelegationCert: DUMMY_LAK_CERT,
     };
 
     await storeLease(expiredLease1);

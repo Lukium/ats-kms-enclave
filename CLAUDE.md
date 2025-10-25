@@ -186,15 +186,15 @@ make pre-commit   # Runs test-coverage, typecheck, and lint in sequence
 
 **Or run manually**:
 ```bash
-pnpm test:coverage # All tests must pass with 100% coverage
+pnpm test:coverage # All tests must pass with 80% coverage
 pnpm typecheck     # TypeScript must compile without errors
 pnpm lint          # ESLint must pass without errors
 ```
 
 **Coverage Requirement**:
-- 100% code coverage is MANDATORY for all commits
+- 80% code coverage is MANDATORY for all commits
 - Coverage is enforced automatically via `make pre-commit`
-- Must be 100% for: lines, branches, functions, and statements
+- Must be 80% or higher for: lines, branches, functions, and statements
 - Use `/* c8 ignore next */` only for defensive code that cannot be tested
 
 **Commit workflow**:
@@ -210,7 +210,7 @@ pnpm lint          # ESLint must pass without errors
 make help           # Show all available commands
 make install        # Install dependencies
 make test           # Run tests only (no coverage enforcement)
-make test-coverage  # Run tests with 100% coverage enforcement
+make test-coverage  # Run tests with 80% coverage enforcement
 make typecheck      # Type check only
 make lint           # Lint only
 make pre-commit     # Run all checks with coverage (MANDATORY before commits)

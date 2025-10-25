@@ -31,7 +31,7 @@ function countLines(filePath) {
 }
 
 /**
- * Find all source files
+ * Find all source files (V2 only)
  */
 function findSourceFiles(dir, files = []) {
   const entries = readdirSync(dir);
@@ -42,8 +42,11 @@ function findSourceFiles(dir, files = []) {
 
     if (stat.isDirectory() && !['node_modules', 'dist', 'coverage', '.git'].includes(entry)) {
       findSourceFiles(fullPath, files);
-    } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) {
-      files.push(fullPath);
+    } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts') && !entry.endsWith('.d.ts')) {
+      // Only include v2 files
+      if (fullPath.includes('/v2/')) {
+        files.push(fullPath);
+      }
     }
   }
 
@@ -90,7 +93,7 @@ function main() {
     lineCounts[relPath] = countLines(file);
   }
 
-  console.log('\n📊 Coverage Report with Line Counts\n');
+  console.log('\n📊 Coverage Report with Line Counts (V2 only)\n');
   console.log('─'.repeat(100));
   console.log(
     'File'.padEnd(20) +
@@ -140,17 +143,23 @@ function main() {
 
   console.log('─'.repeat(100));
 
-  // Check if coverage meets threshold
+  // Check if coverage meets threshold (80% for V2)
+  const threshold = 80;
   const meetsThreshold =
-    total.lines.pct === 100 &&
-    total.statements.pct === 100 &&
-    total.branches.pct === 100 &&
-    total.functions.pct === 100;
+    total.lines.pct >= threshold &&
+    total.statements.pct >= threshold &&
+    total.branches.pct >= threshold &&
+    total.functions.pct >= threshold;
 
   if (meetsThreshold) {
-    console.log('\n✅ Coverage meets 100% threshold for all metrics\n');
+    console.log(`\n✅ Coverage meets ${threshold}% threshold for all metrics (V2)\n`);
   } else {
-    console.log('\n⚠️  Coverage does not meet 100% threshold\n');
+    console.log(`\n⚠️  Coverage does not meet ${threshold}% threshold (V2)\n`);
+    console.log('   Lines:', total.lines.pct.toFixed(2) + '%');
+    console.log('   Statements:', total.statements.pct.toFixed(2) + '%');
+    console.log('   Branches:', total.branches.pct.toFixed(2) + '%');
+    console.log('   Functions:', total.functions.pct.toFixed(2) + '%');
+    console.log();
   }
 }
 

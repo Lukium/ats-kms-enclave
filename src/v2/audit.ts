@@ -33,7 +33,7 @@ export async function initAuditLogger(): Promise<void> {
     { name: 'Ed25519' },
     true, // extractable: true (needed for export)
     ['sign', 'verify']
-  ) as CryptoKeyPair;
+  );
   // Derive auditKeyId by hashing the public key SPKI
   const pubSpki = await crypto.subtle.exportKey('spki', auditKeyPair.publicKey);
   const hashBuf = await crypto.subtle.digest('SHA-256', pubSpki);

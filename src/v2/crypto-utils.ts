@@ -12,7 +12,7 @@
  * operations from higher‑level business logic.
  */
 
-import { TextEncoder, TextDecoder } from 'util';
+import { TextEncoder } from 'util';
 import type { MSAADConfig, KeyWrapAADConfig } from './types';
 import { performance } from 'perf_hooks';
 
@@ -102,12 +102,15 @@ export function derToP1363(signature: Uint8Array): Uint8Array {
   if (signature[offset++] !== 0x30) {
     throw new Error('Invalid DER signature: expected sequence');
   }
-  const seqLength = signature[offset++];
+  offset++; // Skip sequence length byte
   // Read r
   if (signature[offset++] !== 0x02) {
     throw new Error('Invalid DER signature: expected integer for r');
   }
   const rLength = signature[offset++];
+  if (rLength === undefined) {
+    throw new Error('Invalid DER signature: missing r length');
+  }
   let rBytes = signature.slice(offset, offset + rLength);
   offset += rLength;
   // Remove leading zero padding
@@ -117,6 +120,9 @@ export function derToP1363(signature: Uint8Array): Uint8Array {
     throw new Error('Invalid DER signature: expected integer for s');
   }
   const sLength = signature[offset++];
+  if (sLength === undefined) {
+    throw new Error('Invalid DER signature: missing s length');
+  }
   let sBytes = signature.slice(offset, offset + sLength);
   // Remove leading zero padding
   if (sBytes[0] === 0x00) sBytes = sBytes.slice(1);
@@ -150,8 +156,12 @@ export function p1363ToDer(signature: Uint8Array): Uint8Array {
   while (rTrim.length > 0 && rTrim[0] === 0x00) rTrim = rTrim.slice(1);
   while (sTrim.length > 0 && sTrim[0] === 0x00) sTrim = sTrim.slice(1);
   // Ensure positive integers by prepending 0x00 if high bit is set
-  if (rTrim[0] & 0x80) rTrim = Buffer.concat([Buffer.from([0x00]), Buffer.from(rTrim)]);
-  if (sTrim[0] & 0x80) sTrim = Buffer.concat([Buffer.from([0x00]), Buffer.from(sTrim)]);
+  if (rTrim.length > 0 && rTrim[0]! & 0x80) {
+    rTrim = Buffer.concat([Buffer.from([0x00]), Buffer.from(rTrim)]);
+  }
+  if (sTrim.length > 0 && sTrim[0]! & 0x80) {
+    sTrim = Buffer.concat([Buffer.from([0x00]), Buffer.from(sTrim)]);
+  }
   const seqLength = 2 + rTrim.length + 2 + sTrim.length;
   const result = new Uint8Array(2 + seqLength);
   let idx = 0;
@@ -307,7 +317,7 @@ export function timingSafeEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {
   if (arrA.length !== arrB.length) return false;
   let result = 0;
   for (let i = 0; i < arrA.length; i++) {
-    result |= arrA[i] ^ arrB[i];
+    result |= arrA[i]! ^ arrB[i]!;
   }
   return result === 0;
 }

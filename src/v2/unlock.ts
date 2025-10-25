@@ -26,7 +26,6 @@ import type {
   PasskeyGateConfigV2,
   AuthCredentials,
   UnlockOperationResult,
-  EnrollmentConfigV2,
   UnlockResult,
 } from './types';
 
@@ -88,7 +87,7 @@ export async function setupPassphrase(
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, additionalData: aad },
     kek,
-    ms
+    ms as BufferSource
   );
   // Persist config
   const config: PassphraseConfigV2 = {
@@ -150,7 +149,7 @@ export async function setupPasskeyPRF(
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, additionalData: aad },
     kek,
-    ms
+    ms as BufferSource
   );
   const now = Date.now();
   // Generate appSalt for WebAuthn PRF first evaluation and separate HKDF salt for future use
@@ -222,7 +221,7 @@ export async function setupPasskeyGate(
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, additionalData: aad },
     kek,
-    ms
+    ms as BufferSource
   );
 
   // Wrap the pepper for storage
@@ -282,7 +281,7 @@ export async function unlockWithPassphrase(passphrase: string): Promise<UnlockRe
       config.encryptedMS
     );
     return { success: true, ms: new Uint8Array(msBuf) };
-  } catch (err) {
+  } catch {
     return { success: false, error: 'Decryption failed' };
   }
 }
@@ -312,7 +311,7 @@ export async function unlockWithPasskeyPRF(prfOutput: ArrayBuffer): Promise<Unlo
       config.encryptedMS
     );
     return { success: true, ms: new Uint8Array(msBuf) };
-  } catch (err) {
+  } catch {
     return { success: false, error: 'Decryption failed' };
   }
 }
@@ -352,7 +351,7 @@ export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
       config.encryptedMS
     );
     return { success: true, ms: new Uint8Array(msBuf) };
-  } catch (err) {
+  } catch {
     return { success: false, error: 'Decryption failed' };
   }
 }
@@ -393,7 +392,7 @@ export async function isPasskeySetup(): Promise<boolean> {
 export async function deriveMKEKFromMS(ms: Uint8Array): Promise<CryptoKey> {
   const salt = await deriveDeterministicSalt('ATS/KMS/MKEK/salt/v2');
   const info = new TextEncoder().encode('ATS/KMS/MKEK/v2');
-  const ikm = await crypto.subtle.importKey('raw', ms, 'HKDF', false, ['deriveKey']);
+  const ikm = await crypto.subtle.importKey('raw', ms as BufferSource, 'HKDF', false, ['deriveKey']);
   const mkek = await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt, info },
     ikm,

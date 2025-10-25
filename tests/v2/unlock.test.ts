@@ -482,8 +482,6 @@ describe('withUnlock', () => {
   it('should zeroize MS after operation', async () => {
     await setupPassphrase('passphrase');
 
-    let capturedMS: Uint8Array | null = null;
-
     // We can't directly observe MS zeroization, but we can verify the operation completes
     const result = await withUnlock(
       { method: 'passphrase', passphrase: 'passphrase' },

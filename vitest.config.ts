@@ -35,6 +35,7 @@ export default defineConfig({
     globals: true,
 
     // Test files (V2 only)
+    // Excludes: tests/unit/** (v1), tests/prototype/** (old prototypes)
     include: ['tests/v2/**/*.test.ts'],
 
     // Timeout

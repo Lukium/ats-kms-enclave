@@ -290,7 +290,7 @@ describe('resetAuditLogger', () => {
     resetAuditLogger();
 
     // Clear entries manually (resetAuditLogger only resets logger state, not storage)
-    await closeDB();
+    closeDB();
     globalThis.indexedDB = new IDBFactory();
     await initDB();
 

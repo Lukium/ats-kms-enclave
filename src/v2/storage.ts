@@ -234,7 +234,7 @@ export async function wrapKey(
   key: CryptoKey,
   wrappingKey: CryptoKey,
   kid: string,
-  algorithm: AlgorithmIdentifier = key.algorithm,
+  _algorithm: AlgorithmIdentifier = key.algorithm,
   usages: KeyUsage[] = key.usages,
   metadata: KeyMetadata = { alg: 'unknown', purpose: 'unknown' }
 ): Promise<void> {
@@ -267,7 +267,7 @@ export async function wrapKey(
     wrappedKey: ciphertext,
     iv: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength),
     aad,
-    publicKeyRaw: metadata.publicKeyRaw,
+    ...(metadata.publicKeyRaw !== undefined && { publicKeyRaw: metadata.publicKeyRaw }),
     alg: metadata.alg,
     purpose: metadata.purpose,
     createdAt,
@@ -450,7 +450,7 @@ export async function getAllAuditEntries(): Promise<AuditEntryV2[]> {
  */
 export async function getLastAuditEntry(): Promise<AuditEntryV2 | null> {
   const entries = await getAllAuditEntries();
-  return entries.length > 0 ? entries[entries.length - 1] : null;
+  return entries.length > 0 ? entries[entries.length - 1]! : null;
 }
 
 // ============================================================================

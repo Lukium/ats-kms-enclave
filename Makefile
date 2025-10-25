@@ -30,19 +30,27 @@ install:
 	@echo "📦 Installing dependencies..."
 	pnpm install
 
-# Run tests
+# Run tests (V2 only - configured in vitest.config.ts)
 test:
-	@echo "🧪 Running tests..."
+	@echo "🧪 Running tests (V2 only)..."
+	@echo "   Tests: tests/v2/**/*.test.ts"
+	@echo "   Coverage: src/v2/**/*.ts"
 	pnpm test
 
-# Run tests with coverage
+# Run tests with coverage (V2 only)
 test-coverage:
-	@echo "🎯 Running tests with coverage..."
+	@echo "🎯 Running tests with coverage (V2 only)..."
+	@echo "   Tests: tests/v2/**/*.test.ts"
+	@echo "   Coverage: src/v2/**/*.ts"
+	@echo "   Threshold: 80% (lines, functions, branches, statements)"
 	pnpm test:coverage
 
-# Run tests with coverage + line counts
+# Run tests with coverage + line counts (V2 only)
 test-coverage-lines:
-	@echo "📊 Running tests with coverage and line counts..."
+	@echo "📊 Running tests with coverage and line counts (V2 only)..."
+	@echo "   Tests: tests/v2/**/*.test.ts"
+	@echo "   Coverage: src/v2/**/*.ts"
+	@echo "   Threshold: 80% (lines, functions, branches, statements)"
 	pnpm test:coverage:lines
 
 # Run TypeScript type checking

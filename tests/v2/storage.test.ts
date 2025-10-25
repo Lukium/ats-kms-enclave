@@ -95,20 +95,20 @@ describe('wrapKey and unwrapKey', () => {
   it('should wrap and unwrap a key successfully', async () => {
     // Generate a key to wrap
     const keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       true, // extractable for testing
       ['sign', 'verify']
     );
 
     // Export public key for metadata
-    const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+    const publicKeyRaw = await crypto.subtle.exportKey('raw', (keyPair as CryptoKeyPair).publicKey);
 
     // Wrap the private key
     await wrapKey(
-      keyPair.privateKey,
+      (keyPair as CryptoKeyPair).privateKey,
       wrappingKey,
       'test-key-1',
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       ['sign'],
       {
         alg: 'ECDSA',
@@ -121,7 +121,7 @@ describe('wrapKey and unwrapKey', () => {
     const unwrapped = await unwrapKey(
       'test-key-1',
       wrappingKey,
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       ['sign']
     );
 
@@ -132,18 +132,18 @@ describe('wrapKey and unwrapKey', () => {
 
   it('should store wrapped key metadata correctly', async () => {
     const keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       true,
       ['sign', 'verify']
     );
 
-    const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+    const publicKeyRaw = await crypto.subtle.exportKey('raw', (keyPair as CryptoKeyPair).publicKey);
 
     await wrapKey(
-      keyPair.privateKey,
+      (keyPair as CryptoKeyPair).privateKey,
       wrappingKey,
       'vapid-1',
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       ['sign'],
       {
         alg: 'ES256',
@@ -164,16 +164,16 @@ describe('wrapKey and unwrapKey', () => {
 
   it('should fail to unwrap with wrong wrapping key', async () => {
     const keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       true,
       ['sign', 'verify']
     );
 
     await wrapKey(
-      keyPair.privateKey,
+      (keyPair as CryptoKeyPair).privateKey,
       wrappingKey,
       'test-key',
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       ['sign'],
       { alg: 'ECDSA', purpose: 'test' }
     );
@@ -190,7 +190,7 @@ describe('wrapKey and unwrapKey', () => {
       unwrapKey(
         'test-key',
         wrongKey,
-        { name: 'ECDSA', namedCurve: 'P-256' },
+        { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
         ['sign']
       )
     ).rejects.toThrow();
@@ -201,7 +201,7 @@ describe('wrapKey and unwrapKey', () => {
       unwrapKey(
         'non-existent',
         wrappingKey,
-        { name: 'ECDSA', namedCurve: 'P-256' },
+        { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
         ['sign']
       )
     ).rejects.toThrow('No wrapped key with id: non-existent');
@@ -222,16 +222,16 @@ describe('getWrappedKey', () => {
     );
 
     const keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       true,
       ['sign', 'verify']
     );
 
     await wrapKey(
-      keyPair.privateKey,
+      (keyPair as CryptoKeyPair).privateKey,
       wrappingKey,
       'test-key',
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       ['sign'],
       { alg: 'ECDSA', purpose: 'test' }
     );
@@ -259,16 +259,16 @@ describe('getAllWrappedKeys', () => {
     // Store multiple keys
     for (let i = 1; i <= 3; i++) {
       const keyPair = await crypto.subtle.generateKey(
-        { name: 'ECDSA', namedCurve: 'P-256' },
+        { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
         true,
         ['sign', 'verify']
       );
 
       await wrapKey(
-        keyPair.privateKey,
+        (keyPair as CryptoKeyPair).privateKey,
         wrappingKey,
         `key-${i}`,
-        { name: 'ECDSA', namedCurve: 'P-256' },
+        { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
         ['sign'],
         { alg: 'ECDSA', purpose: 'test' }
       );
@@ -289,16 +289,16 @@ describe('deleteWrappedKey', () => {
     );
 
     const keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       true,
       ['sign', 'verify']
     );
 
     await wrapKey(
-      keyPair.privateKey,
+      (keyPair as CryptoKeyPair).privateKey,
       wrappingKey,
       'to-delete',
-      { name: 'ECDSA', namedCurve: 'P-256' },
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
       ['sign'],
       { alg: 'ECDSA', purpose: 'test' }
     );
@@ -476,9 +476,9 @@ describe('storeAuditEntry and getAllAuditEntries', () => {
     expect(retrieved).toHaveLength(3);
 
     // Should be sorted by seqNum
-    expect(retrieved[0].seqNum).toBe(1);
-    expect(retrieved[1].seqNum).toBe(2);
-    expect(retrieved[2].seqNum).toBe(3);
+    expect(retrieved[0]!.seqNum).toBe(1);
+    expect(retrieved[1]!.seqNum).toBe(2);
+    expect(retrieved[2]!.seqNum).toBe(3);
   });
 });
 
@@ -629,7 +629,7 @@ describe('getUserLeases', () => {
 
     const user2Leases = await getUserLeases('user-2');
     expect(user2Leases).toHaveLength(1);
-    expect(user2Leases[0].leaseId).toBe('lease-3');
+    expect(user2Leases[0]!.leaseId).toBe('lease-3');
   });
 });
 

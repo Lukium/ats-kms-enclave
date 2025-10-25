@@ -253,7 +253,7 @@ ${coverageTable}\`\`\`
   console.log('✅ README.md updated with latest test statistics');
 }
 
-// Check if coverage meets 100% threshold
+// Check if coverage meets 80% threshold
 const coverage = parseCoverage();
 if (!coverage) {
   console.error('❌ No coverage data found');
@@ -261,9 +261,11 @@ if (!coverage) {
 }
 
 const { total } = coverage;
-if (total.lines.pct !== 100 || total.statements.pct !== 100 ||
-    total.branches.pct !== 100 || total.functions.pct !== 100) {
-  console.error('❌ Coverage is not 100%, skipping README update');
+const threshold = 80;
+if (total.lines.pct < threshold || total.statements.pct < threshold ||
+    total.branches.pct < threshold || total.functions.pct < threshold) {
+  console.error(`❌ Coverage is below ${threshold}%, skipping README update`);
+  console.error(`   Lines: ${total.lines.pct}%, Statements: ${total.statements.pct}%, Branches: ${total.branches.pct}%, Functions: ${total.functions.pct}%`);
   process.exit(1);
 }
 

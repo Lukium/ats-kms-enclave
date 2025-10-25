@@ -27,9 +27,9 @@ if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
-// Build configuration
+// Build configuration (V2 only)
 const buildConfig = {
-  entryPoints: [path.join(__dirname, '../src/worker.ts')],
+  entryPoints: [path.join(__dirname, '../src/v2/worker.ts')],
   bundle: true,
   outfile: path.join(distDir, 'worker.js'),
   format: 'esm',

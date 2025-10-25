@@ -12,9 +12,8 @@
  * operations from higher‑level business logic.
  */
 
-import { TextEncoder } from 'util';
+// Browser-compatible imports (TextEncoder and performance are globals)
 import type { MSAADConfig, KeyWrapAADConfig } from './types';
-import { performance } from 'perf_hooks';
 
 // -- Encoding helpers ----------------------------------------------------
 
@@ -388,13 +387,12 @@ export async function calibratePBKDF2Iterations(
  * process.platform and process.arch. The resulting hash is returned
  * as a base64url string suitable for storage in the KMS config.
  */
-export function getPlatformHash(): string {
+export async function getPlatformHash(): Promise<string> {
   const info = typeof navigator !== 'undefined'
     ? [navigator.userAgent, navigator.platform, (navigator as any).hardwareConcurrency ?? ''].join('|')
     : [process.platform, process.arch, process.version].join('|');
   const data = new TextEncoder().encode(info);
-  // In Node the global crypto may not expose createHash via subtle, so use subtle.digest
-  // Note: this function returns immediately with a cached hash; use a sync fallback here.
-  const hash = Buffer.from(require('crypto').createHash('sha256').update(Buffer.from(data)).digest());
-  return arrayBufferToBase64url(hash.buffer.slice(hash.byteOffset, hash.byteOffset + hash.byteLength));
+  // Use WebCrypto subtle.digest which works in both browser and Node.js
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return arrayBufferToBase64url(hashBuffer);
 }

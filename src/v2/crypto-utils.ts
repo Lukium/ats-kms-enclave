@@ -25,7 +25,9 @@ import type { MSAADConfig, KeyWrapAADConfig } from './types';
  */
 export function arrayBufferToBase64url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  const b64 = Buffer.from(bytes).toString('base64');
+  // Convert to base64 using browser-compatible approach
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+  const b64 = btoa(binary);
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
@@ -40,8 +42,13 @@ export function base64urlToArrayBuffer(base64url: string): ArrayBuffer {
   let b64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
   const pad = b64.length % 4;
   if (pad) b64 += '='.repeat(4 - pad);
-  const buf = Buffer.from(b64, 'base64');
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  // Decode base64 using browser-compatible approach
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
 
 /**
@@ -156,10 +163,16 @@ export function p1363ToDer(signature: Uint8Array): Uint8Array {
   while (sTrim.length > 0 && sTrim[0] === 0x00) sTrim = sTrim.slice(1);
   // Ensure positive integers by prepending 0x00 if high bit is set
   if (rTrim.length > 0 && rTrim[0]! & 0x80) {
-    rTrim = Buffer.concat([Buffer.from([0x00]), Buffer.from(rTrim)]);
+    const newRTrim = new Uint8Array(rTrim.length + 1);
+    newRTrim[0] = 0x00;
+    newRTrim.set(rTrim, 1);
+    rTrim = newRTrim;
   }
   if (sTrim.length > 0 && sTrim[0]! & 0x80) {
-    sTrim = Buffer.concat([Buffer.from([0x00]), Buffer.from(sTrim)]);
+    const newSTrim = new Uint8Array(sTrim.length + 1);
+    newSTrim[0] = 0x00;
+    newSTrim.set(sTrim, 1);
+    sTrim = newSTrim;
   }
   const seqLength = 2 + rTrim.length + 2 + sTrim.length;
   const result = new Uint8Array(2 + seqLength);

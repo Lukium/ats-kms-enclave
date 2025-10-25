@@ -141,12 +141,43 @@ export interface AuditOperation {
   kid: string;
   requestId: string;
   origin?: string;
+  leaseId?: string; // If present, audit entry will be signed with LAK instead of UAK
   details?: Record<string, unknown>;
   unlockTime?: number;
   lockTime?: number;
   duration?: number;
 }
 
+/**
+ * Audit delegation certificate
+ *
+ * Authorizes a signing key (LAK or KIAK) to sign audit entries.
+ * Signed by UAK to create chain of trust back to user's Master Secret.
+ */
+export interface AuditDelegationCert {
+  type: 'audit-delegation';
+  version: 1;
+  signerKind: 'LAK' | 'KIAK';
+  leaseId?: string; // Present for LAK, absent for KIAK
+  instanceId?: string; // Present for KIAK, absent for LAK
+  delegatePub: string; // base64url Ed25519 public key
+  scope: string[]; // e.g., ["vapid.issue", "lease.expire"] or ["system.*"]
+  notBefore: number; // Unix timestamp (ms)
+  notAfter: number | null; // Unix timestamp (ms), null = no expiration
+  codeHash: string; // KMS code hash at delegation time
+  manifestHash: string; // KMS manifest hash
+  kmsVersion: string; // e.g., "v2.0.0"
+  sig: string; // base64url signature by UAK
+}
+
+/**
+ * V2 audit entry with delegation support
+ *
+ * Entries can be signed by three types of keys:
+ * - UAK: User Audit Key (user-authenticated operations)
+ * - LAK: Lease Audit Key (lease-scoped background operations)
+ * - KIAK: KMS Instance Audit Key (system events)
+ */
 export interface AuditEntryV2 {
   kmsVersion: 2;
   seqNum: number;
@@ -155,14 +186,22 @@ export interface AuditEntryV2 {
   kid: string;
   requestId: string;
   origin?: string;
+  leaseId?: string; // Present if operation is lease-related
   unlockTime?: number;
   lockTime?: number;
   duration?: number;
   details?: Record<string, unknown>;
   previousHash: string;
   chainHash: string;
-  signature: string;
-  auditKeyId: string;
+
+  // Delegation support
+  signer: 'UAK' | 'LAK' | 'KIAK';
+  signerId: string; // base64url(SHA-256(publicKey))
+  cert?: AuditDelegationCert; // Present for LAK entries, optional for others
+
+  // Signature
+  sig: string; // base64url Ed25519 signature over chainHash
+  sigNew?: string; // For rotation entries: second signature from new key
 }
 
 export interface VerificationResult {
@@ -205,7 +244,7 @@ export interface RPCRequest {
 export interface RPCResponse {
   id: string;
   result?: any;
-  error?: string;
+  error?: string | { code: string; message: string };
 }
 
 // Example enumerated method names. Implementations may extend this list.
@@ -239,6 +278,13 @@ export interface LeaseRecord {
   createdAt: number;
   exp: number;
   quotas: QuotaState;
+  // SessionKEK-wrapped VAPID key (allows JWT signing without user credentials)
+  wrappedLeaseKey: ArrayBuffer; // VAPID private key wrapped with SessionKEK
+  wrappedLeaseKeyIV: ArrayBuffer; // IV used for AES-GCM encryption of wrappedLeaseKey
+  leaseSalt: ArrayBuffer; // Random salt used to derive SessionKEK from MS
+  kid: string; // Key ID (JWK thumbprint) of the VAPID keypair
+  // LAK (Lease Audit Key) delegation certificate (authorizes LAK to sign audit entries)
+  lakDelegationCert: AuditDelegationCert;
 }
 
 export interface QuotaState {

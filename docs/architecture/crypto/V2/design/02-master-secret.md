@@ -95,6 +95,53 @@ export function generateMasterSecret(): Uint8Array {
 - Seeded from hardware RNG, timing jitter, user input
 - Meets FIPS 140-2 requirements
 
+### Evolution from V1
+
+**V1 Pattern (wrapped CryptoKeys):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ V1 PATTERN (wrapped CryptoKeys)                         │
+├─────────────────────────────────────────────────────────┤
+│ 1. Generate MKEK as CryptoKey (extractable: true)      │
+│ 2. Wrap MKEK with KEK_passphrase → store wrapped bytes │
+│ 3. Wrap MKEK with KEK_passkey → store wrapped bytes    │
+│ 4. On unlock: unwrapKey() → MKEK in memory             │
+│ 5. Problem: MKEK must be extractable for wrapKey()     │
+└─────────────────────────────────────────────────────────┘
+```
+
+**V2 Pattern (encrypted Master Secret):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ V2 PATTERN (encrypted Master Secret)                    │
+├─────────────────────────────────────────────────────────┤
+│ 1. Generate MS as random bytes (32 bytes)              │
+│ 2. Encrypt MS with KEK_passphrase → store ciphertext   │
+│ 3. Encrypt MS with KEK_passkey → store ciphertext      │
+│ 4. On unlock: decrypt MS → derive MKEK from MS         │
+│ 5. Benefit: No CryptoKey needs extractable: true       │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Key Improvements:**
+
+1. **No Extractable KEKs**
+   - MS is bytes, not a CryptoKey → no `wrapKey()` needed
+   - All CryptoKeys (KEKs, MKEK) are `extractable: false`
+   - Removes `exportKey()` attack vector entirely
+
+2. **Simplified Multi-Enrollment**
+   - Same MS encrypted by multiple KEKs (passphrase, passkey PRF, passkey gate)
+   - No need to re-wrap CryptoKeys when adding new auth methods
+   - Each enrollment stores `encryptedMS` independently
+
+3. **Clearer Key Hierarchy**
+   - MS = root secret (random bytes)
+   - MKEK = derived from MS via HKDF (function of MS, not independent key)
+   - Application keys = wrapped under MKEK
+
 ---
 
 ## KEK Derivation Methods

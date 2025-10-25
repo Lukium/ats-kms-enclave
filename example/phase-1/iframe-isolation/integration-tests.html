@@ -190,6 +190,63 @@
       border-radius: 0;
       margin-bottom: 8px;
     }
+
+    /* Cards container for side-by-side layout */
+    .cards-container {
+      display: flex;
+      gap: 15px;
+      margin: 15px 0;
+      align-items: flex-start;
+    }
+
+    /* Artifact cards */
+    .artifact-card {
+      background: #f7fafc;
+      border: 1px solid #cbd5e0;
+      border-left: 4px solid #4299e1;
+      border-radius: 6px;
+      padding: 15px;
+      flex: 1;
+      min-width: 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .audit-card {
+      background: #f7fafc;
+      border: 1px solid #cbd5e0;
+      border-left: 4px solid #4299e1;
+      border-radius: 6px;
+      padding: 15px;
+      flex: 1;
+      min-width: 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .artifact-title {
+      font-weight: 600;
+      color: #2d3748;
+      margin-bottom: 10px;
+      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    .artifact-data {
+      color: #4a5568;
+      line-height: 1.6;
+    }
+
+    .artifact-data strong {
+      color: #2d3748;
+      font-weight: 600;
+    }
+
+    .artifact-data div {
+      padding: 3px 0;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+    }
   </style>
 </head>
 <body>
@@ -212,6 +269,7 @@
 
     <div class="test-controls">
       <button id="run-tests">▶️ Run All Tests</button>
+      <button id="reset-demo" style="background: #e53e3e; margin-left: 10px;">🔄 Reset Demo</button>
       <p style="margin: 10px 0 0 0; color: #718096; font-size: 14px;">
         Note: Some tests are skipped in automated mode (require user interaction)
       </p>

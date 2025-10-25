@@ -40,6 +40,60 @@ User Authentication → Unlock (milliseconds) → Operation → Cleanup
 ✅ **Explicit duration**: Operation must complete within timeout
 ✅ **Audit trail**: All unlocks are logged with timing
 
+### User Mental Model
+
+**Think `sudo`, not session login:**
+
+Per-operation authentication is like running `sudo command` in Unix — you authenticate per high-value operation, not once per session. This provides:
+- ✅ Minimal exposure window (seconds, not hours)
+- ✅ Explicit user consent per operation
+- ✅ Harder to exploit (attacker needs to compromise during active operation)
+
+Contrast with persistent unlock (session model):
+- ❌ Long-lived secrets in memory (hours)
+- ❌ User authenticates once, forgets KMS is "open"
+- ❌ Easier to exploit (attacker has hours to compromise)
+
+### Evolution from V1
+
+**V1 Pattern (persistent unlock):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ V1 FLOW (persistent unlock)                             │
+├─────────────────────────────────────────────────────────┤
+│ 1. User unlocks KMS                                     │
+│ 2. MKEK stored in memory                                │
+│ 3. Operations performed without re-auth                 │
+│ 4. MKEK persists until explicit lock                    │
+│ 5. Risk: Long-lived in-memory keys                      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**V2 Pattern (per-operation auth):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ V2 FLOW (per-operation auth)                            │
+├─────────────────────────────────────────────────────────┤
+│ 1. User requests operation (e.g., "sign JWT")           │
+│ 2. Worker requests authentication from client           │
+│ 3. Client performs WebAuthn/passphrase prompt           │
+│ 4. Worker decrypts MS, derives MKEK                     │
+│ 5. Perform operation(s)                                 │
+│ 6. IMMEDIATELY clear MKEK from memory                   │
+│ 7. Next operation requires new authentication           │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Key principles:**
+- No persistent unlocked state in Worker
+- Each operation batch requires authentication
+- MKEK lifetime: milliseconds (just long enough for operation)
+- Multiple operations can be batched in single auth (e.g., generate VAPID + sign JWT)
+
+**Exception:** SessionKEK for VAPID leases (see [12-vapid-leases.md](./12-vapid-leases.md)) — time-bounded authorization for background push notifications.
+
 ---
 
 ## Unlock Flow

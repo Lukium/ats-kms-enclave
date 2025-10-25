@@ -11,8 +11,10 @@ const iframe = document.getElementById('kms-iframe') as HTMLIFrameElement;
 const KMS_ORIGIN = 'http://localhost:5177';
 
 let vapidKid: string | null = null; // Store VAPID kid for reuse
+let vapidPublicKey: string | null = null; // Store VAPID public key
 let setupMethod: 'passphrase' | 'passkey' | null = null; // Track setup method for unlock
 let isLocked = true; // Track lock state
+let currentLeaseId: string | null = null; // Store current lease ID
 
 // Display current origin
 document.getElementById('parent-origin')!.textContent = window.location.origin;
@@ -72,7 +74,7 @@ function enableInitialControls(): void {
 // Enable operation controls (after setup)
 function enableOperationControls(): void {
   updateLockButton();
-  document.getElementById('generate-vapid')!.removeAttribute('disabled');
+  document.getElementById('create-lease')!.removeAttribute('disabled');
   document.getElementById('sign-jwt')!.removeAttribute('disabled');
 }
 
@@ -141,7 +143,17 @@ document.getElementById('setup-passphrase')!.addEventListener('click', async () 
     if (result.success) {
       setupMethod = 'passphrase'; // Track setup method
       isLocked = false; // Setup auto-unlocks
-      displayOutput('✅ Passphrase Setup Complete', result);
+
+      // Capture VAPID keys generated during setup
+      vapidKid = result.vapidKid;
+      vapidPublicKey = result.vapidPublicKey;
+
+      displayOutput('✅ Passphrase Setup Complete', {
+        enrollmentId: result.enrollmentId,
+        vapidPublicKey: result.vapidPublicKey,
+        vapidKid: result.vapidKid,
+        note: 'VAPID keypair generated automatically during setup'
+      });
       enableOperationControls();
     } else {
       displayError(new Error(result.error || 'Passphrase setup failed'));
@@ -162,7 +174,17 @@ document.getElementById('setup-passkey')!.addEventListener('click', async () => 
     if (result.success) {
       setupMethod = 'passkey'; // Track setup method
       isLocked = false; // Setup auto-unlocks
-      displayOutput('✅ Passkey Setup Complete', result);
+
+      // Capture VAPID keys generated during setup
+      vapidKid = result.vapidKid;
+      vapidPublicKey = result.vapidPublicKey;
+
+      displayOutput('✅ Passkey Setup Complete', {
+        enrollmentId: result.enrollmentId,
+        vapidPublicKey: result.vapidPublicKey,
+        vapidKid: result.vapidKid,
+        note: 'VAPID keypair generated automatically during setup'
+      });
       enableOperationControls();
     } else {
       displayError(new Error(result.error || 'Passkey setup failed'));
@@ -219,14 +241,35 @@ document.getElementById('unlock-kms')!.addEventListener('click', async () => {
   }
 });
 
-document.getElementById('generate-vapid')!.addEventListener('click', async () => {
+document.getElementById('create-lease')!.addEventListener('click', async () => {
+  if (!vapidKid) {
+    displayError(new Error('No VAPID keypair found. Setup should have generated one automatically.'));
+    return;
+  }
+
+  // Prompt for passphrase to authorize lease creation
+  const passphrase = prompt('Enter passphrase to authorize lease creation:');
+  if (!passphrase) return;
+
   try {
-    const result = await kmsUser.generateVAPID();
-    vapidKid = result.kid; // Store kid for later use
-    displayOutput('✅ VAPID Keypair Generated', {
-      publicKey: result.publicKey,
-      kid: result.kid,
-      note: 'Private key is non-extractable and isolated in KMS',
+    // Create a lease for push subscriptions
+    const result = await kmsUser.createLease({
+      userId: 'demo-user',
+      subs: [
+        { url: 'https://fcm.googleapis.com/fcm/send/example1', aud: 'https://fcm.googleapis.com', eid: 'endpoint-1' },
+        { url: 'https://fcm.googleapis.com/fcm/send/example2', aud: 'https://fcm.googleapis.com', eid: 'endpoint-2' },
+      ],
+      ttlHours: 12,
+      credentials: { method: 'passphrase', passphrase },
+    });
+
+    currentLeaseId = result.leaseId;
+
+    displayOutput('✅ Lease Created', {
+      leaseId: result.leaseId,
+      expiresAt: new Date(result.exp).toLocaleString(),
+      quotas: result.quotas,
+      note: 'JWTs can now be issued without user interaction until lease expires'
     });
   } catch (error) {
     displayError(error as Error);
@@ -234,26 +277,31 @@ document.getElementById('generate-vapid')!.addEventListener('click', async () =>
 });
 
 document.getElementById('sign-jwt')!.addEventListener('click', async () => {
-  if (!vapidKid) {
-    displayError(new Error('Please generate VAPID keypair first'));
+  if (!currentLeaseId) {
+    displayError(new Error('Please create a lease first'));
     return;
   }
 
   // Use default FCM endpoint for demo
-  const endpoint = 'https://fcm.googleapis.com/fcm/send/example';
+  const endpoint = {
+    url: 'https://fcm.googleapis.com/fcm/send/example1',
+    aud: 'https://fcm.googleapis.com',
+    eid: 'endpoint-1'
+  };
 
   try {
-    const payload = {
-      aud: new URL(endpoint).origin,
-      sub: 'mailto:admin@allthe.services',
-      exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60, // 12 hours
-    };
-    const result = await kmsUser.signJWT(vapidKid, payload);
-    displayOutput('✅ JWT Signed', {
+    // Issue JWT using the lease (no credentials needed!)
+    const result = await kmsUser.issueVAPIDJWT({
+      leaseId: currentLeaseId,
+      endpoint,
+    });
+
+    displayOutput('✅ JWT Issued (No User Interaction!)', {
       jwt: result.jwt,
-      kid: vapidKid,
-      endpoint: endpoint,
-      note: 'Signed with non-extractable private key in KMS',
+      jti: result.jti,
+      expiresAt: new Date(result.exp * 1000).toLocaleString(),
+      endpoint: endpoint.url,
+      note: 'JWT signed using SessionKEK - no user authentication required!'
     });
   } catch (error) {
     displayError(error as Error);

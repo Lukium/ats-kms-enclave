@@ -29,7 +29,8 @@ export default defineConfig({
         "default-src 'self'",
         "script-src 'self'",
         "frame-src http://localhost:5177", // Allow KMS iframe
-        "connect-src 'self'",
+        "connect-src 'self' ws://localhost:5178", // Allow Vite HMR
+        "worker-src 'self' blob:", // Allow Vite HMR workers
         "style-src 'self' 'unsafe-inline'", // TODO: Remove unsafe-inline in production
       ].join('; '),
     },

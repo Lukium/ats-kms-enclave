@@ -2,7 +2,7 @@
 
 **Status**: Design Phase
 **Version**: 2.0
-**Last Updated**: 2025-01-24
+**Last Updated**: 2025-01-25
 
 ---
 
@@ -10,14 +10,15 @@
 
 1. [Overview](#overview)
 2. [Audit Entry Schema](#audit-entry-schema)
-3. [Chain Integrity](#chain-integrity)
-4. [Sequence Numbers](#sequence-numbers)
-5. [Ed25519 Signatures](#ed25519-signatures)
-6. [Periodic Anchors](#periodic-anchors)
-7. [Audit Key Management](#audit-key-management)
-8. [Verification](#verification)
-9. [Implementation](#implementation)
-10. [Security Analysis](#security-analysis)
+3. [Audit Key Delegation Architecture](#audit-key-delegation-architecture)
+4. [Chain Integrity](#chain-integrity)
+5. [Sequence Numbers](#sequence-numbers)
+6. [Ed25519 Signatures](#ed25519-signatures)
+7. [Periodic Anchors](#periodic-anchors)
+8. [Audit Key Management](#audit-key-management)
+9. [Verification](#verification)
+10. [Implementation](#implementation)
+11. [Security Analysis](#security-analysis)
 
 ---
 
@@ -28,10 +29,11 @@ The audit log is a **tamper-evident record** of all cryptographic operations in 
 ### V2 Improvements
 
 1. **Sequence Numbers**: Monotonic counter detects truncation attacks
-2. **Non-Extractable Audit Keys**: Ed25519 keys stored as non-extractable
+2. **Delegated Audit Keys**: UAK/LAK/KIAK architecture for background operations
 3. **Enhanced Chain**: SHA-256 hash of previous entry's `chainHash`
 4. **Periodic Anchors**: Checkpoint entries every N operations
-5. **Key Reference**: `auditKeyId` instead of embedding public key
+5. **Key Reference**: `signerId` instead of embedding public key
+6. **LRK Management**: Lease Root Key for wrapping LAK/KIAK
 
 ### Security Properties
 
@@ -39,7 +41,22 @@ The audit log is a **tamper-evident record** of all cryptographic operations in 
 ✅ **Truncation-resistant**: Sequence numbers detect log truncation
 ✅ **Replay-resistant**: Each entry has unique timestamp + requestId
 ✅ **Verifiable**: Ed25519 signatures can be verified externally
-✅ **Non-repudiable**: Audit key cannot be extracted (with backup ceremony)
+✅ **Background-capable**: LAK/KIAK enable logging without user auth
+✅ **Authorized**: All audit keys trace back to UAK via delegation certificates
+
+### The Audit Delegation Problem
+
+In V2 SessionKEK architecture, we have a fundamental conflict:
+
+1. **Audit integrity requires**: Audit signing key must be wrapped under MS to prevent forgery
+2. **Background operations require**: Lease-based JWT issuance happens WITHOUT user authentication
+3. **The conflict**: Can't unwrap audit key to sign entries during lease-based operations
+
+**Solution**: Three types of audit signers with explicit delegation:
+
+- **UAK (User Audit Key)**: For user-authenticated operations, wrapped under MS
+- **LAK (Lease Audit Key)**: Per-lease, delegated via UAK-signed cert, wrapped under LRK
+- **KIAK (KMS Instance Audit Key)**: Per-installation, delegated via UAK-signed cert, wrapped under LRK
 
 ---
 
@@ -47,8 +64,10 @@ The audit log is a **tamper-evident record** of all cryptographic operations in 
 
 ### V2 Entry Structure
 
+All entries use this unified format regardless of signer:
+
 ```typescript
-interface AuditEntry {
+interface AuditEntryV2 {
   // Version and identification
   kmsVersion: 2;
   seqNum: number;              // Monotonic sequence (0, 1, 2, ...)
@@ -60,10 +79,13 @@ interface AuditEntry {
   requestId: string;           // UUID for this operation
   origin?: string;             // Origin of request (if available)
 
-  // Unlock timing
-  unlockTime: number;          // Unlock start (ms since epoch)
-  lockTime: number;            // Unlock end (ms since epoch)
-  duration: number;            // Duration (ms, high-resolution)
+  // Lease context (if applicable)
+  leaseId?: string;            // Present if operation is lease-related
+
+  // Unlock timing (for user-authenticated operations)
+  unlockTime?: number;         // Unlock start (ms since epoch)
+  lockTime?: number;           // Unlock end (ms since epoch)
+  duration?: number;           // Duration (ms, high-resolution)
 
   // Additional context
   details?: Record<string, unknown>;  // Operation-specific data
@@ -73,9 +95,36 @@ interface AuditEntry {
   previousHash: string;        // SHA-256 of previous entry's chainHash (base64url)
   chainHash: string;           // SHA-256 of this entry's canonical form (base64url)
 
-  // Signature
-  signature: string;           // Ed25519 signature of chainHash (base64url)
-  auditKeyId: string;          // Reference to audit key (kid)
+  // Signer identification (V2 DELEGATION SUPPORT)
+  signer: 'UAK' | 'LAK' | 'KIAK';
+  signerId: string;            // base64url(SHA-256(publicKey))
+
+  // Authorization proof (for LAK, optional for KIAK)
+  cert?: AuditDelegationCert;  // Delegation certificate
+
+  // Signature (V2: renamed from 'signature')
+  sig: string;                 // Ed25519 signature of chainHash (base64url)
+  sigNew?: string;             // For rotation entries: second signature from new key
+}
+```
+
+### Delegation Certificate Schema
+
+```typescript
+interface AuditDelegationCert {
+  type: 'audit-delegation';
+  version: 1;
+  signerKind: 'LAK' | 'KIAK';
+  leaseId?: string;            // Present for LAK, absent for KIAK
+  instanceId?: string;         // Present for KIAK, absent for LAK
+  delegatePub: string;         // base64url Ed25519 public key
+  scope: string[];             // e.g., ["vapid.issue", "lease.expire"] or ["system.*"]
+  notBefore: number;           // Unix timestamp (ms)
+  notAfter: number | null;     // Unix timestamp (ms), null = no expiration
+  codeHash: string;            // KMS code hash at delegation time
+  manifestHash: string;        // KMS manifest hash
+  kmsVersion: string;          // e.g., "v2.0.0"
+  sig: string;                 // base64url signature by UAK
 }
 ```
 
@@ -86,123 +135,582 @@ interface AuditEntry {
 type AuditOperation =
   | 'unlock'                   // Generic unlock (if no specific op)
   | 'vapid:generate'           // Generate VAPID keypair
-  | 'vapid:sign'               // Sign VAPID JWT
-  | 'vapid:issue'              // Issue VAPID JWT (V2 lease-based)
+  | 'vapid:sign'               // Sign VAPID JWT (user-authenticated)
+  | 'vapid:issue'              // Issue VAPID JWT (V2 lease-based, LAK-signed)
   | 'vapid:export'             // Export VAPID public key
   | 'audit:generate'           // Generate audit keypair
   | 'audit:export'             // Export audit public key (for backup)
+  | 'audit:delegate'           // Create delegation certificate
+  | 'audit:rotate'             // Rotate audit key
   | 'enrollment:add'           // Add new credential
   | 'enrollment:remove'        // Remove credential
+  | 'lease:create'             // Create VAPID lease
+  | 'lease:expire'             // Lease expiration
   | 'backup:export'            // Export backup bundle
   | 'backup:import'            // Import backup bundle
   | 'recalibrate:pbkdf2'       // Recalibrate PBKDF2 iterations
+  | 'boot'                     // System boot (KIAK-signed)
+  | 'fail-secure'              // Fail-secure transition (KIAK-signed)
   | 'anchor'                   // Periodic anchor entry
   ;
 ```
 
-### VAPID Issuance with `jti` Field
+### Example Entries
 
-**For VAPID JWT issuance operations (`vapid:issue`), the `jti` field is MANDATORY:**
-
-```typescript
-/**
- * VAPID issuance audit entry (V2).
- *
- * ANTI-REPLAY PROTECTION:
- * - KMS records every jti it issues
- * - KMS MUST NOT re-issue a token with the same jti within TTL window
- * - This prevents broker replay attacks
- * - Audit entries include jti for tracking and correlation
- */
-interface VAPIDIssuanceAuditEntry extends AuditEntry {
-  op: 'vapid:issue';
-  jti: string;               // REQUIRED: Unique token ID (UUID v4)
-  details: {
-    jti: string;             // Also in details for consistency
-    aud: string;             // Audience (push service origin)
-    exp: number;             // Token expiration (Unix ms)
-    leaseId: string;         // Lease this token was issued for
-    endpoint: string;        // Subscription endpoint fingerprint (eid)
-  };
-}
-```
-
-**Anti-Replay Enforcement:**
-
-```typescript
-/**
- * Check if jti was already issued (anti-replay).
- *
- * KMS maintains a rolling blacklist of jti values issued in the last TTL window.
- * Prevents re-issuance of the same jti within the token's validity period.
- *
- * @param jti JWT Token ID to check
- * @param ttlMs Token TTL in milliseconds
- * @returns true if jti is safe to use (not recently issued)
- */
-async function checkJTINotReissued(jti: string, ttlMs: number): Promise<boolean> {
-  // Query audit log for recent jti usage
-  const recentEntries = await audit.getRecentByOp('vapid:issue', Date.now() - ttlMs);
-
-  for (const entry of recentEntries) {
-    if (entry.jti === jti) {
-      // This jti was issued recently - reject
-      return false;
-    }
-  }
-
-  return true;
-}
-```
-
-**Audit Query for Verification:**
-
-Verification endpoints can reject tokens if they appear in the audit log with suspicious patterns:
-
-```typescript
-/**
- * Verify jti is not in revoked list (emergency mode).
- *
- * Optional: KMS can maintain a rolling blacklist of jti values
- * from revoked leases for emergency revocation (last N minutes).
- */
-async function isJTIRevoked(jti: string): Promise<boolean> {
-  const revokedLeases = await storage.get('revoked-leases');
-
-  for (const lease of revokedLeases) {
-    const leaseJTIs = await audit.getByLeaseId(lease.leaseId, lease.revokedAt - 600_000);
-    if (leaseJTIs.some(entry => entry.jti === jti)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-```
-
-### Example Entry
-
+**User-authenticated operation (UAK):**
 ```json
 {
   "kmsVersion": 2,
   "seqNum": 42,
-  "timestamp": 1704067200000,
-  "op": "vapid:sign",
-  "kid": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs",
+  "timestamp": 1729700000000,
+  "op": "lease:create",
+  "kid": "",
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
   "origin": "https://allthe.services",
-  "unlockTime": 1704067200100,
-  "lockTime": 1704067200350,
+  "leaseId": "lease-abc123",
+  "unlockTime": 1729700000100,
+  "lockTime": 1729700000350,
   "duration": 250,
   "details": {
-    "jti": "9c7d330b-5b7a-4d3c-9c4b-7f8a9b0c1d2e"
+    "userId": "user-xyz",
+    "ttlHours": 12,
+    "quotas": { "maxIssue": 1000 }
   },
   "previousHash": "pQ7YQz4FxS2kL9mN3pR6tU8vW1xY2zA3bC4dE5fGhIj",
   "chainHash": "zQz4FxS2kL9mN3pR6tU8vW1xY2zA3bC4dE5fGhIjKlM",
-  "signature": "A3bC4dE5fGhIjKlMnOpQrStUvWxYzA1bC2dE3fGhIjKlMnOpQrStUvWxYzA1b...",
-  "auditKeyId": "abc123def456..."
+  "signer": "UAK",
+  "signerId": "b64u(pk_uak)",
+  "sig": "A3bC4dE5fGhIjKlMnOpQrStUvWxYzA1bC2dE3fGhIjKlMnOpQrStUvWxYzA1b..."
 }
 ```
+
+**Lease-delegated operation (LAK):**
+```json
+{
+  "kmsVersion": 2,
+  "seqNum": 43,
+  "timestamp": 1729700300000,
+  "op": "vapid:issue",
+  "kid": "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs",
+  "requestId": "660e8400-e29b-41d4-a716-446655440001",
+  "leaseId": "lease-abc123",
+  "details": {
+    "endpoint": "https://fcm.googleapis.com/fcm/send/xyz",
+    "jti": "jwt-789",
+    "exp": 1729703900,
+    "aud": "https://fcm.googleapis.com"
+  },
+  "jti": "jwt-789",
+  "previousHash": "zQz4FxS2kL9mN3pR6tU8vW1xY2zA3bC4dE5fGhIjKlM",
+  "chainHash": "mNoPqRsTuVwXyZaBcDeFgHiJkLmNoPqRsTuVwXyZaBc",
+  "signer": "LAK",
+  "signerId": "b64u(pk_lak)",
+  "cert": {
+    "type": "audit-delegation",
+    "version": 1,
+    "signerKind": "LAK",
+    "leaseId": "lease-abc123",
+    "delegatePub": "b64u(pk_lak)",
+    "scope": ["vapid:issue", "lease:expire"],
+    "notBefore": 1729700000000,
+    "notAfter": 1729743200000,
+    "codeHash": "sha256-...",
+    "manifestHash": "sha256-...",
+    "kmsVersion": "v2.0.0",
+    "sig": "b64u(sig_uak)"
+  },
+  "sig": "b64u(sig_lak)"
+}
+```
+
+**System event (KIAK):**
+```json
+{
+  "kmsVersion": 2,
+  "seqNum": 1,
+  "timestamp": 1729600000000,
+  "op": "boot",
+  "kid": "",
+  "requestId": "770e8400-e29b-41d4-a716-446655440002",
+  "details": {
+    "version": "v2.0.0",
+    "codeHash": "sha256-...",
+    "manifestHash": "sha256-...",
+    "priorChainHead": null
+  },
+  "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "chainHash": "aBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLmNoPq",
+  "signer": "KIAK",
+  "signerId": "b64u(pk_kiak)",
+  "sig": "b64u(sig_kiak)"
+}
+```
+
+---
+
+## Audit Key Delegation Architecture
+
+### Overview
+
+The delegation architecture solves the catch-22 of audit logging during background operations:
+
+**Problem**: Audit signing key wrapped under MS prevents logging when user is not authenticated (e.g., lease-based JWT issuance).
+
+**Solution**: Three-tier audit key hierarchy:
+1. **UAK**: Wrapped under MS, signs user-authenticated operations
+2. **LAK**: Wrapped under LRK, delegated per-lease for background operations
+3. **KIAK**: Wrapped under LRK, delegated per-installation for system events
+
+### 1. User Audit Key (UAK)
+
+**Purpose:** Sign audit entries for user-authenticated operations
+
+**Lifecycle:**
+- Generated during setup alongside MS
+- Wrapped under MS (same as application keys)
+- Unwrapped when user authenticates
+- Available while MS is unlocked
+
+**Signs:**
+- Setup/enrollment
+- Lease creation
+- Delegation certificate issuance
+- Manual key operations
+- Unlock events
+
+**Storage:**
+```typescript
+{
+  kid: "audit-user",
+  kmsVersion: 2,
+  wrappedKey: ArrayBuffer,      // UAK private key wrapped under MS
+  iv: ArrayBuffer(12),
+  aad: ArrayBuffer,             // AAD: { kmsVersion: 2, kid: "audit-user", purpose: "audit-user" }
+  publicKeyRaw: ArrayBuffer,    // Ed25519 public key (32 bytes raw)
+  alg: "EdDSA",
+  purpose: "audit",
+  createdAt: number
+}
+```
+
+**Generation:**
+```typescript
+async function generateUAK(ms: Uint8Array): Promise<void> {
+  // Derive MKEK from MS
+  const mkek = await deriveMKEK(ms);
+
+  // Generate UAK keypair
+  const uak = await crypto.subtle.generateKey(
+    { name: "Ed25519" },
+    true,  // temporarily extractable for wrapping
+    ["sign", "verify"]
+  );
+
+  // Export public key
+  const publicKeyRaw = await crypto.subtle.exportKey("raw", uak.publicKey);
+
+  // Build AAD
+  const aad = buildAAD({
+    kmsVersion: 2,
+    kid: "audit-user",
+    alg: "EdDSA",
+    purpose: "audit",
+    createdAt: Date.now(),
+    keyType: "audit-user"
+  });
+
+  // Wrap private key under MKEK
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedKey = await crypto.subtle.wrapKey(
+    "jwk",
+    uak.privateKey,
+    mkek,
+    { name: "AES-GCM", iv, additionalData: aad }
+  );
+
+  // Store
+  await storage.put("keys", {
+    kid: "audit-user",
+    kmsVersion: 2,
+    wrappedKey,
+    iv,
+    aad,
+    publicKeyRaw,
+    alg: "EdDSA",
+    purpose: "audit",
+    createdAt: Date.now()
+  });
+}
+```
+
+### 2. Lease Audit Key (LAK)
+
+**Purpose:** Sign audit entries for lease-scoped operations without user present
+
+**Lifecycle:**
+- Generated during lease creation (when user IS authenticated)
+- Delegated via certificate signed by UAK
+- Wrapped under LRK (not MS!) so available anytime
+- Deleted when lease expires/revoked
+- Lifetime = lease TTL (no mid-lease rotation)
+
+**Signs:**
+- VAPID JWT issuance
+- Quota enforcement
+- Lease expiration
+- Operations under that lease
+
+**Certificate Generation Flow:**
+```
+1. User authenticates, creates lease
+2. MS is unwrapped, UAK is available
+3. Generate LAK keypair (Ed25519, non-extractable)
+4. Create delegation cert with:
+   - leaseId
+   - pk_lak
+   - scope: ["vapid:issue", "lease:expire"]
+   - validity: [now, leaseExp]
+5. Sign cert with UAK private key
+6. Wrap sk_lak under LRK (not MS!)
+7. Store: { leaseId, wrappedKey(LRK), cert, exp }
+```
+
+**Storage:**
+```typescript
+interface LeaseAuditKeyRecord {
+  leaseId: string;              // Primary key
+  wrappedKey: ArrayBuffer;      // LAK private key wrapped under LRK
+  iv: ArrayBuffer;
+  aad: ArrayBuffer;
+  publicKeyRaw: ArrayBuffer;    // LAK public key
+  delegationCert: AuditDelegationCert;
+  expiresAt: number;
+  createdAt: number;
+}
+// Stored in IndexedDB: lease-audit-keys store
+```
+
+**Usage During JWT Issuance:**
+```typescript
+async function issueVAPIDJWT({ leaseId, endpoint }): Promise<string> {
+  // 1. Retrieve LAK for leaseId
+  const lakRecord = await storage.get("lease-audit-keys", leaseId);
+
+  // 2. Unwrap LAK using LRK (always available!)
+  const lrk = await storage.getMeta("LRK");
+  const lak = await crypto.subtle.unwrapKey(
+    "jwk",
+    lakRecord.wrappedKey,
+    lrk,
+    { name: "AES-GCM", iv: lakRecord.iv, additionalData: lakRecord.aad },
+    { name: "Ed25519" },
+    false,  // non-extractable
+    ["sign"]
+  );
+
+  // 3. Issue JWT (omitted for brevity)
+  const jwt = await signVAPIDJWT(...);
+
+  // 4. Create audit entry
+  const entry = {
+    seq: await getNextSeq(),
+    timestamp: Date.now(),
+    op: "vapid:issue",
+    kid: jwt.kid,
+    requestId: crypto.randomUUID(),
+    leaseId,
+    details: { endpoint, jti: jwt.jti, exp: jwt.exp },
+    jti: jwt.jti,
+    previousHash: await getChainHead(),
+    chainHash: "",  // computed below
+    signer: "LAK",
+    signerId: base64url(SHA256(lakRecord.publicKeyRaw)),
+    cert: lakRecord.delegationCert  // Include full cert for portability
+  };
+
+  entry.chainHash = await computeChainHash(entry);
+
+  // 5. Sign with LAK
+  const sigBytes = await crypto.subtle.sign(
+    "Ed25519",
+    lak,
+    new TextEncoder().encode(entry.chainHash)
+  );
+  entry.sig = base64url(new Uint8Array(sigBytes));
+
+  // 6. Append to audit log
+  await appendAuditEntry(entry);
+
+  return jwt;
+}
+```
+
+### 3. KMS Instance Audit Key (KIAK)
+
+**Purpose:** Sign system events not tied to any user/lease
+
+**Lifecycle:**
+- Generated once per KMS installation (first run)
+- Wrapped under LRK (always available)
+- Delegated via certificate signed by UAK during first setup
+- Rotated on clear triggers (90 days, code change, attestation change, or compromise)
+
+**Signs:**
+- KMS boot/initialization
+- Attestation status changes
+- Fail-secure transitions
+- Instance reset events
+- KIAK rotation events
+
+**Delegation & Authorization:**
+
+Unlike LAK (delegated per-lease), KIAK is delegated once per installation during initial setup:
+
+1. User completes first setup (generates MS, UAK)
+2. Generate KIAK (if not exists)
+3. Create KIAK delegation cert signed by UAK:
+   ```typescript
+   {
+     type: "audit-delegation",
+     version: 1,
+     signerKind: "KIAK",
+     instanceId: "inst-...",
+     delegatePub: pk_kiak,
+     scope: ["system.*", "attestation.*", "boot", "fail-secure"],
+     notBefore: now,
+     notAfter: null,  // No expiration for instance key
+     codeHash, manifestHash, kmsVersion,
+     sig: sig_uak  // Signed by UAK
+   }
+   ```
+4. Append delegation cert as audit entry (op: "audit:delegate")
+
+This ensures KIAK authority traces back to user's MS ownership.
+
+**Storage:**
+```typescript
+{
+  kid: "audit-instance",
+  kmsVersion: 2,
+  instanceId: string,           // Unique per installation
+  wrappedKey: ArrayBuffer,      // KIAK private key wrapped under LRK
+  iv: ArrayBuffer,
+  aad: ArrayBuffer,
+  publicKeyRaw: ArrayBuffer,    // KIAK public key
+  kiakKeyId: string,            // base64url(SHA-256(publicKeyRaw))
+  delegationCert: AuditDelegationCert,  // UAK-signed delegation
+  alg: "EdDSA",
+  purpose: "audit-instance",
+  createdAt: number,
+  codeHash: string,             // Current KMS code hash
+  manifestHash: string          // Current manifest hash
+}
+```
+
+**Wrapping Pattern (LRK-based for portability):**
+
+```typescript
+// First run initialization
+async function initKIAK(): Promise<void> {
+  // 1. Ensure LRK exists
+  let lrk = await storage.getMeta("LRK");
+  if (!lrk) {
+    lrk = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,  // non-extractable
+      ["wrapKey", "unwrapKey"]
+    );
+    await storage.putMeta("LRK", lrk);
+  }
+
+  // 2. Generate KIAK (temporarily extractable for wrapping)
+  const kiak = await crypto.subtle.generateKey(
+    { name: "Ed25519" },
+    true,  // extractable: true (only for wrapping!)
+    ["sign", "verify"]
+  );
+
+  // 3. Build AAD
+  const instanceId = crypto.randomUUID();
+  const aad = buildAAD({
+    kmsVersion: 2,
+    instanceId,
+    purpose: "kiak",
+    keyType: "audit-instance"
+  });
+
+  // 4. Wrap KIAK under LRK
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedKiak = await crypto.subtle.wrapKey(
+    "jwk",
+    kiak.privateKey,
+    lrk,
+    { name: "AES-GCM", iv, additionalData: aad }
+  );
+
+  // 5. Export public key
+  const publicKeyRaw = await crypto.subtle.exportKey("raw", kiak.publicKey);
+
+  // 6. Store wrapped KIAK
+  await storage.put("keys", {
+    kid: "audit-instance",
+    kmsVersion: 2,
+    instanceId,
+    wrappedKey: wrappedKiak,
+    iv,
+    aad,
+    publicKeyRaw,
+    kiakKeyId: await computeKeyId(publicKeyRaw),
+    alg: "EdDSA",
+    purpose: "audit-instance",
+    createdAt: Date.now(),
+    codeHash: await getCurrentCodeHash(),
+    manifestHash: await getCurrentManifestHash()
+  });
+
+  // 7. Discard extractable handle immediately
+  // (JS GC will clean up)
+}
+
+// Runtime unwrap (returns non-extractable handle)
+async function unwrapKIAK(): Promise<CryptoKey> {
+  const record = await storage.get("keys", "audit-instance");
+  const lrk = await storage.getMeta("LRK");
+
+  return await crypto.subtle.unwrapKey(
+    "jwk",
+    record.wrappedKey,
+    lrk,
+    { name: "AES-GCM", iv: record.iv, additionalData: record.aad },
+    { name: "Ed25519" },
+    false,  // non-extractable at runtime!
+    ["sign"]
+  );
+}
+```
+
+**Rotation Policy:**
+
+Rotate KIAK on any of these triggers:
+- **Scheduled:** Every 90 days
+- **Code change:** New KMS version deployed
+- **Attestation change:** Manifest hash changes
+- **Compromise:** Suspected key compromise or fail-secure recovery
+
+**Rotation Process:**
+```typescript
+async function rotateKIAK(): Promise<void> {
+  // 1. Get old KIAK
+  const oldKiak = await unwrapKIAK();
+  const oldRecord = await storage.get("keys", "audit-instance");
+
+  // 2. Generate new KIAK (same pattern as initKIAK)
+  const newKiak = await generateAndWrapKIAK();
+
+  // 3. Create rotation entry with DUAL signatures
+  const entry = {
+    seq: await getNextSeq(),
+    timestamp: Date.now(),
+    op: "audit:rotate",
+    kid: "audit-instance",
+    requestId: crypto.randomUUID(),
+    details: {
+      oldKeyId: oldRecord.kiakKeyId,
+      newKeyId: newKiak.kiakKeyId,
+      reason: "scheduled" | "code-change" | "compromise",
+      oldCodeHash: oldRecord.codeHash,
+      newCodeHash: await getCurrentCodeHash()
+    },
+    previousHash: await getChainHead(),
+    chainHash: "",
+    signer: "KIAK",
+    signerId: oldRecord.kiakKeyId  // Old key signs
+  };
+
+  entry.chainHash = await computeChainHash(entry);
+
+  // 4. Sign with BOTH keys (proves continuity)
+  const sigOld = await crypto.subtle.sign(
+    "Ed25519",
+    oldKiak,
+    new TextEncoder().encode(entry.chainHash)
+  );
+  const sigNew = await crypto.subtle.sign(
+    "Ed25519",
+    newKiak.privateKey,
+    new TextEncoder().encode(entry.chainHash)
+  );
+
+  entry.sig = base64url(new Uint8Array(sigOld));
+  entry.sigNew = base64url(new Uint8Array(sigNew));
+
+  await appendAuditEntry(entry);
+
+  // 5. Create new delegation cert (requires user auth to get UAK!)
+  // This step requires MS to be unlocked
+  const newDelegationCert = await createKIAKDelegation(newKiak.publicKeyRaw);
+  await appendAuditEntry({
+    op: "audit:delegate",
+    details: { signerKind: "KIAK", cert: newDelegationCert },
+    signer: "UAK"
+  });
+
+  // 6. Update storage
+  await storage.put("keys", "audit-instance", newKiak);
+}
+```
+
+### 4. Lease Root Key (LRK)
+
+**Purpose:** Wrapping key for LAK and KIAK private keys
+
+**Why needed:** LAK and KIAK must be available for signing without user authentication. Wrapping them under MS would require authentication to unwrap. Solution: wrap under LRK, which is always available.
+
+**Lifecycle:**
+- Generated once on first run
+- Stored as non-extractable CryptoKey in IndexedDB
+- Never rotated (rotation would invalidate all LAK/KIAK)
+- Backed up as part of KMS backup bundle
+
+**Generation:**
+```typescript
+async function ensureLRK(): Promise<CryptoKey> {
+  let lrk = await storage.getMeta("LRK");
+
+  if (!lrk) {
+    lrk = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,  // non-extractable
+      ["wrapKey", "unwrapKey"]
+    );
+
+    await storage.putMeta("LRK", lrk);
+  }
+
+  return lrk;
+}
+```
+
+**Security Note:** LRK compromise requires KMS code compromise (protected by SRI). Accepted residual risk for background operation capability.
+
+**Distinction from SessionKEK:**
+
+LRK and SessionKEK are DIFFERENT keys with different purposes:
+
+| Aspect | LRK (Lease Root Key) | SessionKEK (Session Key Encryption Key) |
+|--------|----------------------|----------------------------------------|
+| **Purpose** | Wrap audit keys (LAK/KIAK) | Wrap VAPID key for background JWT signing |
+| **Scope** | Global (single key for entire KMS) | Per-lease (unique key for each lease) |
+| **Lifecycle** | Permanent (generated once on first run) | Temporary (expires with lease, 8-24 hours) |
+| **Generation** | `generateKey()` (random AES-GCM key) | `HKDF(MS, leaseSalt, "SessionKEK/v1")` (derived) |
+| **Storage** | `meta:LRK` (single entry) | `meta:sessionkek:{leaseId}` (one per lease) |
+| **Use case** | Background audit logging | Background push notifications |
+| **Documentation** | This file (05-audit-log.md) | [12-vapid-leases.md](./12-vapid-leases.md) |
+
+**Why both needed:**
+- **LRK** enables audit logging during background operations (no user auth available)
+- **SessionKEK** enables VAPID JWT signing during background operations (no user auth available)
+- Both solve the same problem (background operations) for different subsystems (audit vs VAPID)
 
 ---
 
@@ -240,31 +748,42 @@ To ensure consistent hashing, entries are serialized in **canonical JSON** with 
  * - Deterministic serialization
  *
  * INCLUDED FIELDS:
- * - All fields except signature (signature covers chainHash)
+ * - All fields except sig/sigNew (signatures cover chainHash)
  *
- * @param entry Audit entry (without signature)
+ * @param entry Audit entry (without sig/sigNew)
  * @returns Canonical JSON string
  */
-function canonicalizeAuditEntry(entry: Omit<AuditEntry, 'signature'>): string {
+function canonicalizeAuditEntry(entry: Omit<AuditEntryV2, 'sig' | 'sigNew'>): string {
   // Build object with sorted keys
-  const canonical = {
-    auditKeyId: entry.auditKeyId,
+  const canonical: Record<string, any> = {
+    cert: entry.cert || null,
     chainHash: entry.chainHash,
     details: entry.details || null,
     duration: entry.duration,
+    jti: entry.jti,
     kid: entry.kid,
     kmsVersion: entry.kmsVersion,
+    leaseId: entry.leaseId,
     lockTime: entry.lockTime,
     op: entry.op,
     origin: entry.origin || null,
     previousHash: entry.previousHash,
     requestId: entry.requestId,
     seqNum: entry.seqNum,
+    signer: entry.signer,
+    signerId: entry.signerId,
     timestamp: entry.timestamp,
     unlockTime: entry.unlockTime
   };
 
-  // Stringify with sorted keys (Object.keys returns sorted array)
+  // Remove undefined/null fields
+  Object.keys(canonical).forEach(key => {
+    if (canonical[key] === undefined) {
+      delete canonical[key];
+    }
+  });
+
+  // Stringify with sorted keys
   return JSON.stringify(canonical, Object.keys(canonical).sort());
 }
 ```
@@ -284,7 +803,7 @@ function canonicalizeAuditEntry(entry: Omit<AuditEntry, 'signature'>): string {
  * @returns Base64url-encoded SHA-256 hash
  */
 async function computeChainHash(
-  entry: Omit<AuditEntry, 'chainHash' | 'signature'>
+  entry: Omit<AuditEntryV2, 'chainHash' | 'sig' | 'sigNew'>
 ): Promise<string> {
   // Canonical JSON
   const canonical = canonicalizeAuditEntry({
@@ -310,7 +829,7 @@ async function computeChainHash(
  * Get previousHash for new audit entry.
  *
  * CASES:
- * - Genesis entry (seqNum=0): previousHash = "0" (no previous)
+ * - Genesis entry (seqNum=0): previousHash = "0" (64-char hex string)
  * - Subsequent entries: previousHash = chainHash of seqNum-1
  *
  * @param seqNum Sequence number of new entry
@@ -318,7 +837,7 @@ async function computeChainHash(
  */
 async function getPreviousHash(seqNum: number): Promise<string> {
   if (seqNum === 0) {
-    return '0';  // Genesis entry
+    return '0'.repeat(64);  // Genesis entry
   }
 
   // Load previous entry
@@ -362,7 +881,7 @@ async function getNextSeqNum(): Promise<number> {
     nextSeqNum: 0,
     totalEntries: 0,
     lastTimestamp: 0,
-    lastChainHash: '0',
+    lastChainHash: '0'.repeat(64),
     lastAnchor: 0
   };
 
@@ -438,45 +957,71 @@ async function verifySequence(): Promise<{
 withUnlock → Unwrap Audit Key → Sign chainHash → Attach Signature
 ```
 
+For LAK/KIAK, no withUnlock needed (wrapped under LRK, always available).
+
 ### Implementation
 
 ```typescript
 /**
- * Sign audit entry with Ed25519 audit key.
+ * Sign audit entry with appropriate audit key.
  *
  * WHAT IS SIGNED: The chainHash (32-byte SHA-256)
  * WHY: chainHash already commits to all entry fields
  *
  * @param entry Audit entry (with chainHash computed)
- * @param auditKeyId Audit key identifier
- * @param mkek Master Key Encryption Key (from unlock context)
+ * @param signer Which audit key to use
+ * @param mkek Master Key Encryption Key (from unlock context, if UAK)
  * @returns Ed25519 signature (64 bytes, base64url-encoded)
  */
 async function signAuditEntry(
-  entry: Omit<AuditEntry, 'signature'>,
-  auditKeyId: string,
-  mkek: CryptoKey
+  entry: Omit<AuditEntryV2, 'sig'>,
+  signer: 'UAK' | 'LAK' | 'KIAK',
+  mkek?: CryptoKey  // Required for UAK, not for LAK/KIAK
 ): Promise<string> {
-  // Load audit key configuration
-  const keyConfig = await storage.get(`key:${auditKeyId}`);
-  if (!keyConfig || keyConfig.purpose !== 'audit') {
-    throw new Error(`Audit key not found: ${auditKeyId}`);
-  }
+  let auditKey: CryptoKey;
 
-  // Unwrap audit private key
-  const auditKey = await unwrapApplicationKey(
-    keyConfig.wrappedKey,
-    mkek,
-    keyConfig.iv,
-    keyConfig.aad,
-    { alg: 'EdDSA', purpose: 'audit' }
-  );
+  switch (signer) {
+    case 'UAK':
+      if (!mkek) throw new Error('MKEK required for UAK signing');
+      // Load UAK and unwrap with MKEK
+      const uakConfig = await storage.get('keys', 'audit-user');
+      auditKey = await crypto.subtle.unwrapKey(
+        'jwk',
+        uakConfig.wrappedKey,
+        mkek,
+        { name: 'AES-GCM', iv: uakConfig.iv, additionalData: uakConfig.aad },
+        { name: 'Ed25519' },
+        false,
+        ['sign']
+      );
+      break;
+
+    case 'LAK':
+      // Load LAK and unwrap with LRK
+      const lakRecord = await storage.get('lease-audit-keys', entry.leaseId!);
+      const lrk = await storage.getMeta('LRK');
+      auditKey = await crypto.subtle.unwrapKey(
+        'jwk',
+        lakRecord.wrappedKey,
+        lrk,
+        { name: 'AES-GCM', iv: lakRecord.iv, additionalData: lakRecord.aad },
+        { name: 'Ed25519' },
+        false,
+        ['sign']
+      );
+      break;
+
+    case 'KIAK':
+      // Unwrap KIAK with LRK
+      auditKey = await unwrapKIAK();
+      break;
+  }
 
   // Sign chainHash
   const signature = await crypto.subtle.sign(
     'Ed25519',
     auditKey,
-    base64url.decode(entry.chainHash)  // Sign raw hash bytes
+    new TextEncoder().encode(entry.chainHash)
   );
 
   // Base64url encode signature
@@ -490,18 +1035,18 @@ async function signAuditEntry(
 /**
  * Verify audit entry signature.
  *
- * @param entry Complete audit entry (including signature)
- * @param auditPublicKey Audit public key (raw Ed25519, 32 bytes)
+ * @param entry Complete audit entry (including sig)
+ * @param publicKey Audit public key (raw Ed25519, 32 bytes)
  * @returns true if signature valid
  */
 async function verifyAuditSignature(
-  entry: AuditEntry,
-  auditPublicKey: ArrayBuffer
+  entry: AuditEntryV2,
+  publicKey: ArrayBuffer
 ): Promise<boolean> {
   // Import public key
-  const publicKey = await crypto.subtle.importKey(
+  const pubKey = await crypto.subtle.importKey(
     'raw',
-    auditPublicKey,
+    publicKey,
     { name: 'Ed25519' },
     false,
     ['verify']
@@ -510,9 +1055,9 @@ async function verifyAuditSignature(
   // Verify signature
   const valid = await crypto.subtle.verify(
     'Ed25519',
-    publicKey,
-    base64url.decode(entry.signature),
-    base64url.decode(entry.chainHash)
+    pubKey,
+    base64url.decode(entry.sig),
+    new TextEncoder().encode(entry.chainHash)
   );
 
   return valid;
@@ -546,8 +1091,9 @@ function shouldInsertAnchor(seqNum: number): boolean {
 ### Anchor Entry
 
 ```typescript
-interface AnchorEntry extends AuditEntry {
+interface AnchorEntry extends AuditEntryV2 {
   op: 'anchor';
+  signer: 'KIAK';  // Anchors signed by KIAK
   details: {
     anchorType: 'periodic';
     sinceSeqNum: number;        // Start of range (last anchor)
@@ -580,7 +1126,9 @@ async function createAnchor(
     }
   }
 
-  const anchor: Omit<AnchorEntry, 'chainHash' | 'signature'> = {
+  const kiakRecord = await storage.get('keys', 'audit-instance');
+
+  const anchor: Omit<AnchorEntry, 'chainHash' | 'sig'> = {
     kmsVersion: 2,
     seqNum,
     timestamp: Date.now(),
@@ -598,13 +1146,17 @@ async function createAnchor(
       keyOperations
     },
     previousHash,
-    auditKeyId: await audit.getCurrentKeyId()
+    signer: 'KIAK',
+    signerId: kiakRecord.kiakKeyId
   };
 
   // Compute chainHash
   const chainHash = await computeChainHash(anchor);
 
-  return { ...anchor, chainHash, signature: '' };
+  // Sign with KIAK
+  const sig = await signAuditEntry({ ...anchor, chainHash }, 'KIAK');
+
+  return { ...anchor, chainHash, sig };
 }
 ```
 
@@ -612,148 +1164,221 @@ async function createAnchor(
 
 ## Audit Key Management
 
-### V2 IMPROVEMENT: Non-Extractable Keys
-
-**V1 Problem**: Audit key was extractable (could be exported and used to forge entries).
-**V2 Solution**: Non-extractable with explicit backup ceremony.
-
-### Backup Ceremony
+### UAK Generation
 
 ```typescript
 /**
- * Export audit key for backup (one-time ceremony).
+ * Generate User Audit Key during setup.
  *
  * SECURITY:
- * - Requires explicit user action (not automatic)
- * - User must confirm understanding of risks
- * - Backup should be encrypted and stored securely
- * - Original key remains non-extractable in KMS
+ * - Wrapped under MS for authorization
+ * - Non-extractable at runtime
+ * - Public key stored for verification
  *
- * FLOW:
- * 1. User initiates backup ceremony
- * 2. withUnlock (authenticate user)
- * 3. Temporarily make audit key extractable
- * 4. Export as JWK
- * 5. Encrypt with backup password
- * 6. Return encrypted backup
- * 7. Re-wrap key as non-extractable
- *
- * @param credential User credential
- * @param backupPassword Strong password for backup encryption
- * @returns Encrypted backup bundle
+ * @param mkek Master Key Encryption Key (derived from MS)
+ * @returns UAK key ID
  */
-export async function exportAuditKeyBackup(
-  credential: Credential,
-  backupPassword: string
-): Promise<{
-  encryptedKey: ArrayBuffer;
-  iv: ArrayBuffer;
-  salt: ArrayBuffer;
-}> {
-  return withUnlock(
-    credential,
-    async (ctx) => {
-      // Load current audit key
-      const auditKeyId = await audit.getCurrentKeyId();
-      const keyConfig = await storage.get(`key:${auditKeyId}`);
-
-      // Unwrap (temporarily accessible)
-      const auditKey = await unwrapApplicationKey(
-        keyConfig.wrappedKey,
-        ctx.mkek,
-        keyConfig.iv,
-        keyConfig.aad,
-        { alg: 'EdDSA', purpose: 'audit' }
-      );
-
-      // Export as JWK (requires re-wrapping with extractable=true)
-      // This is the ONE TIME we make audit key extractable
-      const jwk = await crypto.subtle.exportKey('jwk', auditKey);
-
-      // Derive backup KEK from password
-      const salt = crypto.getRandomValues(new Uint8Array(16));
-      const backupKEK = await deriveBackupKEK(backupPassword, salt, 600_000);
-
-      // Encrypt JWK
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const encryptedKey = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        backupKEK,
-        new TextEncoder().encode(JSON.stringify(jwk))
-      );
-
-      // Audit this sensitive operation
-      await audit.log({
-        op: 'audit:export',
-        kid: auditKeyId,
-        requestId: crypto.randomUUID(),
-        details: {
-          warning: 'Audit key exported for backup'
-        }
-      });
-
-      return {
-        encryptedKey,
-        iv: iv.buffer,
-        salt: salt.buffer
-      };
-    },
-    {
-      timeout: 10_000,
-      purpose: 'audit:backup'
-    }
+export async function generateUAK(mkek: CryptoKey): Promise<string> {
+  // Generate keypair
+  const uak = await crypto.subtle.generateKey(
+    { name: 'Ed25519' },
+    true,  // temporarily extractable for wrapping
+    ['sign', 'verify']
   );
+
+  // Export public key
+  const publicKeyRaw = await crypto.subtle.exportKey('raw', uak.publicKey);
+
+  // Build AAD
+  const aad = buildAAD({
+    kmsVersion: 2,
+    kid: 'audit-user',
+    alg: 'EdDSA',
+    purpose: 'audit',
+    createdAt: Date.now(),
+    keyType: 'audit-user'
+  });
+
+  // Wrap private key
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedKey = await crypto.subtle.wrapKey(
+    'jwk',
+    uak.privateKey,
+    mkek,
+    { name: 'AES-GCM', iv, additionalData: aad }
+  );
+
+  // Store
+  await storage.put('keys', {
+    kid: 'audit-user',
+    kmsVersion: 2,
+    wrappedKey,
+    iv,
+    aad,
+    publicKeyRaw,
+    alg: 'EdDSA',
+    purpose: 'audit',
+    createdAt: Date.now()
+  });
+
+  return 'audit-user';
 }
 ```
 
-### Key Rotation
+### LAK Generation (During Lease Creation)
 
 ```typescript
 /**
- * Rotate audit key (generate new, keep old for verification).
+ * Generate Lease Audit Key during lease creation.
  *
- * FLOW:
- * 1. Generate new Ed25519 keypair
- * 2. Sign "key rotation" entry with OLD key
- * 3. Sign next entry with NEW key
- * 4. Store both keys (old for verification, new for signing)
+ * SECURITY:
+ * - Delegated via UAK-signed certificate
+ * - Wrapped under LRK (available without auth)
+ * - Expires with lease
  *
- * @param credential User credential
- * @returns New audit key ID
+ * @param leaseId Lease identifier
+ * @param ttlHours Lease TTL in hours
+ * @param uak UAK private key (unwrapped during user auth)
+ * @returns LAK record
  */
-export async function rotateAuditKey(
-  credential: Credential
-): Promise<string> {
-  return withUnlock(
-    credential,
-    async (ctx) => {
-      const oldKeyId = await audit.getCurrentKeyId();
+export async function generateLAK(
+  leaseId: string,
+  ttlHours: number,
+  uak: CryptoKey
+): Promise<LeaseAuditKeyRecord> {
+  const now = Date.now();
+  const expiresAt = now + (ttlHours * 3600 * 1000);
 
-      // Generate new keypair
-      const { kid: newKeyId } = await generateAuditKeypair(credential);
-
-      // Sign rotation entry with OLD key
-      await audit.log({
-        op: 'audit:rotate',
-        kid: oldKeyId,
-        requestId: crypto.randomUUID(),
-        details: {
-          oldKeyId,
-          newKeyId,
-          reason: 'periodic-rotation'
-        }
-      });
-
-      // Update current key ID
-      await storage.put('audit:currentKeyId', newKeyId);
-
-      return newKeyId;
-    },
-    {
-      timeout: 10_000,
-      purpose: 'audit:rotate'
-    }
+  // 1. Generate LAK keypair
+  const lak = await crypto.subtle.generateKey(
+    { name: 'Ed25519' },
+    true,  // temporarily extractable for wrapping
+    ['sign', 'verify']
   );
+
+  // 2. Export public key
+  const publicKeyRaw = await crypto.subtle.exportKey('raw', lak.publicKey);
+
+  // 3. Create delegation certificate
+  const delegationCert: AuditDelegationCert = {
+    type: 'audit-delegation',
+    version: 1,
+    signerKind: 'LAK',
+    leaseId,
+    delegatePub: base64url.encode(new Uint8Array(publicKeyRaw)),
+    scope: ['vapid:issue', 'lease:expire'],
+    notBefore: now,
+    notAfter: expiresAt,
+    codeHash: await getCurrentCodeHash(),
+    manifestHash: await getCurrentManifestHash(),
+    kmsVersion: 'v2.0.0',
+    sig: ''  // Will be filled below
+  };
+
+  // 4. Sign delegation cert with UAK
+  const certCanonical = canonicalizeJSON({
+    ...delegationCert,
+    sig: undefined
+  });
+  const certSig = await crypto.subtle.sign(
+    'Ed25519',
+    uak,
+    new TextEncoder().encode(certCanonical)
+  );
+  delegationCert.sig = base64url.encode(new Uint8Array(certSig));
+
+  // 5. Wrap LAK under LRK
+  const lrk = await storage.getMeta('LRK');
+  const aad = buildAAD({
+    kmsVersion: 2,
+    leaseId,
+    purpose: 'lak',
+    keyType: 'lease-audit-key'
+  });
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedKey = await crypto.subtle.wrapKey(
+    'jwk',
+    lak.privateKey,
+    lrk,
+    { name: 'AES-GCM', iv, additionalData: aad }
+  );
+
+  // 6. Create record
+  const record: LeaseAuditKeyRecord = {
+    leaseId,
+    wrappedKey,
+    iv,
+    aad,
+    publicKeyRaw,
+    delegationCert,
+    expiresAt,
+    createdAt: now
+  };
+
+  // 7. Store
+  await storage.put('lease-audit-keys', record);
+
+  return record;
+}
+```
+
+### KIAK Initialization
+
+See [Audit Key Delegation Architecture](#audit-key-delegation-architecture) section above for complete KIAK initialization and rotation code.
+
+### Delegation Certificate Creation
+
+```typescript
+/**
+ * Create and sign delegation certificate.
+ *
+ * @param signerKind Type of delegated signer
+ * @param delegatePub Public key of delegated signer
+ * @param scope Authorized operations
+ * @param notBefore Validity start
+ * @param notAfter Validity end (null for no expiration)
+ * @param uak UAK private key for signing
+ * @param leaseId Lease ID (for LAK only)
+ * @param instanceId Instance ID (for KIAK only)
+ * @returns Signed delegation certificate
+ */
+async function createDelegationCert(
+  signerKind: 'LAK' | 'KIAK',
+  delegatePub: ArrayBuffer,
+  scope: string[],
+  notBefore: number,
+  notAfter: number | null,
+  uak: CryptoKey,
+  leaseId?: string,
+  instanceId?: string
+): Promise<AuditDelegationCert> {
+  const cert: Omit<AuditDelegationCert, 'sig'> = {
+    type: 'audit-delegation',
+    version: 1,
+    signerKind,
+    leaseId,
+    instanceId,
+    delegatePub: base64url.encode(new Uint8Array(delegatePub)),
+    scope,
+    notBefore,
+    notAfter,
+    codeHash: await getCurrentCodeHash(),
+    manifestHash: await getCurrentManifestHash(),
+    kmsVersion: 'v2.0.0'
+  };
+
+  // Canonicalize and sign
+  const canonical = canonicalizeJSON(cert);
+  const sigBytes = await crypto.subtle.sign(
+    'Ed25519',
+    uak,
+    new TextEncoder().encode(canonical)
+  );
+
+  return {
+    ...cert,
+    sig: base64url.encode(new Uint8Array(sigBytes))
+  };
 }
 ```
 
@@ -761,72 +1386,182 @@ export async function rotateAuditKey(
 
 ## Verification
 
-### Complete Chain Verification
+### Key Rotation and Chain Verification
+
+**Critical insight: You never need old private keys for verification.**
+
+The audit log is self-sufficient:
+
+1. **Delegation entries introduce keys**: Contain full public key + UAK signature
+2. **Regular entries reference keys by ID**: Use `signerId` to look up delegation
+3. **Key rotation adds new delegation**: New public key embedded in log
+4. **Old private keys deleted safely**: Only public keys needed for verification
+5. **Bundle-local verification**: No external registry needed
+
+### Verification Algorithm
 
 ```typescript
 /**
- * Verify entire audit log chain.
+ * Verify complete audit chain with delegation support.
  *
- * CHECKS:
- * 1. Sequence numbers are complete (no gaps)
- * 2. Chain hashes link correctly (previousHash = chainHash[n-1])
- * 3. All signatures valid
- * 4. Timestamps are monotonic
- *
- * @returns { valid, errors }
+ * @param entries All audit entries (sorted by seqNum)
+ * @param uakPublicKey UAK public key
+ * @param kiakPublicKey KIAK public key (current)
+ * @returns Verification result
  */
-export async function verifyAuditChain(): Promise<{
-  valid: boolean;
-  errors: string[];
-}> {
+export async function verifyAuditChain(
+  entries: AuditEntryV2[],
+  uakPublicKey: ArrayBuffer,
+  kiakPublicKey: ArrayBuffer
+): Promise<VerificationResult> {
+  let previousHash = '0'.repeat(64); // Genesis
   const errors: string[] = [];
+  const lakKeys = new Map<string, CryptoKey>(); // Cache verified LAK keys
 
-  // Check 1: Sequence complete
-  const seqCheck = await verifySequence();
-  if (!seqCheck.valid) {
-    errors.push(`Sequence gaps: ${seqCheck.gaps.join(', ')}`);
-    errors.push(`Sequence duplicates: ${seqCheck.duplicates.join(', ')}`);
-  }
+  // Import UAK and KIAK public keys
+  const uakPubKey = await crypto.subtle.importKey(
+    'raw',
+    uakPublicKey,
+    { name: 'Ed25519' },
+    false,
+    ['verify']
+  );
 
-  // Load all entries
-  const entries = await audit.getAll();
-  entries.sort((a, b) => a.seqNum - b.seqNum);
+  const kiakPubKey = await crypto.subtle.importKey(
+    'raw',
+    kiakPublicKey,
+    { name: 'Ed25519' },
+    false,
+    ['verify']
+  );
 
-  // Check 2: Chain links
-  for (let i = 1; i < entries.length; i++) {
-    if (entries[i].previousHash !== entries[i - 1].chainHash) {
-      errors.push(`Chain break at seqNum ${entries[i].seqNum}: ` +
-        `previousHash=${entries[i].previousHash} but ` +
-        `expected=${entries[i - 1].chainHash}`);
-    }
-  }
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
 
-  // Check 3: Signatures
-  const auditKeys = await audit.getAllPublicKeys();
-  for (const entry of entries) {
-    const publicKey = auditKeys[entry.auditKeyId];
-    if (!publicKey) {
-      errors.push(`Missing audit public key: ${entry.auditKeyId}`);
-      continue;
+    // 1. Check sequence continuity
+    if (entry.seqNum !== i) {
+      errors.push(`Sequence gap at ${i}: expected ${i}, got ${entry.seqNum}`);
+      break;
     }
 
-    const valid = await verifyAuditSignature(entry, publicKey);
-    if (!valid) {
-      errors.push(`Invalid signature at seqNum ${entry.seqNum}`);
+    // 2. Check chain continuity
+    if (entry.previousHash !== previousHash) {
+      errors.push(`Chain break at ${i}: previousHash mismatch`);
+      break;
     }
-  }
 
-  // Check 4: Timestamp ordering
-  for (let i = 1; i < entries.length; i++) {
-    if (entries[i].timestamp < entries[i - 1].timestamp) {
-      errors.push(`Timestamp not monotonic at seqNum ${entries[i].seqNum}`);
+    // 3. Recompute chainHash
+    const computedChainHash = await computeChainHash(entry);
+    if (computedChainHash !== entry.chainHash) {
+      errors.push(`Chain hash mismatch at ${i}`);
+      break;
     }
+
+    // 4. Verify signature based on signer type
+    let signatureValid = false;
+
+    switch (entry.signer) {
+      case 'UAK':
+        signatureValid = await verifyAuditSignature(entry, uakPublicKey);
+        if (!signatureValid) {
+          errors.push(`UAK signature invalid at ${i}`);
+        }
+        break;
+
+      case 'LAK':
+        // Must have delegation cert
+        if (!entry.cert) {
+          errors.push(`LAK entry missing cert at ${i}`);
+          break;
+        }
+
+        // Verify delegation cert signed by UAK
+        const certValid = await verifyDelegationCert(entry.cert, uakPubKey);
+        if (!certValid) {
+          errors.push(`LAK delegation cert invalid at ${i}`);
+          break;
+        }
+
+        // Check cert scope covers operation
+        if (!entry.cert.scope.includes(entry.op) &&
+            !entry.cert.scope.some(s => s.endsWith('*'))) {
+          errors.push(`Operation ${entry.op} not in LAK scope at ${i}`);
+          break;
+        }
+
+        // Check cert validity period
+        if (entry.timestamp < entry.cert.notBefore ||
+            (entry.cert.notAfter && entry.timestamp > entry.cert.notAfter)) {
+          errors.push(`LAK cert expired at ${i}`);
+          break;
+        }
+
+        // Import and cache LAK public key
+        if (!lakKeys.has(entry.signerId)) {
+          const lakPubBytes = base64url.decode(entry.cert.delegatePub);
+          const lakPubKey = await crypto.subtle.importKey(
+            'raw',
+            lakPubBytes,
+            { name: 'Ed25519' },
+            false,
+            ['verify']
+          );
+          lakKeys.set(entry.signerId, lakPubKey);
+        }
+
+        // Verify entry signature with LAK
+        const lakPubKey = lakKeys.get(entry.signerId)!;
+        const lakPubBytes = await crypto.subtle.exportKey('raw', lakPubKey);
+        signatureValid = await verifyAuditSignature(entry, lakPubBytes);
+        if (!signatureValid) {
+          errors.push(`LAK signature invalid at ${i}`);
+        }
+        break;
+
+      case 'KIAK':
+        signatureValid = await verifyAuditSignature(entry, kiakPublicKey);
+        if (!signatureValid) {
+          errors.push(`KIAK signature invalid at ${i}`);
+        }
+        break;
+
+      default:
+        errors.push(`Unknown signer type at ${i}: ${entry.signer}`);
+    }
+
+    // 5. Update previousHash for next iteration
+    previousHash = entry.chainHash;
   }
 
   return {
     valid: errors.length === 0,
+    verified: entries.length,
     errors
   };
+}
+
+/**
+ * Verify delegation certificate signature.
+ *
+ * @param cert Delegation certificate
+ * @param uakPublicKey UAK public key (CryptoKey)
+ * @returns true if signature valid
+ */
+async function verifyDelegationCert(
+  cert: AuditDelegationCert,
+  uakPublicKey: CryptoKey
+): Promise<boolean> {
+  // Reconstruct canonical cert for verification
+  const { sig, ...unsigned } = cert;
+  const canonical = canonicalizeJSON(unsigned);
+  const sigBytes = base64url.decode(sig);
+
+  return await crypto.subtle.verify(
+    'Ed25519',
+    uakPublicKey,
+    sigBytes,
+    new TextEncoder().encode(canonical)
+  );
 }
 ```
 
@@ -841,40 +1576,67 @@ export async function verifyAuditChain(): Promise<{
  * Log operation to audit trail.
  *
  * FLOW:
- * 1. Get next sequence number
- * 2. Get previousHash
- * 3. Build entry (without chainHash/signature)
- * 4. Compute chainHash
- * 5. Sign chainHash
- * 6. Store entry
- * 7. Check if anchor needed
+ * 1. Determine signer type (UAK if unlocked, LAK if lease, KIAK if system)
+ * 2. Get next sequence number
+ * 3. Get previousHash
+ * 4. Build entry (without chainHash/sig)
+ * 5. Compute chainHash
+ * 6. Sign chainHash with appropriate key
+ * 7. Store entry
+ * 8. Check if anchor needed
  *
  * @param data Operation data
- * @param mkek Master Key Encryption Key (from unlock context, if available)
+ * @param mkek Master Key Encryption Key (from unlock context, if UAK)
+ * @param leaseId Lease ID (if LAK)
  */
 export async function logAudit(
   data: {
     op: string;
     kid?: string;
     requestId: string;
+    leaseId?: string;
     unlockTime?: number;
     lockTime?: number;
     duration?: number;
     details?: Record<string, unknown>;
+    jti?: string;
   },
-  mkek?: CryptoKey
+  options?: {
+    mkek?: CryptoKey;  // For UAK
+    leaseId?: string;  // For LAK
+  }
 ): Promise<void> {
+  // Determine signer type
+  let signer: 'UAK' | 'LAK' | 'KIAK';
+  let signerId: string;
+  let cert: AuditDelegationCert | undefined;
+
+  if (options?.mkek) {
+    // User-authenticated operation → UAK
+    signer = 'UAK';
+    const uakRecord = await storage.get('keys', 'audit-user');
+    signerId = await computeKeyId(uakRecord.publicKeyRaw);
+  } else if (options?.leaseId) {
+    // Lease-scoped operation → LAK
+    signer = 'LAK';
+    const lakRecord = await storage.get('lease-audit-keys', options.leaseId);
+    signerId = await computeKeyId(lakRecord.publicKeyRaw);
+    cert = lakRecord.delegationCert;
+  } else {
+    // System operation → KIAK
+    signer = 'KIAK';
+    const kiakRecord = await storage.get('keys', 'audit-instance');
+    signerId = kiakRecord.kiakKeyId;
+  }
+
   // Get sequence number
   const seqNum = await getNextSeqNum();
 
   // Get previousHash
   const previousHash = await getPreviousHash(seqNum);
 
-  // Get audit key ID
-  const auditKeyId = await audit.getCurrentKeyId();
-
   // Build entry (partial)
-  const partial: Omit<AuditEntry, 'chainHash' | 'signature'> = {
+  const partial: Omit<AuditEntryV2, 'chainHash' | 'sig'> = {
     kmsVersion: 2,
     seqNum,
     timestamp: Date.now(),
@@ -882,32 +1644,29 @@ export async function logAudit(
     kid: data.kid || '',
     requestId: data.requestId,
     origin: self.location?.origin,
+    leaseId: data.leaseId,
     unlockTime: data.unlockTime || 0,
     lockTime: data.lockTime || 0,
     duration: data.duration || 0,
     details: data.details,
+    jti: data.jti,
     previousHash,
-    auditKeyId
+    signer,
+    signerId,
+    cert
   };
 
   // Compute chainHash
   const chainHash = await computeChainHash(partial);
 
-  // Sign (if MKEK available, otherwise queue for signing)
-  let signature = '';
-  if (mkek) {
-    signature = await signAuditEntry({ ...partial, chainHash }, auditKeyId, mkek);
-  } else {
-    // Queue for signing on next unlock
-    // (Some operations like setup don't have unlock context)
-    signature = 'UNSIGNED';
-  }
+  // Sign
+  const sig = await signAuditEntry({ ...partial, chainHash }, signer, options?.mkek);
 
   // Complete entry
-  const entry: AuditEntry = {
+  const entry: AuditEntryV2 = {
     ...partial,
     chainHash,
-    signature
+    sig
   };
 
   // Store
@@ -941,24 +1700,49 @@ export async function logAudit(
 - ✅ **Log truncation**: Sequence number gaps detected
 - ✅ **Replay attacks**: Unique requestId + timestamp
 - ✅ **Forgery (without key)**: Ed25519 signature required
+- ✅ **Unauthorized background operations**: LAK scope enforcement
+- ✅ **Rogue lease operations**: Delegation cert proves user authorization
 
 **NOT Protected Against**:
-- ❌ **Forgery (with key)**: If attacker gets audit private key, can forge
-- ❌ **Rollback (with key)**: Attacker could regenerate chain from checkpoint
+- ❌ **Forgery (with UAK)**: If attacker gets UAK, can forge entries and delegations
+- ❌ **LRK compromise**: Attacker can unwrap LAK/KIAK and forge background entries
 - ❌ **Complete deletion**: If entire log deleted, no evidence remains
+- ❌ **Rollback (with anchor)**: Attacker could regenerate chain from checkpoint
 
 ### Mitigation for Key Compromise
 
-1. **Non-Extractable**: Audit key cannot be exported from KMS
-2. **Backup Ceremony**: Explicit user action required
-3. **Periodic Rotation**: Rotate audit key every 90 days
-4. **External Anchors**: Timestamp anchors to external transparency logs (future)
+1. **Non-Extractable**: All audit keys non-extractable at runtime
+2. **MS Protection**: UAK wrapped under MS (requires user auth to access)
+3. **LRK Isolation**: LRK compromise requires KMS code compromise (SRI detects)
+4. **Periodic Rotation**: KIAK rotates every 90 days or on code change
+5. **External Anchors**: Timestamp anchors to external transparency logs (future)
 
-### Periodic Anchors Defense
+### Delegation Security
 
-**Attack**: Attacker gets audit key, replaces last N entries
-**Defense**: Anchors published to external transparency log (Rekor, Certificate Transparency)
-**Verification**: User can verify anchor matches external record
+**Authorization Chain**:
+```
+User owns MS → Unwraps UAK → Signs delegation cert → Authorizes LAK/KIAK
+```
+
+**Scope Enforcement**:
+- LAK limited to lease operations (`vapid:issue`, `lease:expire`)
+- KIAK limited to system operations (`boot`, `fail-secure`, etc.)
+- Verifiers check `cert.scope` includes `entry.op`
+
+**Validity Windows**:
+- LAK: `notAfter` = lease expiration (enforced)
+- KIAK: `notAfter` = null (open-ended, rotated periodically)
+- Verifiers check `cert.notBefore <= entry.timestamp <= cert.notAfter`
+
+### Residual Risk: LRK Compromise
+
+**Accepted risk**: LRK compromise enables forging background operation entries.
+
+**Justification**:
+- LRK compromise requires KMS code compromise (protected by SRI)
+- Background operations already trust KMS code
+- Alternative (no background logging) worse for auditability
+- Detection via periodic UAK-signed anchors
 
 ---
 
@@ -968,6 +1752,7 @@ export async function logAudit(
 - **Tamper-Evident Logging**: Schneier, "Applied Cryptography"
 - **Audit Trails**: NIST SP 800-92
 - **Transparency Logs**: Rekor, Certificate Transparency
+- **Delegation Architecture**: [V2 README](../README.md), [SessionKEK](./12-vapid-leases.md)
 
 ---
 

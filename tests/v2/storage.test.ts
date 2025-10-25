@@ -416,8 +416,9 @@ describe('storeAuditEntry and getAllAuditEntries', () => {
       requestId: 'req-1',
       previousHash: '',
       chainHash: 'hash1',
-      signature: 'sig1',
-      auditKeyId: 'audit-key-1',
+      signer: 'UAK' as const,
+      sig: 'sig1',
+      signerId: 'audit-key-1',
     };
 
     await storeAuditEntry(entry);
@@ -439,8 +440,9 @@ describe('storeAuditEntry and getAllAuditEntries', () => {
         requestId: 'req-3',
         previousHash: '',
         chainHash: 'hash3',
-        signature: 'sig3',
-        auditKeyId: 'audit-key',
+        signer: 'UAK' as const,
+        sig: 'sig3',
+        signerId: 'audit-key',
       },
       {
         kmsVersion: 2,
@@ -451,8 +453,9 @@ describe('storeAuditEntry and getAllAuditEntries', () => {
         requestId: 'req-1',
         previousHash: '',
         chainHash: 'hash1',
-        signature: 'sig1',
-        auditKeyId: 'audit-key',
+        signer: 'UAK' as const,
+        sig: 'sig1',
+        signerId: 'audit-key',
       },
       {
         kmsVersion: 2,
@@ -463,8 +466,9 @@ describe('storeAuditEntry and getAllAuditEntries', () => {
         requestId: 'req-2',
         previousHash: '',
         chainHash: 'hash2',
-        signature: 'sig2',
-        auditKeyId: 'audit-key',
+        signer: 'UAK' as const,
+        sig: 'sig2',
+        signerId: 'audit-key',
       },
     ];
 
@@ -499,8 +503,9 @@ describe('getLastAuditEntry', () => {
         requestId: 'req-1',
         previousHash: '',
         chainHash: 'hash1',
-        signature: 'sig1',
-        auditKeyId: 'audit-key',
+        signer: 'UAK' as const,
+        sig: 'sig1',
+        signerId: 'audit-key',
       },
       {
         kmsVersion: 2,
@@ -511,8 +516,9 @@ describe('getLastAuditEntry', () => {
         requestId: 'req-2',
         previousHash: 'hash1',
         chainHash: 'hash2',
-        signature: 'sig2',
-        auditKeyId: 'audit-key',
+        signer: 'UAK' as const,
+        sig: 'sig2',
+        signerId: 'audit-key',
       },
     ];
 
@@ -552,6 +558,10 @@ describe('storeLease and getLease', () => {
         burstSends: 50,
         sendsPerMinutePerEid: 5,
       },
+      wrappedLeaseKey: new ArrayBuffer(32),
+      wrappedLeaseKeyIV: new ArrayBuffer(12),
+      leaseSalt: new ArrayBuffer(32),
+      kid: 'test-kid-1',
     };
 
     await storeLease(lease);
@@ -588,6 +598,10 @@ describe('getUserLeases', () => {
           burstSends: 50,
           sendsPerMinutePerEid: 5,
         },
+        wrappedLeaseKey: new ArrayBuffer(32),
+        wrappedLeaseKeyIV: new ArrayBuffer(12),
+        leaseSalt: new ArrayBuffer(32),
+        kid: 'test-kid',
       },
       {
         leaseId: 'lease-2',
@@ -602,6 +616,10 @@ describe('getUserLeases', () => {
           burstSends: 50,
           sendsPerMinutePerEid: 5,
         },
+        wrappedLeaseKey: new ArrayBuffer(32),
+        wrappedLeaseKeyIV: new ArrayBuffer(12),
+        leaseSalt: new ArrayBuffer(32),
+        kid: 'test-kid',
       },
       {
         leaseId: 'lease-3',
@@ -616,6 +634,10 @@ describe('getUserLeases', () => {
           burstSends: 50,
           sendsPerMinutePerEid: 5,
         },
+        wrappedLeaseKey: new ArrayBuffer(32),
+        wrappedLeaseKeyIV: new ArrayBuffer(12),
+        leaseSalt: new ArrayBuffer(32),
+        kid: 'test-kid',
       },
     ];
 
@@ -648,6 +670,10 @@ describe('deleteLease', () => {
         burstSends: 50,
         sendsPerMinutePerEid: 5,
       },
+      wrappedLeaseKey: new ArrayBuffer(32),
+      wrappedLeaseKeyIV: new ArrayBuffer(12),
+      leaseSalt: new ArrayBuffer(32),
+      kid: 'test-kid-1',
     };
 
     await storeLease(lease);
@@ -685,6 +711,10 @@ describe('deleteExpiredLeases', () => {
         burstSends: 50,
         sendsPerMinutePerEid: 5,
       },
+      wrappedLeaseKey: new ArrayBuffer(32),
+      wrappedLeaseKeyIV: new ArrayBuffer(12),
+      leaseSalt: new ArrayBuffer(32),
+      kid: 'test-kid-1',
     };
 
     await storeLease(lease);
@@ -712,6 +742,10 @@ describe('deleteExpiredLeases', () => {
         burstSends: 50,
         sendsPerMinutePerEid: 5,
       },
+      wrappedLeaseKey: new ArrayBuffer(32),
+      wrappedLeaseKeyIV: new ArrayBuffer(12),
+      leaseSalt: new ArrayBuffer(32),
+      kid: 'test-kid',
     };
 
     const expiredLease2: LeaseRecord = {
@@ -727,6 +761,10 @@ describe('deleteExpiredLeases', () => {
         burstSends: 50,
         sendsPerMinutePerEid: 5,
       },
+      wrappedLeaseKey: new ArrayBuffer(32),
+      wrappedLeaseKeyIV: new ArrayBuffer(12),
+      leaseSalt: new ArrayBuffer(32),
+      kid: 'test-kid',
     };
 
     const validLease: LeaseRecord = {
@@ -742,6 +780,10 @@ describe('deleteExpiredLeases', () => {
         burstSends: 50,
         sendsPerMinutePerEid: 5,
       },
+      wrappedLeaseKey: new ArrayBuffer(32),
+      wrappedLeaseKeyIV: new ArrayBuffer(12),
+      leaseSalt: new ArrayBuffer(32),
+      kid: 'test-kid',
     };
 
     await storeLease(expiredLease1);

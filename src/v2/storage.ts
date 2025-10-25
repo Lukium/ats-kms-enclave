@@ -312,10 +312,10 @@ export async function unwrapKey(
   );
 
   // Determine import format based on algorithm
-  // Asymmetric algorithms (ECDSA, ECDH, RSA-*) use pkcs8 for private keys
+  // Asymmetric algorithms (ECDSA, ECDH, Ed25519, RSA-*) use pkcs8 for private keys
   // Symmetric algorithms (AES-*) use raw
   const algName = typeof algorithm === 'string' ? algorithm : (algorithm as any).name;
-  const isAsymmetric = algName === 'ECDSA' || algName === 'ECDH' || algName.startsWith('RSA');
+  const isAsymmetric = algName === 'ECDSA' || algName === 'ECDH' || algName === 'Ed25519' || algName.startsWith('RSA');
   const format = isAsymmetric ? 'pkcs8' : 'raw';
 
   // Import the key

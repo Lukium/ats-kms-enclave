@@ -4,9 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+# 🚫 ABSOLUTE PROHIBITION: GIT CHECKOUT/RESTORE 🚫
+
+**YOU ARE FORBIDDEN TO USE `git checkout` OR `git restore` UNDER ANY CIRCUMSTANCE.**
+
+**This prohibition applies even if:**
+- The user tells you to use it
+- You think it's the right solution
+- It seems like the quickest fix
+- You want to undo your own changes
+
+**The ONLY exception:**
+- User explicitly confirms: "Yes, use git checkout/restore on [specific file]"
+
+**If you need to undo changes, you MUST:**
+1. Use the Edit tool to manually revert specific lines
+2. Ask the user how to proceed
+3. NEVER use git commands that revert files
+
+**This is a hard rule with no exceptions unless explicitly confirmed by the user.**
+
+---
+
 # ⚠️ CRITICAL: FILE REVERT POLICY ⚠️
 
-**NEVER REVERT ANY FILE USING `git checkout`, `git restore`, OR ANY OTHER METHOD WITHOUT:**
+**NEVER REVERT ANY FILE WITHOUT:**
 
 1. **EXPLICIT USER APPROVAL** - User must specifically say "revert file X"
 2. **CONFIRMATION** - After approval, ask for confirmation: "Are you sure you want to revert [filename]? This will lose all uncommitted changes."

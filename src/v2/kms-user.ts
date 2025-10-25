@@ -134,6 +134,7 @@ export class KMSUser {
   private defaultTimeout: number;
   private isInitialized = false;
   private isReady = false;
+  private boundMessageHandler: ((event: MessageEvent) => void) | null = null;
 
   /**
    * Create a new KMS user API instance
@@ -177,8 +178,9 @@ export class KMSUser {
       this.iframe.sandbox.add('allow-scripts', 'allow-same-origin');
       this.iframe.allow = 'publickey-credentials-get; publickey-credentials-create';
 
-      // Setup message handler
-      window.addEventListener('message', this.handleMessage.bind(this));
+      // Setup message handler (store bound reference for later removal)
+      this.boundMessageHandler = this.handleMessage.bind(this);
+      window.addEventListener('message', this.boundMessageHandler);
 
       // Append to DOM
       document.body.appendChild(this.iframe);
@@ -223,6 +225,12 @@ export class KMSUser {
    * Cleanup iframe and resources (without rejecting pending requests)
    */
   private cleanup(): void {
+    // Remove message event listener
+    if (this.boundMessageHandler) {
+      window.removeEventListener('message', this.boundMessageHandler);
+      this.boundMessageHandler = null;
+    }
+
     // Remove iframe
     if (this.iframe && this.iframe.parentNode) {
       this.iframe.parentNode.removeChild(this.iframe);
@@ -287,7 +295,11 @@ export class KMSUser {
 
     // Resolve or reject
     if ('error' in response && response.error) {
-      pending.reject(new Error(response.error));
+      // Handle both string and object error formats
+      const errorMsg = typeof response.error === 'string'
+        ? response.error
+        : response.error.message || JSON.stringify(response.error);
+      pending.reject(new Error(errorMsg));
     } else {
       pending.resolve(response.result);
     }
@@ -645,7 +657,8 @@ export class KMSUser {
   }
 
   /**
-   * Issue VAPID JWT for endpoint
+   * Issue VAPID JWT for endpoint using lease authorization.
+   * No credentials required - the lease IS the authorization.
    *
    * @param params - Issuance parameters
    * @returns JWT result
@@ -653,10 +666,35 @@ export class KMSUser {
   async issueVAPIDJWT(params: {
     leaseId: string;
     endpoint: { url: string; aud: string; eid: string };
-    kid: string;
-    credentials: AuthCredentials;
+    kid?: string; // Optional - auto-detected if not provided (per V2 spec)
   }): Promise<JWTResult> {
     return this.sendRequest<JWTResult>('issueVAPIDJWT', params);
+  }
+
+  /**
+   * Issue multiple VAPID JWTs with staggered expirations (batch issuance for JWT stashing)
+   *
+   * This method generates N JWTs for the same endpoint with intelligent expiration staggering:
+   * - JWT[0]: expires at T+15min (900s)
+   * - JWT[1]: expires at T+24min (900s + 540s stagger)
+   * - JWT[2]: expires at T+33min (900s + 1080s stagger)
+   *
+   * The stagger interval is 60% of the JWT TTL (540s for 900s TTL), ensuring seamless
+   * rotation: when JWT[0] reaches 60% TTL, JWT[1] is already valid.
+   *
+   * @param params.leaseId - Lease ID
+   * @param params.endpoint - Push endpoint details
+   * @param params.count - Number of JWTs to issue (1-10, hard limit)
+   * @param params.kid - Optional VAPID key ID (auto-detected if not provided)
+   * @returns Array of JWT results with staggered expirations
+   */
+  async issueVAPIDJWTs(params: {
+    leaseId: string;
+    endpoint: { url: string; aud: string; eid: string };
+    count: number;
+    kid?: string;
+  }): Promise<JWTResult[]> {
+    return this.sendRequest<JWTResult[]>('issueVAPIDJWTs', params);
   }
 
   // ========================================================================
@@ -688,6 +726,15 @@ export class KMSUser {
    */
   async verifyAuditChain(): Promise<AuditVerificationResult> {
     return this.sendRequest<AuditVerificationResult>('verifyAuditChain', {});
+  }
+
+  /**
+   * Get audit log entries
+   *
+   * @returns All audit log entries
+   */
+  async getAuditLog(): Promise<{ entries: any[] }> {
+    return this.sendRequest<{ entries: any[] }>('getAuditLog', {});
   }
 
   /**

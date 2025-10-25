@@ -70,8 +70,12 @@ describe('initAuditLogger', () => {
     await initAuditLogger();
     const { publicKey: key1 } = await getAuditPublicKey();
 
-    // Reset and reinitialize
+    // Reset and reinitialize with fresh database (simulates new installation)
+    // KIAK persists in DB, so we need to clear it for a fresh key
     resetAuditLogger();
+    closeDB();
+    globalThis.indexedDB = new IDBFactory();
+    await initDB();
     await initAuditLogger();
     const { publicKey: key2 } = await getAuditPublicKey();
 
@@ -162,20 +166,20 @@ describe('logOperation', () => {
     expect(entries[0]!.chainHash).not.toBe(entries[1]!.chainHash);
   });
 
-  it('should include audit key ID in entries', async () => {
+  it('should include signer ID in entries', async () => {
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
 
     const entries = await getAllAuditEntries();
-    expect(entries[0]!.auditKeyId).toBeDefined();
-    expect(entries[0]!.auditKeyId.length).toBeGreaterThan(0);
+    expect(entries[0]!.signerId).toBeDefined();
+    expect(entries[0]!.signerId.length).toBeGreaterThan(0);
   });
 
   it('should include signature in entries', async () => {
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
 
     const entries = await getAllAuditEntries();
-    expect(entries[0]!.signature).toBeDefined();
-    expect(entries[0]!.signature.length).toBeGreaterThan(0);
+    expect(entries[0]!.sig).toBeDefined();
+    expect(entries[0]!.sig.length).toBeGreaterThan(0);
   });
 });
 
@@ -304,7 +308,11 @@ describe('resetAuditLogger', () => {
     await initAuditLogger();
     const { publicKey: key1 } = await getAuditPublicKey();
 
+    // Reset with fresh database to get new KIAK (simulates new installation)
     resetAuditLogger();
+    closeDB();
+    globalThis.indexedDB = new IDBFactory();
+    await initDB();
     await initAuditLogger();
     const { publicKey: key2 } = await getAuditPublicKey();
 

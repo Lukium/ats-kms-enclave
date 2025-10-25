@@ -398,7 +398,7 @@ export async function deriveMKEKFromMS(ms: Uint8Array): Promise<CryptoKey> {
     ikm,
     { name: 'AES-GCM', length: 256 },
     false,
-    ['encrypt', 'decrypt']
+    ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
   );
   return mkek;
 }
@@ -414,7 +414,7 @@ export async function deriveMKEKFromMS(ms: Uint8Array): Promise<CryptoKey> {
  */
 export async function withUnlock<T>(
   credentials: AuthCredentials,
-  operation: (mkek: CryptoKey) => Promise<T>
+  operation: (mkek: CryptoKey, ms: Uint8Array) => Promise<T>
 ): Promise<UnlockOperationResult<T>> {
   const start = Date.now();
   let ms: Uint8Array | null = null;
@@ -438,7 +438,7 @@ export async function withUnlock<T>(
     }
     ms = unlockResult.ms;
     const mkek = await deriveMKEKFromMS(ms);
-    const result = await operation(mkek);
+    const result = await operation(mkek, ms);
     const end = Date.now();
     return {
       result,

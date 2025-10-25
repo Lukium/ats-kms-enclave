@@ -455,9 +455,9 @@ Security Layers (Defense in Depth):
 │  │      privateKey,                                                    │    │
 │  │      new TextEncoder().encode(signatureInput)                       │    │
 │  │    )                                                                │    │
-│  │    // Modern browsers return P-1363 format (64 bytes = r || s)     │    │
-│  │    // JWS ES256 requires P-1363 format - typically no conversion   │    │
-│  │    // needed. DER↔P-1363 utilities available for edge cases.       │    │
+│  │    // Modern browsers return P-1363 format (64 bytes = r || s)      │    │
+│  │    // JWS ES256 requires P-1363 format - typically no conversion    │    │
+│  │    // needed. DER↔P-1363 utilities available for edge cases.        │    │
 │  │                                                                     │    │
 │  │ 4. Final JWT:                                                       │    │
 │  │    jwt = base64url(header) + '.' +                                  │    │
@@ -514,32 +514,59 @@ Security Layers (Defense in Depth):
 │                                                                             │
 │  V2 IMPROVEMENTS:                                                           │
 │    ✓ Sequence numbers (detect truncation)                                   │
-│    ✓ Non-extractable Ed25519 key (with export capability)                   │
-│    ✓ Key ID reference (instead of embedding pubkey in each entry)           │
+│    ✓ Delegated audit keys (UAK/LAK/KIAK) - see design/05-audit-log.md       │
+│    ✓ LRK (Lease Root Key) for wrapping LAK/KIAK                             │
+│    ✓ Key ID reference (signerId instead of embedding pubkey)                │
+│    ✓ Delegation certificates (UAK-signed authorization)                     │
 │    ✓ Explicit versioning (kmsVersion: 2)                                    │
+│                                                                             │
+│  AUDIT DELEGATION ARCHITECTURE:                                             │
+│    • UAK (User Audit Key): Signs user-authenticated operations              │
+│      - Wrapped under MS (requires user auth to unwrap)                      │
+│      - Used for: setup, lease creation, manual operations                   │
+│    • LAK (Lease Audit Key): Signs lease-scoped background operations        │
+│      - Wrapped under LRK (always available, no user auth needed)            │
+│      - Used for: JWT issuance, quota enforcement, lease expiration          │
+│      - Delegated via UAK-signed certificate, expires with lease             │
+│    • KIAK (KMS Instance Audit Key): Signs system events                     │
+│      - Wrapped under LRK (always available)                                 │
+│      - Used for: boot, fail-secure transitions, attestation changes         │
+│      - Delegated via UAK-signed certificate, rotates every 90 days          │
+│                                                                             │
+│  NOTE: See ./design/05-audit-log.md for complete delegation details         │
 │                                                                             │
 │  ═══════════════════════════════════════════════════════════════════════    │
 │                                                                             │
-│  AUDIT SIGNING KEY (Ed25519)                                                │
+│  AUDIT SIGNING KEYS (Ed25519)                                               │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │ Algorithm: Ed25519 (EdDSA with Curve25519)                          │    │
-│  │ Generation: Once per KMS initialization                             │    │
 │  │                                                                     │    │
-│  │ auditKeypair = crypto.subtle.generateKey(                           │    │
-│  │   { name: 'Ed25519' },                                              │    │
-│  │   true,  // V2: Can export for backup (with authentication)         │    │
-│  │   ['sign', 'verify']                                                │    │
-│  │ )                                                                   │    │
+│  │ UAK (User Audit Key):                                               │    │
+│  │   - Generated during setup alongside MS                             │    │
+│  │   - Wrapped with MKEK (derived from MS)                             │    │
+│  │   - Available only when user is authenticated                       │    │
 │  │                                                                     │    │
-│  │ Storage:                                                            │    │
-│  │   - Private key: Wrapped with MKEK (like VAPID)                     │    │
-│  │   - Public key: Stored in meta:audit-public-key                     │    │
-│  │   - Key ID: base64url(SHA-256(public key))                          │    │
+│  │ LAK (Lease Audit Key):                                              │    │
+│  │   - Generated during lease creation (per-lease)                     │    │
+│  │   - Wrapped with LRK (always available)                             │    │
+│  │   - Delegated via UAK-signed certificate                            │    │
+│  │   - Expires with lease (no mid-lease rotation)                      │    │
+│  │                                                                     │    │
+│  │ KIAK (KMS Instance Audit Key):                                      │    │
+│  │   - Generated once per installation                                 │    │
+│  │   - Wrapped with LRK (always available)                             │    │
+│  │   - Delegated via UAK-signed certificate                            │    │
+│  │   - Rotates every 90 days or on code/attestation change             │    │
+│  │                                                                     │    │
+│  │ LRK (Lease Root Key):                                               │    │
+│  │   - AES-GCM 256-bit key for wrapping LAK/KIAK                       │    │
+│  │   - Stored as non-extractable CryptoKey in IndexedDB                │    │
+│  │   - Always available (enables background audit logging)             │    │
 │  │                                                                     │    │
 │  │ Why Ed25519? Fast signing/verification, smaller sigs than ECDSA     │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
-│  AUDIT ENTRY STRUCTURE (V2)                                                 │
+│  AUDIT ENTRY STRUCTURE (V2 with Delegation)                                 │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │ {                                                                   │    │
 │  │   // V2: Versioning and sequence                                    │    │
@@ -548,12 +575,13 @@ Security Layers (Defense in Depth):
 │  │   timestamp: number,            // Unix timestamp (ms)              │    │
 │  │                                                                     │    │
 │  │   // Operation metadata                                             │    │
-│  │   op: string,                   // 'setup'|'unlock'|'generate'|...  │    │
+│  │   op: string,                   // 'vapid:issue'|'lease:create'|... │    │
 │  │   kid: string,                  // Key ID involved                  │    │
 │  │   requestId: string,            // RPC correlation                  │    │
 │  │   origin?: string,              // Caller origin (if provided)      │    │
+│  │   leaseId?: string,             // Present if lease-related         │    │
 │  │                                                                     │    │
-│  │   // Unlock timing (from withUnlock)                                │    │
+│  │   // Unlock timing (for user-authenticated operations)              │    │
 │  │   unlockTime?: number,          // When MS decrypted                │    │
 │  │   lockTime?: number,            // When MS cleared                  │    │
 │  │   duration?: number,            // MS lifetime in memory            │    │
@@ -561,20 +589,25 @@ Security Layers (Defense in Depth):
 │  │   // Operation-specific details                                     │    │
 │  │   details?: {                                                       │    │
 │  │     // For JWT signing                                              │    │
-│  │     aud?: string, sub?: string, exp?: number,                       │    │
-│  │     // For lease issuance                                           │    │
-│  │     leaseId?: string, quotaUsed?: number,                           │    │
-│  │     // For policy violations                                        │    │
-│  │     policyViolation?: string,                                       │    │
+│  │     aud?: string, endpoint?: string, jti?: string, exp?: number,    │    │
+│  │     // For lease operations                                         │    │
+│  │     userId?: string, ttlHours?: number, quotas?: object,            │    │
+│  │     // For system events                                            │    │
+│  │     version?: string, codeHash?: string, manifestHash?: string,     │    │
 │  │   },                                                                │    │
 │  │                                                                     │    │
 │  │   // Chain integrity                                                │    │
-│  │   previousHash: string,         // SHA-256 of previous entry (hex)  │    │
-│  │   chainHash: string,            // SHA-256(this + previous)         │    │
+│  │   previousHash: string,         // SHA-256 of previous chainHash    │    │
+│  │   chainHash: string,            // SHA-256 of this entry            │    │
 │  │                                                                     │    │
-│  │   // Ed25519 signature                                              │    │
-│  │   signature: string,            // Ed25519(chainHash) (base64url)   │    │
-│  │   auditKeyId: string            // V2: Key ID ref (not pubkey)      │    │
+│  │   // V2 DELEGATION SUPPORT                                          │    │
+│  │   signer: 'UAK' | 'LAK' | 'KIAK',  // Which audit key signed this  │    │
+│  │   signerId: string,             // base64url(SHA-256(publicKey))    │    │
+│  │   cert?: AuditDelegationCert,   // For LAK: delegation certificate  │    │
+│  │                                                                     │    │
+│  │   // Ed25519 signature (V2: renamed from 'signature')               │    │
+│  │   sig: string,                  // Ed25519(chainHash) (base64url)   │    │
+│  │   sigNew?: string               // For rotation: dual signatures    │    │
 │  │ }                                                                   │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
@@ -605,26 +638,43 @@ Security Layers (Defense in Depth):
 │  │   - Verification fails if seqNum jumps                              │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
-│  VERIFICATION PROCESS (V2)                                                  │
+│  VERIFICATION PROCESS (V2 with Delegation)                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ async function verifyAuditChain() {                                 │    │
+│  │ async function verifyAuditChain(entries, uakPubKey, kiakPubKey) {   │    │
 │  │   let previousHash = "0000...0000"                                  │    │
 │  │   let expectedSeqNum = 0                                            │    │
+│  │   const lakKeys = new Map()  // Cache LAK public keys              │    │
 │  │                                                                     │    │
 │  │   for (entry of allEntries) {                                       │    │
 │  │     // V2: Check sequence continuity                                │    │
 │  │     if (entry.seqNum !== expectedSeqNum) return false               │    │
 │  │                                                                     │    │
 │  │     // Verify chain hash                                            │    │
-│  │     computed = SHA-256(canonicalize(entry) + previousHash)          │    │
+│  │     computed = SHA-256(canonicalize(entry))                         │    │
 │  │     if (computed !== entry.chainHash) return false                  │    │
 │  │                                                                     │    │
-│  │     // Verify Ed25519 signature                                     │    │
-│  │     valid = Ed25519.verify(                                         │    │
-│  │       auditPublicKey,                                               │    │
-│  │       entry.signature,                                              │    │
-│  │       entry.chainHash                                               │    │
-│  │     )                                                               │    │
+│  │     // V2 DELEGATION: Verify based on signer type                   │    │
+│  │     switch (entry.signer) {                                         │    │
+│  │       case 'UAK':                                                   │    │
+│  │         valid = Ed25519.verify(uakPubKey, entry.sig, chainHash)     │    │
+│  │         break                                                       │    │
+│  │                                                                     │    │
+│  │       case 'LAK':                                                   │    │
+│  │         // Verify delegation cert signed by UAK                     │    │
+│  │         if (!verifyDelegationCert(entry.cert, uakPubKey))           │    │
+│  │           return false                                              │    │
+│  │         // Check cert scope & validity                              │    │
+│  │         if (!entry.cert.scope.includes(entry.op)) return false      │    │
+│  │         if (entry.timestamp > entry.cert.notAfter) return false     │    │
+│  │         // Verify entry signature with LAK                          │    │
+│  │         lakPubKey = importKey(entry.cert.delegatePub)               │    │
+│  │         valid = Ed25519.verify(lakPubKey, entry.sig, chainHash)     │    │
+│  │         break                                                       │    │
+│  │                                                                     │    │
+│  │       case 'KIAK':                                                  │    │
+│  │         valid = Ed25519.verify(kiakPubKey, entry.sig, chainHash)    │    │
+│  │         break                                                       │    │
+│  │     }                                                               │    │
 │  │     if (!valid) return false                                        │    │
 │  │                                                                     │    │
 │  │     previousHash = entry.chainHash                                  │    │

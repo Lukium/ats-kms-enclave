@@ -87,6 +87,134 @@ ES256 token bound to `{aud, eid}` with short expiration and private claims for t
 
 ---
 
+## SessionKEK Architecture
+
+### Context
+
+While per-operation authentication (see [03-unlock-context.md](./03-unlock-context.md)) provides strong security, **VAPID leases require operations without user interaction**:
+- **Push notifications**: May need JWTs when user is not present
+- **Background sync**: Operations triggered by Service Worker
+- **High-frequency operations**: Signing many JWTs in short time (e.g., batch notifications)
+
+The **SessionKEK (Session Key Encryption Key)** provides time-bounded authorization for these scenarios.
+
+### Pattern Overview
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ SessionKEK Pattern (Exception to Per-Operation Auth)         │
+├──────────────────────────────────────────────────────────────┤
+│ CREATE LEASE (user present, requires authentication):        │
+│  1. User authenticates → get MS                              │
+│  2. Generate random 32-byte Lease Salt (LS)                  │
+│  3. Derive SessionKEK:                                       │
+│     SessionKEK = HKDF(MS, LS, "ATS/KMS/SessionKEK/v1")       │
+│  4. Unwrap VAPID key with MKEK                               │
+│  5. Wrap VAPID key with SessionKEK → wrappedLeaseKey         │
+│  6. Store lease: {leaseId, wrappedLeaseKey, LS, exp, ...}    │
+│  7. Store SessionKEK in IndexedDB (CryptoKey persists)       │
+│  8. Cache SessionKEK in memory Map                           │
+│  9. Clear MS immediately                                     │
+│                                                              │
+│ ISSUE JWT (no user interaction, uses cached SessionKEK):     │
+│  1. Retrieve SessionKEK from cache or IndexedDB              │
+│  2. Check lease expiration                                   │
+│  3. Enforce quotas (tokens/hour, sends/min, etc.)            │
+│  4. Unwrap VAPID key using SessionKEK                        │
+│  5. Sign JWT                                                 │
+│  6. Clear unwrapped VAPID key                                │
+│  7. SessionKEK remains cached for next JWT                   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Security Properties
+
+**Time-bounded authorization**:
+- Lease has expiration time (typ. 8-12 hours, max 24 hours)
+- SessionKEK is useless after lease expires
+- User must re-authenticate to create new lease
+
+**Quota enforcement**:
+- Limits per hour: tokens issued
+- Limits per minute: sends, burst sends
+- Per-endpoint limits: prevents abuse of single subscription
+- Hard limits even if SessionKEK is compromised
+
+**Lease-scoped keys**:
+- Each lease has unique salt → unique SessionKEK
+- SessionKEK cannot be used for other leases
+- Revoking lease = SessionKEK becomes useless
+
+**Separation of concerns**:
+- **MS**: Never persisted, only during lease creation
+- **MKEK**: Derived from MS, used to wrap application keys in main storage
+- **SessionKEK**: Lease-scoped, derived per-lease, wraps copies of VAPID key
+- **VAPID key main copy**: Wrapped with MKEK (requires user auth to unwrap)
+- **VAPID key lease copy**: Wrapped with SessionKEK (no auth needed for JWT signing)
+
+### Key Derivation Formula
+
+```
+SessionKEK = HKDF-SHA256(
+  ikm = MS (32 bytes),
+  salt = LeaseSalt (32 bytes, random per lease),
+  info = "ATS/KMS/SessionKEK/v1" (UTF-8 encoded),
+  length = 256 bits
+)
+```
+
+**Properties**:
+- Unique per lease (different salt)
+- Cannot be derived without MS (requires user auth during lease creation)
+- Forward secrecy: Old SessionKEKs useless after lease expires
+
+### Trade-offs vs Per-Operation Auth
+
+| Aspect | Per-Operation Auth | SessionKEK Leases |
+|--------|-------------------|-------------------|
+| User interaction | Required per operation | Required per lease creation (8-12h) |
+| Security level | Highest (always auth) | High (time + quota bounded) |
+| Background ops | Not possible | Possible during lease |
+| Attack window | Milliseconds | Hours (lease duration) |
+| Suitable for | High-value operations | Push notifications, batch operations |
+
+### When to Use SessionKEK
+
+**Use SessionKEK leases when**:
+- Operations need to happen without user present (push notifications)
+- High frequency operations (many JWTs in short time)
+- Background Service Worker operations
+- User explicitly authorizes time-bounded access
+
+**Use per-operation auth when**:
+- High-value operations (key generation, account changes)
+- Infrequent operations
+- Operations user directly triggers
+- Maximum security required
+
+### Lease Lifecycle
+
+```
+1. CREATE LEASE (user auth required)
+   ↓
+2. ACTIVE (0-24 hours)
+   - Issue JWTs without auth
+   - Enforce quotas
+   - SessionKEK in cache + IndexedDB
+   ↓
+3. EXPIRE (automatic)
+   - SessionKEK still in storage but useless
+   - Quota checks fail (lease expired)
+   - Must create new lease
+   ↓
+4. CLEANUP (periodic)
+   - Delete expired lease records
+   - Delete expired SessionKEKs
+   - Clear from cache
+```
+
+---
+
 ## Architecture Diagram
 
 ```
@@ -1100,11 +1228,20 @@ interface Lease {
   scope: 'notifications:send';
   exp: number;              // Expiration timestamp (ms)
   quotas: Quotas;
+
+  // SessionKEK fields (enables JWT signing without user auth)
+  wrappedLeaseKey: ArrayBuffer;   // VAPID private key wrapped with SessionKEK
+  wrappedLeaseKeyIV: ArrayBuffer; // IV for AES-GCM encryption
+  leaseSalt: ArrayBuffer;         // Salt used to derive SessionKEK
+  kid: string;                    // VAPID key ID (JWK thumbprint)
+
   createdAt: number;
   updatedAt: number;
   revokedAt?: number;       // If revoked
 }
 ```
+
+**Note**: The SessionKEK itself is stored separately in the meta store at `sessionkek:{leaseId}` as a non-extractable CryptoKey.
 
 ### Quota State
 
@@ -1140,6 +1277,35 @@ interface WrappedVAPIDKey {
   lastUsedAt?: number;
 }
 ```
+
+**Note**: This is the main VAPID key storage. Requires user authentication (MKEK) to unwrap.
+
+### SessionKEK Storage
+
+**Table:** `sessionkek:{leaseId}`
+
+```typescript
+// Stored as CryptoKey object in IndexedDB meta store
+CryptoKey {
+  type: "secret",
+  algorithm: { name: "AES-GCM", length: 256 },
+  extractable: false,
+  usages: ["encrypt", "decrypt"]
+}
+```
+
+**Properties**:
+- Non-extractable (cannot be exported)
+- Persists across worker restarts
+- Cached in memory for performance
+- Automatically useless after lease expires
+- Deleted during periodic cleanup
+
+**Security**: Even if attacker gains access to IndexedDB, they can only:
+- Use SessionKEK to issue JWTs until lease expires (time-bounded)
+- Limited by quota enforcement (rate-bounded)
+- Cannot derive MS or MKEK from SessionKEK (one-way HKDF)
+- Cannot use SessionKEK for other leases (unique salt per lease)
 
 ### Audit Log (Tamper-Evident)
 
@@ -1278,7 +1444,131 @@ async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 }
 ```
 
-### VAPID Issue Handler
+### Lease Creation Handler (with SessionKEK generation)
+
+**File:** `src/leases.ts`
+
+```typescript
+import { withUnlock } from './unlock.js';
+import { unwrapKey, putMeta, getMeta } from './storage.js';
+import { deriveSessionKEK } from './crypto-utils.js';
+
+// Memory cache for SessionKEKs (performance optimization)
+const sessionKEKCache = new Map<string, CryptoKey>();
+
+/**
+ * Create a new VAPID lease with SessionKEK for background JWT issuance.
+ *
+ * REQUIRES USER AUTHENTICATION (withUnlock context).
+ */
+export async function handleLeaseCreate(params: {
+  userId: string;
+  subs: Endpoint[];
+  ttlHours: number;
+  credentials: AuthCredentials;
+}): Promise<{ leaseId: string; exp: number; quotas: Quotas }> {
+
+  // Validate TTL
+  if (params.ttlHours > 24) {
+    throw new Error('TTL exceeds maximum of 24 hours');
+  }
+
+  const leaseId = `lease-${crypto.randomUUID()}`;
+  const vapidKid = 'vapid'; // Key ID for main VAPID key
+
+  // 1. Authenticate and derive SessionKEK from MS
+  const result = await withUnlock(params.credentials, async (mkek, ms) => {
+    // 2. Generate unique lease salt (32 bytes)
+    const leaseSalt = crypto.getRandomValues(new Uint8Array(32));
+
+    // 3. Derive SessionKEK from MS using lease-specific salt
+    const sessionKEK = await deriveSessionKEK(ms, leaseSalt);
+    //   SessionKEK = HKDF-SHA256(
+    //     ikm = MS (32 bytes),
+    //     salt = leaseSalt (32 bytes),
+    //     info = "ATS/KMS/SessionKEK/v1",
+    //     length = 256 bits
+    //   )
+
+    // 4. Unwrap VAPID private key with MKEK (from main storage)
+    const vapidPrivateKey = await unwrapKey(
+      vapidKid,
+      mkek,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      ['sign']
+    );
+
+    // 5. Export VAPID key (for wrapping with SessionKEK)
+    const exportedKey = await crypto.subtle.exportKey('pkcs8', vapidPrivateKey);
+
+    // 6. Wrap VAPID key with SessionKEK (lease-specific copy)
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const wrappedLeaseKey = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      sessionKEK,
+      exportedKey
+    );
+
+    return { sessionKEK, wrappedLeaseKey, iv, leaseSalt };
+  });
+
+  // 7. Store SessionKEK in IndexedDB (persists across worker restarts)
+  await putMeta(`sessionkek:${leaseId}`, result.sessionKEK);
+
+  // 8. Cache SessionKEK in memory for performance
+  sessionKEKCache.set(leaseId, result.sessionKEK);
+
+  // 9. Create and store lease record
+  const exp = Date.now() + params.ttlHours * 3600 * 1000;
+  const quotas = {
+    tokensPerHour: 120,
+    sendsPerMinute: 60,
+    burstSends: 100,
+    sendsPerMinutePerEid: 30,
+  };
+
+  const lease: Lease = {
+    leaseId,
+    userId: params.userId,
+    subs: params.subs,
+    scope: 'notifications:send',
+    exp,
+    quotas,
+    wrappedLeaseKey: result.wrappedLeaseKey,
+    wrappedLeaseKeyIV: result.iv,
+    leaseSalt: result.leaseSalt,
+    kid: vapidKid,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  await putMeta(`lease:${leaseId}`, lease);
+
+  // 10. Initialize quota state
+  await putMeta(`quotas:${leaseId}`, {
+    leaseId,
+    tokensIssuedLastHour: [],
+    sendsLastMinute: [],
+    sendsPerEndpoint: new Map(),
+    currentlyInflight: 0,
+    violations: 0,
+    lastChecked: Date.now(),
+  });
+
+  // 11. Log lease creation
+  await logAudit({
+    op: 'lease.create',
+    leaseId,
+    userId: params.userId,
+    ttlHours: params.ttlHours,
+    exp,
+  });
+
+  return { leaseId, exp, quotas };
+}
+```
+
+### VAPID Issue Handler (uses SessionKEK, NO user auth)
 
 **File:** `src/vapid.ts`
 
@@ -1286,9 +1576,11 @@ async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 import { enforceQuotas } from './quotas.js';
 import { logAudit } from './audit.js';
 import { getLease } from './leases.js';
-import { unwrapKey, getWrappedKey } from './storage.js';
-import { withUnlock } from './unlock.js';
+import { getWrappedKey, getMeta } from './storage.js';
 import { buildVAPIDJWT } from './crypto-utils.js';
+
+// SessionKEK cache (imported from leases.ts or shared)
+declare const sessionKEKCache: Map<string, CryptoKey>;
 
 export async function handleVAPIDIssue(request: RPCRequest): Promise<RPCResponse> {
   const { leaseId, endpoint } = request.params;
@@ -1323,78 +1615,132 @@ export async function handleVAPIDIssue(request: RPCRequest): Promise<RPCResponse
     };
   }
 
-  // 4. Build JWT with unlock context
-  const result = await withUnlock(request.credentials, async (mkek) => {
-    // Unwrap VAPID private key
-    const vapidKey = await unwrapKey('vapid', mkek, { name: 'ECDSA', namedCurve: 'P-256' });
-
-    // Get public key
-    const wrappedMeta = await getWrappedKey('vapid');
-    const publicKeyRaw = wrappedMeta.publicKeyRaw;
-
-    // Build JWT claims (ES256, RFC 8292 VAPID)
-    const now = Math.floor(Date.now() / 1000);
-    const exp = now + (15 * 60); // 15 minutes (≤ 900s per spec)
-    const jti = crypto.randomUUID();
-
-    const claims = {
-      aud: endpoint.aud,                      // Push service origin (canonical)
-      sub: 'mailto:ops@allthe.services',      // Admin contact (RFC 8292)
-      iat: now,                               // Issued at (REQUIRED)
-      nbf: now,                               // Not before (optional, defaults to iat)
-      exp,                                    // Expires (REQUIRED, ≤ 15 min)
-      jti,                                    // Token ID (REQUIRED for anti-replay)
-      // Private claims (for attribution/telemetry)
-      eid: endpoint.eid,                      // Endpoint fingerprint
-      rid: request.params.relayId || undefined, // Relay connection id (optional)
-    };
-
-    // Sign JWT
-    const jwt = await buildVAPIDJWT(claims, vapidKey, wrappedMeta.kid);
-
-    return {
-      jwt,
-      vapidPublicKey: arrayBufferToBase64url(publicKeyRaw),
-      jti,
-      exp: exp * 1000, // Convert to ms
-    };
-  });
-
-  if (result.error) {
-    return { requestId: request.id, error: result.error };
+  // 4. Get SessionKEK (from cache or IndexedDB) - NO user auth needed!
+  let sessionKEK = sessionKEKCache.get(leaseId);
+  if (!sessionKEK) {
+    sessionKEK = await getMeta<CryptoKey>(`sessionkek:${leaseId}`);
+    if (!sessionKEK) {
+      return { requestId: request.id, error: 'SESSIONKEK_NOT_FOUND' };
+    }
+    sessionKEKCache.set(leaseId, sessionKEK);
   }
 
-  // 5. Update quota state
+  // 5. Unwrap VAPID key using SessionKEK (no user auth!)
+  const iv = new Uint8Array(lease.wrappedLeaseKeyIV);
+  const decryptedKeyData = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    sessionKEK,
+    lease.wrappedLeaseKey
+  );
+
+  // 6. Import as ECDSA private key
+  const vapidPrivateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    decryptedKeyData,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false, // not extractable
+    ['sign']
+  );
+
+  // 7. Build JWT claims (ES256, RFC 8292 VAPID)
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + (15 * 60); // 15 minutes (≤ 900s per spec)
+  const jti = crypto.randomUUID();
+
+  const claims = {
+    aud: endpoint.aud,                      // Push service origin (canonical)
+    sub: 'mailto:ops@allthe.services',      // Admin contact (RFC 8292)
+    iat: now,                               // Issued at (REQUIRED)
+    nbf: now,                               // Not before (optional, defaults to iat)
+    exp,                                    // Expires (REQUIRED, ≤ 15 min)
+    jti,                                    // Token ID (REQUIRED for anti-replay)
+    // Private claims (for attribution/telemetry)
+    eid: endpoint.eid,                      // Endpoint fingerprint
+    rid: request.params.relayId || undefined, // Relay connection id (optional)
+  };
+
+  // 8. Sign JWT
+  const jwt = await buildVAPIDJWT(claims, vapidPrivateKey, lease.kid);
+
+  // 9. Get public key for response
+  const wrappedMeta = await getWrappedKey('vapid');
+  const vapidPublicKey = arrayBufferToBase64url(wrappedMeta.publicKeyRaw);
+
+  // 10. Update quota state
   await updateQuotaState(leaseId, endpoint);
 
-  // 6. Log to audit
+  // 11. Log to audit
   await logAudit({
     op: 'vapid.issue',
     leaseId,
     userId: lease.userId,
     endpoint,
-    jti: result.data.jti,
+    jti,
     aud: endpoint.aud,
-    exp: result.data.exp,
-    kid: (await getWrappedKey('vapid')).kid,
+    exp: exp * 1000,
+    kid: lease.kid,
     rid: request.params.relayId,
     quotasSnapshot: await getQuotasSnapshot(leaseId, endpoint),
   });
 
-  // 7. Return JWT
+  // 12. Return JWT (private key garbage collected, SessionKEK remains cached)
   return {
     requestId: request.id,
-    data: result.data,
+    data: {
+      jwt,
+      vapidPublicKey,
+      jti,
+      exp: exp * 1000,
+    },
   };
 }
 ```
 
-### JWT Builder
+### Crypto Utilities
 
 **File:** `src/crypto-utils.ts`
 
 ```typescript
 import { derToP1363 } from './signature-conversion.js';
+
+/**
+ * Derive SessionKEK from Master Secret for a specific lease.
+ *
+ * SessionKEK = HKDF-SHA256(MS, leaseSalt, "ATS/KMS/SessionKEK/v1")
+ *
+ * @param ms Master Secret (32 bytes)
+ * @param leaseSalt Unique salt for this lease (32 bytes)
+ * @returns SessionKEK as non-extractable CryptoKey
+ */
+export async function deriveSessionKEK(
+  ms: Uint8Array,
+  leaseSalt: Uint8Array
+): Promise<CryptoKey> {
+  // Import MS as HKDF key material
+  const msKey = await crypto.subtle.importKey(
+    'raw',
+    ms,
+    { name: 'HKDF' },
+    false,
+    ['deriveKey']
+  );
+
+  // Derive SessionKEK using HKDF
+  const sessionKEK = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: leaseSalt,
+      info: new TextEncoder().encode('ATS/KMS/SessionKEK/v1'),
+    },
+    msKey,
+    { name: 'AES-GCM', length: 256 },
+    false, // not extractable
+    ['encrypt', 'decrypt']
+  );
+
+  return sessionKEK;
+}
 
 /**
  * Builds and signs a VAPID JWT (ES256).

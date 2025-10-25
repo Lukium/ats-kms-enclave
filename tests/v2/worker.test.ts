@@ -101,10 +101,12 @@ describe('setupPassphrase', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       success: true,
       enrollmentId: 'enrollment:passphrase:v2',
     });
+    expect(response.result.vapidPublicKey).toBeDefined();
+    expect(response.result.vapidKid).toBeDefined();
   });
 
   it('should reject short passphrase', async () => {
@@ -137,10 +139,12 @@ describe('setupPasskeyPRF', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       success: true,
       enrollmentId: 'enrollment:passkey-prf:v2',
     });
+    expect(response.result.vapidPublicKey).toBeDefined();
+    expect(response.result.vapidKid).toBeDefined();
   });
 
   it('should reject missing credentialId', async () => {
@@ -177,10 +181,12 @@ describe('setupPasskeyGate', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       success: true,
       enrollmentId: 'enrollment:passkey-gate:v2',
     });
+    expect(response.result.vapidPublicKey).toBeDefined();
+    expect(response.result.vapidKid).toBeDefined();
   });
 
   it('should reject missing credentialId', async () => {

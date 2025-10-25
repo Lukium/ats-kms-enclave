@@ -26,6 +26,7 @@
     "demo:phase-1-security-flow": "vite --config example/vite.config.phase-1-security-flow.ts",
     "demo:phase-1-iframe-isolation:parent": "vite --config example/vite.config.phase-1-iframe-isolation-parent.ts",
     "demo:phase-1-iframe-isolation:kms": "vite --config example/vite.config.phase-1-iframe-isolation-kms.ts",
+    "demo:phase-1-iframe-isolation:integration": "vite --config example/vite.config.phase-1-integration-tests.ts",
     "demo:enhanced": "vite --config example/vite.config.ts --open /index-enhanced.html"
   },
   "keywords": [

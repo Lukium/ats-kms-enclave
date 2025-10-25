@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Integration Tests - Phase 6</title>
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    .test-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .test-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+    }
+
+    .test-header h1 {
+      margin: 0 0 10px 0;
+      font-size: 32px;
+    }
+
+    .test-header p {
+      margin: 0;
+      opacity: 0.9;
+    }
+
+    .test-controls {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .test-controls button {
+      background: #48bb78;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .test-controls button:hover:not(:disabled) {
+      background: #38a169;
+    }
+
+    .test-controls button:disabled {
+      background: #cbd5e0;
+      cursor: not-allowed;
+    }
+
+    .test-output-container {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .test-section {
+      margin: 20px 0;
+      padding: 10px 0;
+      border-bottom: 2px solid #edf2f7;
+    }
+
+    .test-section h3 {
+      margin: 0;
+      color: #2d3748;
+      font-size: 18px;
+    }
+
+    .test-result {
+      margin: 10px 0;
+      padding: 12px;
+      border-radius: 6px;
+      border-left: 4px solid #48bb78;
+      background: #f0fff4;
+    }
+
+    .test-result.test-fail {
+      border-left-color: #f56565;
+      background: #fff5f5;
+    }
+
+    .test-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .test-header span:first-child {
+      font-weight: 600;
+      color: #2d3748;
+    }
+
+    .test-time {
+      font-size: 12px;
+      color: #718096;
+    }
+
+    .test-error {
+      background: #fed7d7;
+      border: 1px solid #fc8181;
+      border-radius: 4px;
+      padding: 8px;
+      margin-top: 8px;
+      font-size: 13px;
+      color: #742a2a;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .test-summary {
+      margin-top: 30px;
+      padding: 20px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .test-summary h2 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+    }
+
+    .test-summary p {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .summary-pass {
+      font-weight: 600;
+      font-size: 18px;
+      margin-top: 10px !important;
+    }
+
+    .summary-fail {
+      font-weight: 600;
+      font-size: 18px;
+      margin-top: 10px !important;
+      color: #fed7d7;
+    }
+
+    .info-box {
+      background: #ebf8ff;
+      border: 1px solid #90cdf4;
+      border-radius: 6px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+
+    .info-box h3 {
+      margin: 0 0 10px 0;
+      color: #2c5282;
+      font-size: 16px;
+    }
+
+    .info-box ul {
+      margin: 0;
+      padding-left: 20px;
+      color: #2c5282;
+    }
+
+    .info-box ul li {
+      margin: 5px 0;
+    }
+
+    .test-pass {
+      border-left-color: #48bb78;
+      background: #f0fff4;
+    }
+
+    /* Override test-header inside test-result */
+    .test-result .test-header {
+      background: none;
+      color: inherit;
+      padding: 0;
+      border-radius: 0;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <div class="test-header">
+      <h1>🧪 KMS Integration Tests</h1>
+      <p>Phase 6: End-to-End Testing (No Mocks, Real Crypto)</p>
+    </div>
+
+    <div class="info-box">
+      <h3>📋 Test Coverage</h3>
+      <ul>
+        <li><strong>Group 1:</strong> Setup and Unlock Flows (Passphrase, Passkey PRF, Passkey Gate)</li>
+        <li><strong>Group 2:</strong> Multi-Enrollment (Multiple auth methods for same MS)</li>
+        <li><strong>Group 3:</strong> VAPID Key Lifecycle (Generate, Sign JWT, Get Public Key)</li>
+        <li><strong>Group 4:</strong> VAPID Leases (Create, Issue JWT, Expiry, Revocation)</li>
+        <li><strong>Group 5:</strong> Audit Chain Integrity (Verification, Tamper Detection)</li>
+        <li><strong>Group 6:</strong> Error Scenarios (Invalid operations, Edge cases)</li>
+        <li><strong>Group 7:</strong> Performance Benchmarks (Operation timing)</li>
+      </ul>
+    </div>
+
+    <div class="test-controls">
+      <button id="run-tests">▶️ Run All Tests</button>
+      <p style="margin: 10px 0 0 0; color: #718096; font-size: 14px;">
+        Note: Some tests are skipped in automated mode (require user interaction)
+      </p>
+    </div>
+
+    <div class="test-output-container">
+      <h2 style="margin: 0 0 20px 0; color: #2d3748;">Test Results</h2>
+      <div id="test-output"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./integration-tests.ts"></script>
+</body>
+</html>

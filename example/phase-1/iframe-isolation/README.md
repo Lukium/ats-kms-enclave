@@ -664,6 +664,86 @@ The demo successfully demonstrates iframe isolation when:
 9. ✅ All communication via postMessage is auditable (DevTools Console)
 10. ✅ Visual UI clearly shows separation between parent and iframe
 
+## Phase 6: Integration Tests
+
+The demo now includes comprehensive **automated integration tests** that verify end-to-end functionality with real crypto (no mocks).
+
+### Running Integration Tests
+
+**Prerequisites**: Both parent (5176) and KMS (5177) servers must be running.
+
+**Terminal 1** - Start KMS iframe:
+```bash
+pnpm demo:phase-1-iframe-isolation:kms
+```
+
+**Terminal 2** - Start integration tests:
+```bash
+pnpm demo:phase-1-iframe-isolation:integration
+```
+
+The browser will automatically open to `http://localhost:5178/integration-tests.html` and you can click "Run All Tests" to execute the full test suite.
+
+### Test Coverage
+
+The integration test suite (`integration-tests.ts`) covers:
+
+**Group 1: Setup and Unlock Flows**
+- ✅ Passphrase setup and unlock
+- ✅ Wrong passphrase handling
+- ⏭️ Passkey PRF setup (requires user interaction - manual only)
+- ⏭️ Passkey Gate setup (requires user interaction - manual only)
+
+**Group 2: Multi-Enrollment** (Future)
+- ⏭️ Multiple auth methods for same master secret
+
+**Group 3: VAPID Key Lifecycle**
+- ✅ VAPID keypair generation
+- ✅ JWT signing with VAPID key
+- ✅ Get public key by kid
+- ✅ Error handling for non-existent kid
+
+**Group 4: VAPID Leases** (Phase 5 Feature)
+- ✅ Create VAPID lease
+- ✅ Issue JWT from lease
+- ✅ Lease expiry (short-duration test)
+- ✅ Lease revocation
+
+**Group 5: Audit Chain Integrity**
+- ✅ Verify audit chain after multiple operations
+
+**Group 6: Error Scenarios**
+- ✅ Operations before setup (should fail)
+- ✅ Concurrent operations (race conditions)
+- ✅ Reset KMS (cleanup)
+
+**Group 7: Performance Benchmarks**
+- ✅ VAPID generation timing (< 500ms)
+- ✅ JWT signing timing (< 200ms)
+- ✅ Passphrase setup timing (includes PBKDF2 calibration)
+
+### Test Architecture
+
+**Key Differences from Unit Tests:**
+- ❌ **No mocks** - Uses real KMSUser, KMSClient, Worker, and Storage
+- ✅ **Full message flow** - Tests actual postMessage communication across origins
+- ✅ **Real crypto** - Uses WebCrypto API, not mocked operations
+- ✅ **Cross-origin isolation** - Runs in the actual iframe isolation setup
+
+**Test Framework:**
+- Lightweight custom test runner (no external dependencies)
+- Visual test results in browser UI
+- Each test gets fresh KMS instance (setup → test → teardown)
+- Performance timing for benchmarking
+
+### Continuous Integration
+
+Integration tests complement the unit tests (255 tests with 94% coverage):
+- **Unit tests**: Fast, focused, mocked dependencies
+- **Integration tests**: Slower, end-to-end, real components
+
+Both are critical for ensuring KMS reliability and security.
+
 ## Future Enhancements
 
 After Phase 1, this demo can be extended to show:

@@ -601,7 +601,7 @@ Security Layers (Defense in Depth):
 │  │   chainHash: string,            // SHA-256 of this entry            │    │
 │  │                                                                     │    │
 │  │   // V2 DELEGATION SUPPORT                                          │    │
-│  │   signer: 'UAK' | 'LAK' | 'KIAK',  // Which audit key signed this  │    │
+│  │   signer: 'UAK' | 'LAK' | 'KIAK',  // Which audit key signed this   │    │
 │  │   signerId: string,             // base64url(SHA-256(publicKey))    │    │
 │  │   cert?: AuditDelegationCert,   // For LAK: delegation certificate  │    │
 │  │                                                                     │    │
@@ -643,7 +643,7 @@ Security Layers (Defense in Depth):
 │  │ async function verifyAuditChain(entries, uakPubKey, kiakPubKey) {   │    │
 │  │   let previousHash = "0000...0000"                                  │    │
 │  │   let expectedSeqNum = 0                                            │    │
-│  │   const lakKeys = new Map()  // Cache LAK public keys              │    │
+│  │   const lakKeys = new Map()  // Cache LAK public keys               │    │
 │  │                                                                     │    │
 │  │   for (entry of allEntries) {                                       │    │
 │  │     // V2: Check sequence continuity                                │    │

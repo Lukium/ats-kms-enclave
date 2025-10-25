@@ -200,15 +200,13 @@
     </div>
 
     <div class="info-box">
-      <h3>📋 Test Coverage</h3>
+      <h3>📋 Test Coverage (V2 API)</h3>
+      <p><strong>Note:</strong> V2 uses per-operation authentication - credentials passed to each operation (no session lock/unlock)</p>
       <ul>
-        <li><strong>Group 1:</strong> Setup and Unlock Flows (Passphrase, Passkey PRF, Passkey Gate)</li>
-        <li><strong>Group 2:</strong> Multi-Enrollment (Multiple auth methods for same MS)</li>
-        <li><strong>Group 3:</strong> VAPID Key Lifecycle (Generate, Sign JWT, Get Public Key)</li>
-        <li><strong>Group 4:</strong> VAPID Leases (Create, Issue JWT, Expiry, Revocation)</li>
-        <li><strong>Group 5:</strong> Audit Chain Integrity (Verification, Tamper Detection)</li>
-        <li><strong>Group 6:</strong> Error Scenarios (Invalid operations, Edge cases)</li>
-        <li><strong>Group 7:</strong> Performance Benchmarks (Operation timing)</li>
+        <li><strong>Group 1:</strong> Setup Operations (Passphrase setup)</li>
+        <li><strong>Group 2:</strong> VAPID Key Lifecycle (Generate, Sign JWT, Get Public Key, Wrong Credentials, Concurrent Ops)</li>
+        <li><strong>Group 3:</strong> Audit Chain Integrity (Verification after multiple operations)</li>
+        <li><strong>Group 4:</strong> Performance Benchmarks (VAPID gen, JWT sign, Setup timing)</li>
       </ul>
     </div>
 

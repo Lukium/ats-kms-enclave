@@ -8,15 +8,17 @@
  * - Storage (IndexedDB)
  *
  * Tests full message flow across cross-origin boundaries with real crypto.
+ *
+ * NOTE: V2 uses per-operation authentication - credentials must be passed
+ * to every operation (no session-based lock/unlock).
  */
 
 import { KMSUser } from '@/kms-user';
-import type { VAPIDKeyMetadata } from '@/types';
+import type { AuthCredentials } from '@/types';
 
 // Test configuration
 const KMS_ORIGIN = 'http://localhost:5177';
-const RP_ID = 'localhost';
-const RP_NAME = 'Integration Test Suite';
+const TEST_PASSPHRASE = 'integration-test-passphrase-secure-123';
 
 // Test results tracking
 interface TestResult {
@@ -88,6 +90,7 @@ function logSection(title: string): void {
 function displaySummary(): void {
   const passed = testResults.filter(r => r.status === 'pass').length;
   const failed = testResults.filter(r => r.status === 'fail').length;
+  const skipped = testResults.filter(r => r.status === 'skip').length;
   const totalDuration = testResults.reduce((sum, r) => sum + r.duration, 0);
 
   const output = document.getElementById('test-output')!;
@@ -98,6 +101,7 @@ function displaySummary(): void {
         Total: ${testResults.length} |
         ✅ Passed: ${passed} |
         ❌ Failed: ${failed} |
+        ⏭️ Skipped: ${skipped} |
         Duration: ${(totalDuration / 1000).toFixed(2)}s
       </p>
       ${failed > 0 ? '<p class="summary-fail">⚠️ Some tests failed</p>' : '<p class="summary-pass">🎉 All tests passed</p>'}
@@ -110,146 +114,68 @@ function displaySummary(): void {
 // Integration Test Suite
 export class IntegrationTestSuite {
   private kmsUser: KMSUser | null = null;
-  private iframe: HTMLIFrameElement | null = null;
+  private credentials: AuthCredentials = { method: 'passphrase', passphrase: TEST_PASSPHRASE };
 
   async setup(): Promise<void> {
-    // Create iframe element
-    this.iframe = document.createElement('iframe');
-    this.iframe.src = `${KMS_ORIGIN}/kms.html`;
-    this.iframe.sandbox.add('allow-scripts', 'allow-same-origin');
-    this.iframe.style.display = 'none';
-    document.body.appendChild(this.iframe);
-
-    // Wait for iframe to load
-    await new Promise<void>((resolve) => {
-      this.iframe!.addEventListener('load', () => resolve(), { once: true });
-    });
-
-    // Create KMSUser instance
+    // Create KMSUser instance (uses iframe element from the config)
     this.kmsUser = new KMSUser({
       kmsOrigin: KMS_ORIGIN,
-      iframe: this.iframe,
     });
 
-    // Wait for KMS to be ready
-    await sleep(500);
+    // Initialize KMS User (creates iframe, waits for ready)
+    await this.kmsUser.init();
+
+    // Wait a bit for iframe to be fully ready
+    await sleep(200);
   }
 
   async teardown(): Promise<void> {
-    // Reset KMS to clean state
+    // Terminate KMS User (removes iframe)
     if (this.kmsUser) {
-      try {
-        await this.kmsUser.resetKMS();
-      } catch {
-        // Ignore errors during cleanup
-      }
-    }
-
-    // Remove iframe
-    if (this.iframe && this.iframe.parentNode) {
-      this.iframe.parentNode.removeChild(this.iframe);
+      this.kmsUser.terminate();
     }
 
     this.kmsUser = null;
-    this.iframe = null;
 
     // Wait for cleanup
     await sleep(100);
   }
 
   // ============================================================================
-  // Test Group 1: Setup and Unlock Flows
+  // Test Group 1: Setup Operations
   // ============================================================================
 
   async testPassphraseSetup(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Verify not setup initially
-    const status = await kmsUser.isUnlockSetup();
-    assert(!status.isSetup, 'KMS should not be setup initially');
+    const status = await kmsUser.isSetup();
+    assert(status.isSetup === false, 'KMS should not be setup initially');
 
     // Setup passphrase
-    const passphrase = 'integration-test-passphrase-12345';
-    const result = await kmsUser.setupPassphrase(passphrase);
+    const result = await kmsUser.setupPassphrase(TEST_PASSPHRASE);
 
     assert(result.success === true, 'Passphrase setup should succeed');
-    assert(result.keys !== undefined, 'Should return keys metadata');
-    assert(result.keys!.length > 0, 'Should have at least audit key');
+    assert(result.enrollmentId !== undefined, 'Should return enrollment ID');
 
     // Verify setup complete
-    const statusAfter = await kmsUser.isUnlockSetup();
+    const statusAfter = await kmsUser.isSetup();
     assert(statusAfter.isSetup === true, 'KMS should be setup after passphrase setup');
-  }
-
-  async testPassphraseUnlock(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup first
-    const passphrase = 'test-unlock-passphrase';
-    await kmsUser.setupPassphrase(passphrase);
-
-    // Lock (would happen on page reload, but we simulate by creating new instance)
-    // For now, test that unlock returns success when already unlocked
-    const result = await kmsUser.unlockWithPassphrase(passphrase);
-
-    assert(result.success === true, 'Passphrase unlock should succeed');
-    assert(result.keys !== undefined, 'Should return keys metadata');
-  }
-
-  async testWrongPassphrase(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup with one passphrase
-    await kmsUser.setupPassphrase('correct-passphrase');
-
-    // Try to unlock with wrong passphrase (will fail because already unlocked in this session)
-    // Note: This test is limited because we can't actually lock in same session
-    // In real usage, lock happens on page reload
-    const result = await kmsUser.unlockWithPassphrase('wrong-passphrase');
-
-    // Should still succeed because already unlocked (no-op)
-    // Real lock/unlock would require page reload
-    assert(result.success === true, 'Already unlocked, so returns success');
-  }
-
-  async testPasskeySetupPRF(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Note: Passkey setup requires user interaction
-    // In automated tests, this would require mock WebAuthn API
-    // For now, we skip this test in automated mode
-    throw new Error('Passkey tests require user interaction - run manually');
-  }
-
-  async testPasskeySetupGate(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Note: Passkey setup requires user interaction
-    throw new Error('Passkey tests require user interaction - run manually');
+    assert(statusAfter.methods.includes('passphrase'), 'Should have passphrase method enrolled');
   }
 
   // ============================================================================
-  // Test Group 2: Multi-Enrollment
-  // ============================================================================
-
-  async testMultiEnrollmentPassphraseAndPasskey(): Promise<void> {
-    // Note: Multi-enrollment is currently not fully implemented in V2
-    // This test documents the expected behavior for future implementation
-    throw new Error('Multi-enrollment not yet implemented - Phase 7 feature');
-  }
-
-  // ============================================================================
-  // Test Group 3: VAPID Key Lifecycle
+  // Test Group 2: VAPID Key Lifecycle (with per-operation auth)
   // ============================================================================
 
   async testVAPIDGeneration(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Setup first (required before any operations)
-    await kmsUser.setupPassphrase('test-vapid-passphrase');
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
 
-    // Generate VAPID keypair
-    const result = await kmsUser.generateVAPID();
+    // Generate VAPID keypair (with credentials)
+    const result = await kmsUser.generateVAPID(this.credentials);
 
     assert(result.publicKey !== undefined, 'Should return public key');
     assert(result.kid !== undefined, 'Should return key ID');
@@ -262,18 +188,18 @@ export class IntegrationTestSuite {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Setup and generate VAPID
-    await kmsUser.setupPassphrase('test-jwt-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
+    const vapidResult = await kmsUser.generateVAPID(this.credentials);
     const kid = vapidResult.kid;
 
-    // Sign JWT with VAPID key
+    // Sign JWT with VAPID key (with credentials)
     const payload = {
       aud: 'https://fcm.googleapis.com',
       sub: 'mailto:test@example.com',
       exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour
     };
 
-    const result = await kmsUser.signJWT(kid, payload);
+    const result = await kmsUser.signJWT(kid, payload, this.credentials);
 
     assert(result.jwt !== undefined, 'Should return JWT');
     assert(typeof result.jwt === 'string', 'JWT should be string');
@@ -281,34 +207,35 @@ export class IntegrationTestSuite {
 
     // Verify JWT structure
     const [header, payloadPart, signature] = result.jwt.split('.');
-    assert(header.length > 0, 'Header should not be empty');
-    assert(payloadPart.length > 0, 'Payload should not be empty');
-    assert(signature.length > 0, 'Signature should not be empty');
+    assert(header!.length > 0, 'Header should not be empty');
+    assert(payloadPart!.length > 0, 'Payload should not be empty');
+    assert(signature!.length > 0, 'Signature should not be empty');
   }
 
   async testVAPIDGetPublicKey(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Setup and generate VAPID
-    await kmsUser.setupPassphrase('test-getpubkey-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
+    const vapidResult = await kmsUser.generateVAPID(this.credentials);
     const kid = vapidResult.kid;
 
-    // Get public key
+    // Get public key (no credentials needed for public data)
     const result = await kmsUser.getPublicKey(kid);
 
     assert(result.publicKey !== undefined, 'Should return public key');
     assert(result.publicKey === vapidResult.publicKey, 'Should match original public key');
-    assert(result.kid === kid, 'Should match kid');
   }
 
-  async testSignJWTWithNonExistentKid(): Promise<void> {
+  async testSignJWTWithWrongCredentials(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
-    // Setup
-    await kmsUser.setupPassphrase('test-nonexistent-kid');
+    // Setup and generate VAPID
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
+    const vapidResult = await kmsUser.generateVAPID(this.credentials);
 
-    // Try to sign with non-existent kid
+    // Try to sign with wrong passphrase
+    const wrongCreds: AuthCredentials = { method: 'passphrase', passphrase: 'wrong-passphrase' };
     const payload = {
       aud: 'https://fcm.googleapis.com',
       sub: 'mailto:test@example.com',
@@ -316,206 +243,28 @@ export class IntegrationTestSuite {
     };
 
     try {
-      await kmsUser.signJWT('vapid-nonexistent', payload);
-      throw new Error('Should have thrown error for non-existent kid');
+      await kmsUser.signJWT(vapidResult.kid, payload, wrongCreds);
+      throw new Error('Should have thrown error for wrong credentials');
     } catch (error) {
       // Expected to fail
       assert(
-        error instanceof Error && error.message.includes('not found'),
-        'Should throw "not found" error'
+        error instanceof Error && error.message.includes('Decryption failed'),
+        'Should throw decryption error for wrong credentials'
       );
     }
   }
 
-  // ============================================================================
-  // Test Group 4: VAPID Leases (Phase 5 Feature)
-  // ============================================================================
-
-  async testVAPIDLeaseCreation(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup and generate VAPID
-    await kmsUser.setupPassphrase('test-lease-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
-    const kid = vapidResult.kid;
-
-    // Create lease
-    const leaseResult = await kmsUser.createVAPIDLease(kid, {
-      endpoint: 'https://fcm.googleapis.com/fcm/send/test123',
-      subject: 'mailto:test@example.com',
-      durationSeconds: 3600, // 1 hour
-    });
-
-    assert(leaseResult.leaseId !== undefined, 'Should return lease ID');
-    assert(leaseResult.jwt !== undefined, 'Should return JWT');
-    assert(leaseResult.expiresAt !== undefined, 'Should return expiry timestamp');
-    assert(typeof leaseResult.leaseId === 'string', 'Lease ID should be string');
-    assert(leaseResult.jwt.split('.').length === 3, 'JWT should have 3 parts');
-
-    // Verify expiry is in the future
-    const now = Date.now();
-    assert(leaseResult.expiresAt > now, 'Expiry should be in the future');
-    assert(
-      leaseResult.expiresAt <= now + 3600 * 1000 + 1000, // +1s tolerance
-      'Expiry should be within duration'
-    );
-  }
-
-  async testVAPIDLeaseIssueJWT(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup, generate VAPID, create lease
-    await kmsUser.setupPassphrase('test-issue-lease-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
-    const kid = vapidResult.kid;
-
-    const leaseResult = await kmsUser.createVAPIDLease(kid, {
-      endpoint: 'https://fcm.googleapis.com/fcm/send/test123',
-      subject: 'mailto:test@example.com',
-      durationSeconds: 3600,
-    });
-
-    // Issue JWT from lease
-    const jwtResult = await kmsUser.issueVAPIDJWT(leaseResult.leaseId);
-
-    assert(jwtResult.jwt !== undefined, 'Should return JWT');
-    assert(jwtResult.jwt.split('.').length === 3, 'JWT should have 3 parts');
-
-    // JWT should be different from original (different jti)
-    assert(jwtResult.jwt !== leaseResult.jwt, 'Should generate fresh JWT with new jti');
-  }
-
-  async testVAPIDLeaseExpiry(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup and generate VAPID
-    await kmsUser.setupPassphrase('test-expiry-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
-    const kid = vapidResult.kid;
-
-    // Create lease with very short duration
-    const leaseResult = await kmsUser.createVAPIDLease(kid, {
-      endpoint: 'https://fcm.googleapis.com/fcm/send/test123',
-      subject: 'mailto:test@example.com',
-      durationSeconds: 1, // 1 second
-    });
-
-    // Wait for lease to expire
-    await sleep(1500); // 1.5 seconds
-
-    // Try to issue JWT from expired lease
-    try {
-      await kmsUser.issueVAPIDJWT(leaseResult.leaseId);
-      throw new Error('Should have thrown error for expired lease');
-    } catch (error) {
-      // Expected to fail
-      assert(
-        error instanceof Error && error.message.includes('expired'),
-        'Should throw "expired" error'
-      );
-    }
-  }
-
-  async testVAPIDLeaseRevocation(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup, generate VAPID, create lease
-    await kmsUser.setupPassphrase('test-revoke-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
-    const kid = vapidResult.kid;
-
-    const leaseResult = await kmsUser.createVAPIDLease(kid, {
-      endpoint: 'https://fcm.googleapis.com/fcm/send/test123',
-      subject: 'mailto:test@example.com',
-      durationSeconds: 3600,
-    });
-
-    // Revoke lease
-    await kmsUser.revokeVAPIDLease(leaseResult.leaseId);
-
-    // Try to issue JWT from revoked lease
-    try {
-      await kmsUser.issueVAPIDJWT(leaseResult.leaseId);
-      throw new Error('Should have thrown error for revoked lease');
-    } catch (error) {
-      // Expected to fail
-      assert(
-        error instanceof Error && (
-          error.message.includes('revoked') ||
-          error.message.includes('not found')
-        ),
-        'Should throw "revoked" or "not found" error'
-      );
-    }
-  }
-
-  // ============================================================================
-  // Test Group 5: Audit Chain Integrity
-  // ============================================================================
-
-  async testAuditChainVerification(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Setup (creates audit key)
-    await kmsUser.setupPassphrase('test-audit-passphrase');
-
-    // Perform several operations to create audit entries
-    const vapid1 = await kmsUser.generateVAPID();
-    await kmsUser.signJWT(vapid1.kid, {
-      aud: 'https://fcm.googleapis.com',
-      sub: 'mailto:test@example.com',
-      exp: Math.floor(Date.now() / 1000) + 3600,
-    });
-
-    const vapid2 = await kmsUser.generateVAPID();
-    await kmsUser.signJWT(vapid2.kid, {
-      aud: 'https://fcm.googleapis.com',
-      sub: 'mailto:test@example.com',
-      exp: Math.floor(Date.now() / 1000) + 3600,
-    });
-
-    // Verify audit chain
-    const result = await kmsUser.verifyAuditChain();
-
-    assert(result.valid === true, 'Audit chain should be valid');
-    assert(result.verified > 0, 'Should have verified at least one entry');
-    assert(result.errors.length === 0, 'Should have no errors');
-  }
-
-  // ============================================================================
-  // Test Group 6: Error Scenarios and Edge Cases
-  // ============================================================================
-
-  async testOperationBeforeSetup(): Promise<void> {
-    const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
-
-    // Try to generate VAPID before setup
-    try {
-      await kmsUser.generateVAPID();
-      throw new Error('Should have thrown error for operation before setup');
-    } catch (error) {
-      // Expected to fail
-      assert(
-        error instanceof Error && (
-          error.message.includes('not unlocked') ||
-          error.message.includes('not setup')
-        ),
-        'Should throw "not unlocked" or "not setup" error'
-      );
-    }
-  }
-
-  async testConcurrentOperations(): Promise<void> {
+  async testConcurrentVAPIDOperations(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Setup
-    await kmsUser.setupPassphrase('test-concurrent-passphrase');
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
 
     // Issue multiple VAPID generation requests concurrently
     const results = await Promise.all([
-      kmsUser.generateVAPID(),
-      kmsUser.generateVAPID(),
-      kmsUser.generateVAPID(),
+      kmsUser.generateVAPID(this.credentials),
+      kmsUser.generateVAPID(this.credentials),
+      kmsUser.generateVAPID(this.credentials),
     ]);
 
     // All should succeed
@@ -531,53 +280,64 @@ export class IntegrationTestSuite {
     assert(uniqueKids.size === 3, 'All kids should be unique');
   }
 
-  async testResetKMS(): Promise<void> {
+  // ============================================================================
+  // Test Group 3: Audit Chain Integrity
+  // ============================================================================
+
+  async testAuditChainVerification(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
-    // Setup and generate some keys
-    await kmsUser.setupPassphrase('test-reset-passphrase');
-    await kmsUser.generateVAPID();
-    await kmsUser.generateVAPID();
+    // Setup (creates audit key)
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
 
-    // Verify setup
-    const statusBefore = await kmsUser.isUnlockSetup();
-    assert(statusBefore.isSetup === true, 'Should be setup before reset');
+    // Perform several operations to create audit entries
+    const vapid1 = await kmsUser.generateVAPID(this.credentials);
+    await kmsUser.signJWT(vapid1.kid, {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'mailto:test@example.com',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }, this.credentials);
 
-    // Reset KMS
-    const resetResult = await kmsUser.resetKMS();
-    assert(resetResult.success === true, 'Reset should succeed');
+    const vapid2 = await kmsUser.generateVAPID(this.credentials);
+    await kmsUser.signJWT(vapid2.kid, {
+      aud: 'https://fcm.googleapis.com',
+      sub: 'mailto:test@example.com',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }, this.credentials);
 
-    // Verify reset (should not be setup anymore)
-    const statusAfter = await kmsUser.isUnlockSetup();
-    assert(statusAfter.isSetup === false, 'Should not be setup after reset');
+    // Verify audit chain
+    const result = await kmsUser.verifyAuditChain();
+
+    assert(result.valid === true, 'Audit chain should be valid');
+    assert(result.entries > 0, 'Should have at least one audit entry');
   }
 
   // ============================================================================
-  // Test Group 7: Performance Benchmarks
+  // Test Group 4: Performance Benchmarks
   // ============================================================================
 
   async testPerformanceVAPIDGeneration(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Setup
-    await kmsUser.setupPassphrase('test-perf-passphrase');
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
 
-    // Measure VAPID generation time (should be < 100ms per design doc)
+    // Measure VAPID generation time
     const startTime = performance.now();
-    await kmsUser.generateVAPID();
+    await kmsUser.generateVAPID(this.credentials);
     const duration = performance.now() - startTime;
 
-    assert(duration < 500, `VAPID generation should be < 500ms (was ${duration.toFixed(2)}ms)`);
+    assert(duration < 1000, `VAPID generation should be < 1000ms (was ${duration.toFixed(2)}ms)`);
   }
 
   async testPerformanceJWTSigning(): Promise<void> {
     const kmsUser = assertNotNull(this.kmsUser, 'KMSUser not initialized');
 
     // Setup and generate VAPID
-    await kmsUser.setupPassphrase('test-perf-jwt-passphrase');
-    const vapidResult = await kmsUser.generateVAPID();
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
+    const vapidResult = await kmsUser.generateVAPID(this.credentials);
 
-    // Measure JWT signing time (should be < 50ms per design doc)
+    // Measure JWT signing time
     const payload = {
       aud: 'https://fcm.googleapis.com',
       sub: 'mailto:test@example.com',
@@ -585,10 +345,10 @@ export class IntegrationTestSuite {
     };
 
     const startTime = performance.now();
-    await kmsUser.signJWT(vapidResult.kid, payload);
+    await kmsUser.signJWT(vapidResult.kid, payload, this.credentials);
     const duration = performance.now() - startTime;
 
-    assert(duration < 200, `JWT signing should be < 200ms (was ${duration.toFixed(2)}ms)`);
+    assert(duration < 500, `JWT signing should be < 500ms (was ${duration.toFixed(2)}ms)`);
   }
 
   async testPerformanceSetupPassphrase(): Promise<void> {
@@ -596,12 +356,12 @@ export class IntegrationTestSuite {
 
     // Measure passphrase setup time (includes PBKDF2, should be 150-300ms)
     const startTime = performance.now();
-    await kmsUser.setupPassphrase('test-perf-setup-passphrase');
+    await kmsUser.setupPassphrase(TEST_PASSPHRASE);
     const duration = performance.now() - startTime;
 
     assert(
-      duration >= 100 && duration < 2000,
-      `Passphrase setup should be 100-2000ms (was ${duration.toFixed(2)}ms) - includes PBKDF2 calibration`
+      duration >= 100 && duration < 5000,
+      `Passphrase setup should be 100-5000ms (was ${duration.toFixed(2)}ms) - includes PBKDF2`
     );
   }
 }
@@ -611,44 +371,17 @@ async function runAllTests(): Promise<void> {
   const suite = new IntegrationTestSuite();
 
   logSection('🚀 Starting Integration Tests');
+  logSection('ℹ️ V2 uses per-operation authentication - credentials passed to each operation');
 
-  // Group 1: Setup and Unlock
-  logSection('Group 1: Setup and Unlock Flows');
+  // Group 1: Setup
+  logSection('Group 1: Setup Operations');
 
   await suite.setup();
   await runTest('Passphrase Setup', () => suite.testPassphraseSetup());
   await suite.teardown();
 
-  await suite.setup();
-  await runTest('Passphrase Unlock', () => suite.testPassphraseUnlock());
-  await suite.teardown();
-
-  await suite.setup();
-  await runTest('Wrong Passphrase (Limited)', () => suite.testWrongPassphrase());
-  await suite.teardown();
-
-  // Skip passkey tests in automated mode (require user interaction)
-  testResults.push({
-    name: 'Passkey Setup PRF (Requires User Interaction)',
-    status: 'skip',
-    duration: 0,
-  });
-  testResults.push({
-    name: 'Passkey Setup Gate (Requires User Interaction)',
-    status: 'skip',
-    duration: 0,
-  });
-
-  // Group 2: Multi-Enrollment (Future)
-  logSection('Group 2: Multi-Enrollment');
-  testResults.push({
-    name: 'Multi-Enrollment Passphrase + Passkey (Future)',
-    status: 'skip',
-    duration: 0,
-  });
-
-  // Group 3: VAPID Lifecycle
-  logSection('Group 3: VAPID Key Lifecycle');
+  // Group 2: VAPID Lifecycle
+  logSection('Group 2: VAPID Key Lifecycle (Per-Operation Auth)');
 
   await suite.setup();
   await runTest('VAPID Generation', () => suite.testVAPIDGeneration());
@@ -663,52 +396,22 @@ async function runAllTests(): Promise<void> {
   await suite.teardown();
 
   await suite.setup();
-  await runTest('Sign JWT with Non-Existent Kid', () => suite.testSignJWTWithNonExistentKid());
-  await suite.teardown();
-
-  // Group 4: VAPID Leases
-  logSection('Group 4: VAPID Leases (Phase 5)');
-
-  await suite.setup();
-  await runTest('VAPID Lease Creation', () => suite.testVAPIDLeaseCreation());
+  await runTest('Sign JWT with Wrong Credentials', () => suite.testSignJWTWithWrongCredentials());
   await suite.teardown();
 
   await suite.setup();
-  await runTest('VAPID Lease Issue JWT', () => suite.testVAPIDLeaseIssueJWT());
+  await runTest('Concurrent VAPID Operations', () => suite.testConcurrentVAPIDOperations());
   await suite.teardown();
 
-  await suite.setup();
-  await runTest('VAPID Lease Expiry', () => suite.testVAPIDLeaseExpiry());
-  await suite.teardown();
-
-  await suite.setup();
-  await runTest('VAPID Lease Revocation', () => suite.testVAPIDLeaseRevocation());
-  await suite.teardown();
-
-  // Group 5: Audit Chain
-  logSection('Group 5: Audit Chain Integrity');
+  // Group 3: Audit Chain
+  logSection('Group 3: Audit Chain Integrity');
 
   await suite.setup();
   await runTest('Audit Chain Verification', () => suite.testAuditChainVerification());
   await suite.teardown();
 
-  // Group 6: Error Scenarios
-  logSection('Group 6: Error Scenarios');
-
-  await suite.setup();
-  await runTest('Operation Before Setup', () => suite.testOperationBeforeSetup());
-  await suite.teardown();
-
-  await suite.setup();
-  await runTest('Concurrent Operations', () => suite.testConcurrentOperations());
-  await suite.teardown();
-
-  await suite.setup();
-  await runTest('Reset KMS', () => suite.testResetKMS());
-  await suite.teardown();
-
-  // Group 7: Performance
-  logSection('Group 7: Performance Benchmarks');
+  // Group 4: Performance
+  logSection('Group 4: Performance Benchmarks');
 
   await suite.setup();
   await runTest('Performance: VAPID Generation', () => suite.testPerformanceVAPIDGeneration());

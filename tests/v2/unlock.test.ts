@@ -375,7 +375,7 @@ describe('deriveMKEKFromMS', () => {
 
     const mkek = await deriveMKEKFromMS(ms);
 
-    expect(mkek).toBeInstanceOf(CryptoKey);
+    // Check CryptoKey properties (no instanceof check for Node 18 compatibility)
     expect(mkek.type).toBe('secret');
     expect(mkek.algorithm.name).toBe('AES-GCM');
     expect((mkek.algorithm as AesKeyAlgorithm).length).toBe(256);

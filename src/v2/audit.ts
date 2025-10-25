@@ -97,10 +97,10 @@ export async function ensureAuditKey(mkek: CryptoKey): Promise<void> {
   // Check if UAK already exists in storage
   const existing = await getWrappedKey('audit-user');
 
-  if (existing) {
+  if (existing && existing.publicKeyRaw) {
     // Unwrap UAK and set as active signer
     const uak = await crypto.subtle.unwrapKey(
-      'jwk',
+      'pkcs8',
       existing.wrappedKey,
       mkek,
       { name: 'AES-GCM', iv: existing.iv, additionalData: existing.aad },
@@ -109,17 +109,20 @@ export async function ensureAuditKey(mkek: CryptoKey): Promise<void> {
       ['sign']
     );
 
-    const uakPub = await crypto.subtle.generateKey(
+    // Import public key
+    const uakPub = await crypto.subtle.importKey(
+      'raw',
+      existing.publicKeyRaw,
       { name: 'Ed25519' },
-      true,
+      false,
       ['verify']
     );
-    const publicKeyRaw = await crypto.subtle.exportKey('raw', uakPub.publicKey);
-    const keyId = await computeKeyId(existing.publicKeyRaw || publicKeyRaw);
+
+    const keyId = await computeKeyId(existing.publicKeyRaw);
 
     activeSigner = {
       type: 'UAK',
-      keyPair: { privateKey: uak, publicKey: uakPub.publicKey },
+      keyPair: { privateKey: uak, publicKey: uakPub },
       keyId,
     };
     return;
@@ -225,7 +228,7 @@ export async function generateLAK(
   });
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const wrappedKey = await crypto.subtle.wrapKey(
-    'jwk',
+    'pkcs8',
     lak.privateKey,
     lrk,
     { name: 'AES-GCM', iv, additionalData: aad }
@@ -276,7 +279,7 @@ export async function loadLAK(leaseId: string, cert: AuditDelegationCert): Promi
   // Unwrap LAK using LRK
   const lrk = await ensureLRK();
   const lak = await crypto.subtle.unwrapKey(
-    'jwk',
+    'pkcs8',
     lakRecord.wrappedKey,
     lrk,
     { name: 'AES-GCM', iv: lakRecord.iv, additionalData: lakRecord.aad },
@@ -316,11 +319,11 @@ export async function ensureKIAK(): Promise<void> {
   // Check if KIAK already exists
   const existing = await getWrappedKey('audit-instance');
 
-  if (existing) {
+  if (existing && existing.publicKeyRaw) {
     // Unwrap KIAK
     const lrk = await ensureLRK();
     const kiak = await crypto.subtle.unwrapKey(
-      'jwk',
+      'pkcs8',
       existing.wrappedKey,
       lrk,
       { name: 'AES-GCM', iv: existing.iv, additionalData: existing.aad },
@@ -332,13 +335,13 @@ export async function ensureKIAK(): Promise<void> {
     // Import public key
     const kiakPub = await crypto.subtle.importKey(
       'raw',
-      existing.publicKeyRaw!,
+      existing.publicKeyRaw,
       { name: 'Ed25519' },
       false,
       ['verify']
     );
 
-    const keyId = await computeKeyId(existing.publicKeyRaw!);
+    const keyId = await computeKeyId(existing.publicKeyRaw);
 
     activeSigner = {
       type: 'KIAK',
@@ -370,13 +373,39 @@ export async function ensureKIAK(): Promise<void> {
     { alg: 'EdDSA', purpose: 'audit-instance', publicKeyRaw }
   );
 
+  // Retrieve wrapped key record
+  const wrappedKeyRecord = await getWrappedKey('audit-instance');
+  if (!wrappedKeyRecord) {
+    throw new Error('Failed to retrieve wrapped KIAK after storage');
+  }
+
+  // Unwrap KIAK to get non-extractable version (same as existing path)
+  const kiakNonExtractable = await crypto.subtle.unwrapKey(
+    'pkcs8',
+    wrappedKeyRecord.wrappedKey,
+    lrk,
+    { name: 'AES-GCM', iv: wrappedKeyRecord.iv, additionalData: wrappedKeyRecord.aad },
+    { name: 'Ed25519' },
+    false, // non-extractable
+    ['sign']
+  );
+
+  // Import public key
+  const kiakPub = await crypto.subtle.importKey(
+    'raw',
+    publicKeyRaw,
+    { name: 'Ed25519' },
+    false,
+    ['verify']
+  );
+
   // Compute key ID
   const keyId = await computeKeyId(publicKeyRaw);
 
-  // Set KIAK as active signer
+  // Set KIAK as active signer (non-extractable keypair)
   activeSigner = {
     type: 'KIAK',
-    keyPair: kiak,
+    keyPair: { privateKey: kiakNonExtractable, publicKey: kiakPub },
     keyId,
   };
 }

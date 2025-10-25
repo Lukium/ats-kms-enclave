@@ -1,5 +1,9 @@
 name: CI
 
+# V2-only CI workflow
+# Configuration files (tsconfig.json, vitest.config.ts, eslint.config.js)
+# exclude v1 files, ensuring all jobs only check V2 code
+
 on:
   push:
     branches: [main, develop]
@@ -8,7 +12,7 @@ on:
 
 jobs:
   test:
-    name: Test & Coverage
+    name: Test & Coverage (V2 only)
     runs-on: ubuntu-latest
 
     strategy:
@@ -33,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run tests with coverage (enforces 100%)
+      - name: Run tests with coverage (V2 only, enforces 80%)
         run: pnpm test:coverage
 
       - name: Upload coverage to Codecov
@@ -44,7 +48,7 @@ jobs:
           name: codecov-${{ matrix.node-version }}
 
   lint:
-    name: Lint
+    name: Lint (V2 only)
     runs-on: ubuntu-latest
 
     steps:
@@ -65,11 +69,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run linting
+      - name: Run linting (V2 only)
         run: pnpm lint
 
   typecheck:
-    name: Type Check
+    name: Type Check (V2 only)
     runs-on: ubuntu-latest
 
     steps:
@@ -90,7 +94,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run type check
+      - name: Run type check (V2 only)
         run: pnpm typecheck
 
   build:

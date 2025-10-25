@@ -67,7 +67,7 @@ async function ensureLRK(): Promise<CryptoKey> {
     lrk = await crypto.subtle.generateKey(
       { name: 'AES-GCM', length: 256 },
       false, // non-extractable
-      ['wrapKey', 'unwrapKey']
+      ['wrapKey', 'unwrapKey', 'encrypt', 'decrypt']
     ) as CryptoKey;
 
     await putMeta('LRK', lrk);
@@ -357,7 +357,7 @@ export async function ensureKIAK(): Promise<void> {
   const kiak = await crypto.subtle.generateKey(
     { name: 'Ed25519' },
     true, // temporarily extractable for wrapping
-    ['sign', 'verify']
+    ['sign']
   );
 
   // Export public key

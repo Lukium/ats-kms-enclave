@@ -424,15 +424,16 @@ export async function ensureKIAK(): Promise<void> {
  * Based on: 05-audit-log.md § "Logging Function"
  *
  * @param op - Audit operation details
+ * @returns The audit entry that was logged
  */
-export async function logOperation(op: AuditOperation): Promise<void> {
+export async function logOperation(op: AuditOperation): Promise<AuditEntryV2> {
   const callId = crypto.randomUUID().substring(0, 8);
   console.log(`[Audit] ➤ CALL ${callId}: logOperation(op=${op.op}, requestId=${op.requestId})`);
 
-  // Create a wrapper that will hold both success and error results
-  let resolver: () => void;
+  // Create a wrapper that will hold the audit entry or error
+  let resolver: (entry: AuditEntryV2) => void;
   let rejecter: (err: Error) => void;
-  const resultPromise = new Promise<void>((resolve, reject) => {
+  const resultPromise = new Promise<AuditEntryV2>((resolve, reject) => {
     resolver = resolve;
     rejecter = reject;
   });
@@ -515,7 +516,7 @@ export async function logOperation(op: AuditOperation): Promise<void> {
       console.log(`[Audit] 💾 WRITE ${callId}: Calling storeAuditEntry(seqNum=${mySeqNum})`);
       await storeAuditEntry(entry);
       console.log(`[Audit] ✅ STORED ${callId}: Entry written to DB, resolving promise`);
-      resolver!();
+      resolver!(entry);
     } catch (err) {
       console.log(`[Audit] ❌ ERROR ${callId}: ${err}`);
       rejecter!(err as Error);

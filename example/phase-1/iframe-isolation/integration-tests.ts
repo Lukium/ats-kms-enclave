@@ -146,45 +146,48 @@ async function displayLatestAuditEntry(kmsUser: KMSUser): Promise<void> {
     }
 
     const latestEntry = auditLog.entries[auditLog.entries.length - 1];
-
-    // Determine color based on signer type
-    let signerColor = '#4299e1'; // blue for UAK
-    if (latestEntry.signer === 'LAK') {
-      signerColor = '#48bb78'; // green for LAK
-    } else if (latestEntry.signer === 'KIAK') {
-      signerColor = '#ed8936'; // orange for KIAK
-    }
-
-    const output = document.getElementById('test-output')!;
-
-    // Find the most recent cards-container and add the audit card to it
-    const containers = output.querySelectorAll('.cards-container');
-    if (containers.length === 0) {
-      return; // No containers yet
-    }
-
-    const lastContainer = containers[containers.length - 1];
-
-    const auditCardHtml = `
-      <div class="audit-card" style="border-left-color: ${signerColor};">
-        <div class="artifact-title">🔐 Audit Entry #${latestEntry.seqNum} (${latestEntry.signer})</div>
-        <div class="artifact-data">
-          <div><strong>Signer:</strong> ${latestEntry.signer}</div>
-          <div><strong>Operation:</strong> ${latestEntry.op}</div>
-          <div><strong>Request ID:</strong> ${latestEntry.requestId}</div>
-          ${latestEntry.leaseId ? `<div><strong>Lease ID:</strong> ${latestEntry.leaseId}</div>` : ''}
-          <div><strong>Chain Hash:</strong> ${latestEntry.chainHash}</div>
-          <div><strong>Signature:</strong> ${latestEntry.sig}</div>
-          ${latestEntry.cert ? `<div><strong>Has Delegation Cert:</strong> Yes (${latestEntry.cert.signerKind})</div>` : ''}
-        </div>
-      </div>
-    `;
-
-    lastContainer.innerHTML += auditCardHtml;
+    displayAuditEntry(latestEntry);
   } catch (error) {
     console.error('Failed to fetch audit entry:', error);
     // Don't display error - audit system might not be ready yet
   }
+}
+
+function displayAuditEntry(entry: any): void {
+  // Determine color based on signer type
+  let signerColor = '#4299e1'; // blue for UAK
+  if (entry.signer === 'LAK') {
+    signerColor = '#48bb78'; // green for LAK
+  } else if (entry.signer === 'KIAK') {
+    signerColor = '#ed8936'; // orange for KIAK
+  }
+
+  const output = document.getElementById('test-output')!;
+
+  // Find the most recent cards-container and add the audit card to it
+  const containers = output.querySelectorAll('.cards-container');
+  if (containers.length === 0) {
+    return; // No containers yet
+  }
+
+  const lastContainer = containers[containers.length - 1];
+
+  const auditCardHtml = `
+    <div class="audit-card" style="border-left-color: ${signerColor};">
+      <div class="artifact-title">🔐 Audit Entry #${entry.seqNum} (${entry.signer})</div>
+      <div class="artifact-data">
+        <div><strong>Signer:</strong> ${entry.signer}</div>
+        <div><strong>Operation:</strong> ${entry.op}</div>
+        <div><strong>Request ID:</strong> ${entry.requestId}</div>
+        ${entry.leaseId ? `<div><strong>Lease ID:</strong> ${entry.leaseId}</div>` : ''}
+        <div><strong>Chain Hash:</strong> ${entry.chainHash}</div>
+        <div><strong>Signature:</strong> ${entry.sig}</div>
+        ${entry.cert ? `<div><strong>Has Delegation Cert:</strong> Yes (${entry.cert.signerKind})</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  lastContainer.innerHTML += auditCardHtml;
 }
 
 function displaySummary(): void {
@@ -326,8 +329,13 @@ export class IntegrationTestSuite {
         eid: 'ep-1',
       },
     });
-    displayArtifact('VAPID JWT Issued', result);
-    await displayLatestAuditEntry(kmsUser); // Show LAK-signed audit entry (JWT issuance uses LAK, not UAK!)
+
+    // Display JWT data (exclude auditEntry from artifact display)
+    const { auditEntry, ...jwtData } = result;
+    displayArtifact('VAPID JWT Issued', jwtData);
+
+    // Display audit entry for this JWT (LAK-signed)
+    displayAuditEntry(auditEntry);
 
     assert(result.jwt !== undefined, 'Should return JWT');
     assert(typeof result.jwt === 'string', 'JWT should be string');
@@ -349,7 +357,7 @@ export class IntegrationTestSuite {
     // Get public key (no credentials needed for public data)
     const result = await kmsUser.getPublicKey(kid);
     displayArtifact('VAPID Public Key Retrieved', result);
-    await displayLatestAuditEntry(kmsUser); // Show audit entry for getPublicKey operation
+    // Note: getPublicKey does not create an audit entry (read-only operation)
 
     assert(result.publicKey !== undefined, 'Should return public key');
     assert(typeof result.publicKey === 'string', 'Public key should be string');
@@ -387,7 +395,7 @@ export class IntegrationTestSuite {
         error: error instanceof Error ? error.message : String(error),
         expectedBehavior: 'Operation correctly rejected due to invalid credentials',
       });
-      await displayLatestAuditEntry(kmsUser); // Show audit entry if failed auth was logged
+      // Note: Failed authentication does not create an audit entry (operation was rejected)
 
       // V2 uses KCV for fast-fail, so error is "Invalid passphrase" not "Decryption failed"
       assert(
@@ -422,9 +430,10 @@ export class IntegrationTestSuite {
       count: 3,
     });
 
-    // Display all results with expiration times (show full JWT, not truncated)
+    // Display all results with expiration times and audit entries
     const now = new Date();
-    results.forEach((result, i) => {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
       const expDate = new Date(result.exp * 1000);
       const ttlSeconds = Math.floor((expDate.getTime() - now.getTime()) / 1000);
 
@@ -435,7 +444,10 @@ export class IntegrationTestSuite {
         issuedAt: now.toLocaleTimeString(),
         jwt: result.jwt, // Show full JWT (not truncated)
       });
-    });
+
+      // Display audit entry for this JWT (LAK-signed, sequential)
+      displayAuditEntry(result.auditEntry);
+    }
 
     // Verify all JWTs succeeded
     assert(results.length === 3, 'Should have 3 JWTs');

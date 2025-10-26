@@ -860,7 +860,7 @@ async function handleIssueVAPIDJWT(
     exp?: number; // Optional - for staggered expirations
   },
   requestId: string
-): Promise<{ jwt: string; jti: string; exp: number }> {
+): Promise<{ jwt: string; jti: string; exp: number; auditEntry: AuditEntryV2 }> {
   const { leaseId, endpoint } = params;
   let { kid } = params;
 
@@ -981,7 +981,7 @@ async function handleIssueVAPIDJWT(
   // Final JWT
   const jwt = `${headerB64}.${payloadB64}.${signatureB64}`;
 
-  await logOperation({
+  const auditEntry = await logOperation({
     op: 'sign',
     kid: lease.kid,
     requestId,
@@ -994,7 +994,7 @@ async function handleIssueVAPIDJWT(
     },
   });
 
-  return { jwt, jti, exp };
+  return { jwt, jti, exp, auditEntry };
 }
 
 /**
@@ -1022,7 +1022,7 @@ async function handleIssueVAPIDJWTs(
     kid?: string;
   },
   requestId: string
-): Promise<Array<{ jwt: string; jti: string; exp: number }>> {
+): Promise<Array<{ jwt: string; jti: string; exp: number; auditEntry: AuditEntryV2 }>> {
   const { leaseId, endpoint, count, kid } = params;
 
   // Validate count
@@ -1037,7 +1037,7 @@ async function handleIssueVAPIDJWTs(
 
   // Generate JWTs sequentially by calling handleIssueVAPIDJWT
   // This ensures audit logging is properly serialized
-  const results: Array<{ jwt: string; jti: string; exp: number }> = [];
+  const results: Array<{ jwt: string; jti: string; exp: number; auditEntry: AuditEntryV2 }> = [];
 
   for (let i = 0; i < count; i++) {
     // Calculate staggered expiration for this JWT
@@ -1050,7 +1050,7 @@ async function handleIssueVAPIDJWTs(
       {
         leaseId,
         endpoint,
-        kid,
+        ...(kid !== undefined && { kid }),
         jti,
         exp,
       },

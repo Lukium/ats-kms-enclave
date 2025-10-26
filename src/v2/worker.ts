@@ -1223,9 +1223,9 @@ async function handleRemoveEnrollment(
         },
       });
 
-      console.log('[KMS Worker] Initialized with KIAK, audit chain started');
+      // KIAK initialized, audit chain started
     } else {
-      console.log('[KMS Worker] Initialized (audit chain already exists, skipping init event)');
+      // Audit chain already exists, skipping init event
     }
   } catch (err) {
     // Initialization may fail in test environments where Worker/IndexedDB aren't fully set up

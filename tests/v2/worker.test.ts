@@ -700,6 +700,9 @@ describe('getPublicKey', () => {
 
 describe('getAuditPublicKey', () => {
   it('should retrieve audit public key', async () => {
+    // Setup KMS first to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'audit-key-test' }));
+
     const request = createRequest('getAuditPublicKey');
     const response = await handleMessage(request);
 

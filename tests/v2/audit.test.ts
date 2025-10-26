@@ -17,15 +17,25 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
-  initAuditLogger,
   logOperation,
   verifyAuditChain,
   getAuditPublicKey,
   exportAuditKey,
   resetAuditLogger,
+  ensureKIAK,
 } from '@/v2/audit';
-import { initDB, closeDB, getAllAuditEntries } from '@/v2/storage';
+import { initDB, closeDB, getAllAuditEntries, getWrappedKey } from '@/v2/storage';
 import type { AuditOperation } from '@/v2/types';
+import { handleMessage } from '@/v2/worker';
+
+// Helper function to create worker requests
+function createRequest(method: string, params: unknown = {}): { id: string; method: string; params: unknown } {
+  return {
+    id: crypto.randomUUID(),
+    method,
+    params,
+  };
+}
 
 // ============================================================================
 // Test Setup
@@ -46,29 +56,40 @@ afterEach(() => {
 // Audit Logger Initialization Tests
 // ============================================================================
 
-describe('initAuditLogger', () => {
-  it('should initialize audit logger with Ed25519 key pair', async () => {
-    await initAuditLogger();
+describe('ensureKIAK', () => {
+  it('should initialize KIAK with Ed25519 key pair', async () => {
+    await ensureKIAK();
 
-    // Verify we can get the public key
-    const { publicKey } = await getAuditPublicKey();
-    expect(publicKey).toBeDefined();
-    expect(publicKey.length).toBeGreaterThan(0);
+    // Verify KIAK was stored
+    const kiakRecord = await getWrappedKey('audit-instance');
+    expect(kiakRecord).toBeDefined();
+    expect(kiakRecord?.publicKeyRaw).toBeDefined();
+    expect(kiakRecord?.publicKeyRaw!.byteLength).toBe(32); // Ed25519 public key is 32 bytes
   });
 
   it('should be idempotent (same key on multiple calls)', async () => {
-    await initAuditLogger();
-    const { publicKey: key1 } = await getAuditPublicKey();
+    await ensureKIAK();
+    const kiakRecord1 = await getWrappedKey('audit-instance');
+    expect(kiakRecord1).toBeDefined();
+    expect(kiakRecord1?.publicKeyRaw).toBeDefined();
 
-    await initAuditLogger();
-    const { publicKey: key2 } = await getAuditPublicKey();
+    await ensureKIAK();
+    const kiakRecord2 = await getWrappedKey('audit-instance');
+    expect(kiakRecord2).toBeDefined();
+    expect(kiakRecord2?.publicKeyRaw).toBeDefined();
 
-    expect(key1).toBe(key2);
+    // Should be the same key (same public key bytes)
+    const pub1 = new Uint8Array(kiakRecord1!.publicKeyRaw!);
+    const pub2 = new Uint8Array(kiakRecord2!.publicKeyRaw!);
+    expect(pub1).toEqual(pub2);
   });
 
   it('should generate unique keys for different logger instances', async () => {
-    await initAuditLogger();
-    const { publicKey: key1 } = await getAuditPublicKey();
+    await ensureKIAK();
+    const kiakRecord1 = await getWrappedKey('audit-instance');
+    expect(kiakRecord1).toBeDefined();
+    expect(kiakRecord1?.publicKeyRaw).toBeDefined();
+    const pub1 = new Uint8Array(kiakRecord1!.publicKeyRaw!);
 
     // Reset and reinitialize with fresh database (simulates new installation)
     // KIAK persists in DB, so we need to clear it for a fresh key
@@ -76,10 +97,13 @@ describe('initAuditLogger', () => {
     closeDB();
     globalThis.indexedDB = new IDBFactory();
     await initDB();
-    await initAuditLogger();
-    const { publicKey: key2 } = await getAuditPublicKey();
+    await ensureKIAK();
+    const kiakRecord2 = await getWrappedKey('audit-instance');
+    expect(kiakRecord2).toBeDefined();
+    expect(kiakRecord2?.publicKeyRaw).toBeDefined();
+    const pub2 = new Uint8Array(kiakRecord2!.publicKeyRaw!);
 
-    expect(key1).not.toBe(key2);
+    expect(pub1).not.toEqual(pub2);
   });
 });
 
@@ -89,6 +113,8 @@ describe('initAuditLogger', () => {
 
 describe('logOperation', () => {
   it('should log a simple operation', async () => {
+    await ensureKIAK();
+
     const op: AuditOperation = {
       op: 'sign',
       kid: 'test-key-1',
@@ -106,6 +132,8 @@ describe('logOperation', () => {
   });
 
   it('should increment sequence numbers', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
     await logOperation({ op: 'unlock', kid: '', requestId: 'req-2' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3' });
@@ -118,6 +146,8 @@ describe('logOperation', () => {
   });
 
   it('should include timestamps', async () => {
+    await ensureKIAK();
+
     const before = Date.now();
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
     const after = Date.now();
@@ -128,6 +158,8 @@ describe('logOperation', () => {
   });
 
   it('should include optional fields when provided', async () => {
+    await ensureKIAK();
+
     const op: AuditOperation = {
       op: 'sign',
       kid: 'key-1',
@@ -150,6 +182,8 @@ describe('logOperation', () => {
   });
 
   it('should create chain hash linking to previous entry', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2' });
 
@@ -159,6 +193,8 @@ describe('logOperation', () => {
   });
 
   it('should create unique chain hashes for different operations', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2' });
 
@@ -167,6 +203,8 @@ describe('logOperation', () => {
   });
 
   it('should include signer ID in entries', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
 
     const entries = await getAllAuditEntries();
@@ -175,6 +213,8 @@ describe('logOperation', () => {
   });
 
   it('should include signature in entries', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
 
     const entries = await getAllAuditEntries();
@@ -197,6 +237,8 @@ describe('verifyAuditChain', () => {
   });
 
   it('should verify a single entry', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
 
     const result = await verifyAuditChain();
@@ -207,6 +249,8 @@ describe('verifyAuditChain', () => {
   });
 
   it('should verify multiple entries', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
     await logOperation({ op: 'unlock', kid: '', requestId: 'req-2' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3' });
@@ -225,6 +269,9 @@ describe('verifyAuditChain', () => {
 
 describe('getAuditPublicKey', () => {
   it('should export base64url encoded SPKI public key', async () => {
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+
     const { publicKey } = await getAuditPublicKey();
 
     // Base64url should not contain +, /, or =
@@ -232,8 +279,10 @@ describe('getAuditPublicKey', () => {
     expect(publicKey.length).toBeGreaterThan(0);
   });
 
-  it('should initialize logger if not already initialized', async () => {
-    // Don't call initAuditLogger
+  it('should return UAK public key after setup', async () => {
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+
     const { publicKey } = await getAuditPublicKey();
 
     expect(publicKey).toBeDefined();
@@ -241,6 +290,9 @@ describe('getAuditPublicKey', () => {
   });
 
   it('should return consistent public key', async () => {
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+
     const { publicKey: key1 } = await getAuditPublicKey();
     const { publicKey: key2 } = await getAuditPublicKey();
 
@@ -254,6 +306,9 @@ describe('getAuditPublicKey', () => {
 
 describe('exportAuditKey', () => {
   it('should export base64url encoded PKCS#8 private key', async () => {
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+
     const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test' });
 
     // Base64url should not contain +, /, or =
@@ -261,8 +316,10 @@ describe('exportAuditKey', () => {
     expect(privateKey.length).toBeGreaterThan(0);
   });
 
-  it('should initialize logger if not already initialized', async () => {
-    // Don't call initAuditLogger
+  it('should export UAK after setup', async () => {
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+
     const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test' });
 
     expect(privateKey).toBeDefined();
@@ -270,6 +327,9 @@ describe('exportAuditKey', () => {
   });
 
   it('should export different key than public key', async () => {
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+
     const { publicKey } = await getAuditPublicKey();
     const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test' });
 
@@ -285,6 +345,8 @@ describe('exportAuditKey', () => {
 
 describe('resetAuditLogger', () => {
   it('should reset sequence counter', async () => {
+    await ensureKIAK();
+
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2' });
 
@@ -297,6 +359,7 @@ describe('resetAuditLogger', () => {
     closeDB();
     globalThis.indexedDB = new IDBFactory();
     await initDB();
+    await ensureKIAK();
 
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3' });
 
@@ -305,15 +368,16 @@ describe('resetAuditLogger', () => {
   });
 
   it('should generate new key pair after reset', async () => {
-    await initAuditLogger();
+    // Setup KMS to initialize UAK
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
     const { publicKey: key1 } = await getAuditPublicKey();
 
-    // Reset with fresh database to get new KIAK (simulates new installation)
+    // Reset with fresh database to get new UAK (simulates new installation)
     resetAuditLogger();
     closeDB();
     globalThis.indexedDB = new IDBFactory();
     await initDB();
-    await initAuditLogger();
+    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
     const { publicKey: key2 } = await getAuditPublicKey();
 
     expect(key1).not.toBe(key2);
@@ -326,6 +390,8 @@ describe('resetAuditLogger', () => {
 
 describe('audit integration', () => {
   it('should maintain chain integrity across multiple operations', async () => {
+    await ensureKIAK();
+
     // Simulate a typical KMS session
     await logOperation({ op: 'setup', kid: '', requestId: 'req-1', details: { method: 'passphrase' } });
     await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', unlockTime: 100 });
@@ -341,6 +407,8 @@ describe('audit integration', () => {
   });
 
   it('should verify chain with all optional fields populated', async () => {
+    await ensureKIAK();
+
     const op: AuditOperation = {
       op: 'sign',
       kid: 'key-1',

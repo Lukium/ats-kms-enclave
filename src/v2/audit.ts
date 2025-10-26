@@ -62,14 +62,14 @@ export async function initAuditLogger(): Promise<void> {
  * Based on: 05-audit-log.md § "Lease Root Key (LRK)"
  */
 async function ensureLRK(): Promise<CryptoKey> {
-  let lrk = await getMeta('LRK') as CryptoKey | undefined;
+  let lrk = await getMeta<CryptoKey>('LRK');
 
   if (!lrk) {
     lrk = await crypto.subtle.generateKey(
       { name: 'AES-GCM', length: 256 },
       false, // non-extractable
       ['wrapKey', 'unwrapKey', 'encrypt', 'decrypt']
-    ) as CryptoKey;
+    );
 
     await putMeta('LRK', lrk);
   }
@@ -427,9 +427,6 @@ export async function ensureKIAK(): Promise<void> {
  * @returns The audit entry that was logged
  */
 export async function logOperation(op: AuditOperation): Promise<AuditEntryV2> {
-  const callId = crypto.randomUUID().substring(0, 8);
-  console.log(`[Audit] ➤ CALL ${callId}: logOperation(op=${op.op}, requestId=${op.requestId})`);
-
   // Create a wrapper that will hold the audit entry or error
   let resolver: (entry: AuditEntryV2) => void;
   let rejecter: (err: Error) => void;
@@ -438,26 +435,20 @@ export async function logOperation(op: AuditOperation): Promise<AuditEntryV2> {
     rejecter = reject;
   });
 
-  console.log(`[Audit] ⏳ QUEUE ${callId}: Added to promise chain`);
-
   // Queue this operation after the previous one completes
   // ALL sequence management happens inside the chain to ensure serialization
   auditChain = auditChain.then(async () => {
     try {
-      console.log(`[Audit] ▶ START ${callId}: Chain callback executing`);
-
       if (!activeSigner) {
         throw new Error('No active audit signer - call ensureAuditKey, loadLAK, or ensureKIAK first');
       }
 
       const timestamp = Date.now();
-      console.log(`[Audit] 📖 READ ${callId}: Calling getLastAuditEntry()`);
       const previousEntry = await getLastAuditEntry();
       const previousHash = previousEntry ? previousEntry.chainHash : '';
 
       // Determine next sequence number from previous entry (audit log is source of truth)
       const mySeqNum = previousEntry ? previousEntry.seqNum + 1 : 1;
-      console.log(`[Audit] 🔢 SEQNUM ${callId}: mySeqNum=${mySeqNum}, prevSeqNum=${previousEntry?.seqNum}, prevHash=${previousHash.substring(0, 10)}...`);
 
       // Construct the payload to be hashed (excluding sig and chainHash)
       const payload = {
@@ -513,20 +504,15 @@ export async function logOperation(op: AuditOperation): Promise<AuditEntryV2> {
         sig,
       };
 
-      console.log(`[Audit] 💾 WRITE ${callId}: Calling storeAuditEntry(seqNum=${mySeqNum})`);
       await storeAuditEntry(entry);
-      console.log(`[Audit] ✅ STORED ${callId}: Entry written to DB, resolving promise`);
       resolver!(entry);
     } catch (err) {
-      console.log(`[Audit] ❌ ERROR ${callId}: ${err}`);
       rejecter!(err as Error);
     }
   }).catch(() => {
     // Swallow errors to keep chain alive
-    console.log(`[Audit] 🔇 CATCH ${callId}: Error swallowed to keep chain alive`);
   });
 
-  console.log(`[Audit] 🔄 RETURN ${callId}: Returning resultPromise to caller`);
   // Return the result promise to the caller
   return resultPromise;
 }

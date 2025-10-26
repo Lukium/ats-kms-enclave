@@ -32,8 +32,9 @@ import {
 } from './storage';
 import { arrayBufferToBase64url, buildKeyWrapAAD } from './crypto-utils';
 
-// Module state
-let seqCounter = 0;
+// Promise chain to serialize audit operations (prevents seqNum collisions in IndexedDB)
+// Sequence numbers are derived from the audit log itself (database is source of truth)
+let auditChain: Promise<void> = Promise.resolve();
 
 // Active signer (determines which key signs the next audit entry)
 interface ActiveSigner {
@@ -417,75 +418,116 @@ export async function ensureKIAK(): Promise<void> {
  * - loadLAK() -> LAK
  * - ensureKIAK() -> KIAK
  *
+ * Operations are serialized via a promise chain to prevent seqNum collisions
+ * in the IndexedDB unique index when multiple operations occur concurrently.
+ *
  * Based on: 05-audit-log.md § "Logging Function"
  *
  * @param op - Audit operation details
  */
 export async function logOperation(op: AuditOperation): Promise<void> {
-  if (!activeSigner) {
-    throw new Error('No active audit signer - call ensureAuditKey, loadLAK, or ensureKIAK first');
-  }
+  const callId = crypto.randomUUID().substring(0, 8);
+  console.log(`[Audit] ➤ CALL ${callId}: logOperation(op=${op.op}, requestId=${op.requestId})`);
 
-  seqCounter += 1;
-  const timestamp = Date.now();
-  const previousEntry = await getLastAuditEntry();
-  const previousHash = previousEntry ? previousEntry.chainHash : '';
+  // Create a wrapper that will hold both success and error results
+  let resolver: () => void;
+  let rejecter: (err: Error) => void;
+  const resultPromise = new Promise<void>((resolve, reject) => {
+    resolver = resolve;
+    rejecter = reject;
+  });
 
-  // Construct the payload to be hashed (excluding sig and chainHash)
-  const payload = {
-    kmsVersion: 2 as const,
-    seqNum: seqCounter,
-    timestamp,
-    op: op.op,
-    kid: op.kid,
-    requestId: op.requestId,
-    origin: op.origin,
-    leaseId: op.leaseId,
-    unlockTime: op.unlockTime,
-    lockTime: op.lockTime,
-    duration: op.duration,
-    details: op.details,
-    previousHash,
-    signer: activeSigner.type,
-    signerId: activeSigner.keyId,
-  };
+  console.log(`[Audit] ⏳ QUEUE ${callId}: Added to promise chain`);
 
-  // Canonical JSON representation for hashing
-  const payloadString = JSON.stringify(payload);
+  // Queue this operation after the previous one completes
+  // ALL sequence management happens inside the chain to ensure serialization
+  auditChain = auditChain.then(async () => {
+    try {
+      console.log(`[Audit] ▶ START ${callId}: Chain callback executing`);
 
-  // Compute chain hash = SHA256(previousHash + payloadString)
-  const chainInput = new TextEncoder().encode(previousHash + payloadString);
-  const chainHashBuf = await crypto.subtle.digest('SHA-256', chainInput);
-  const chainHash = arrayBufferToBase64url(chainHashBuf);
+      if (!activeSigner) {
+        throw new Error('No active audit signer - call ensureAuditKey, loadLAK, or ensureKIAK first');
+      }
 
-  // Sign the chain hash
-  const chainHashBytes = new TextEncoder().encode(chainHash);
-  const sigBuf = await crypto.subtle.sign('Ed25519', activeSigner.keyPair.privateKey, chainHashBytes);
-  const sig = arrayBufferToBase64url(sigBuf);
+      const timestamp = Date.now();
+      console.log(`[Audit] 📖 READ ${callId}: Calling getLastAuditEntry()`);
+      const previousEntry = await getLastAuditEntry();
+      const previousHash = previousEntry ? previousEntry.chainHash : '';
 
-  // Construct entry
-  const entry: AuditEntryV2 = {
-    kmsVersion: payload.kmsVersion,
-    seqNum: payload.seqNum,
-    timestamp: payload.timestamp,
-    op: payload.op,
-    kid: payload.kid,
-    requestId: payload.requestId,
-    ...(payload.origin !== undefined && { origin: payload.origin }),
-    ...(payload.leaseId !== undefined && { leaseId: payload.leaseId }),
-    ...(payload.unlockTime !== undefined && { unlockTime: payload.unlockTime }),
-    ...(payload.lockTime !== undefined && { lockTime: payload.lockTime }),
-    ...(payload.duration !== undefined && { duration: payload.duration }),
-    ...(payload.details !== undefined && { details: payload.details }),
-    previousHash: payload.previousHash,
-    chainHash,
-    signer: payload.signer,
-    signerId: payload.signerId,
-    ...(activeSigner.cert !== undefined && { cert: activeSigner.cert }),
-    sig,
-  };
+      // Determine next sequence number from previous entry (audit log is source of truth)
+      const mySeqNum = previousEntry ? previousEntry.seqNum + 1 : 1;
+      console.log(`[Audit] 🔢 SEQNUM ${callId}: mySeqNum=${mySeqNum}, prevSeqNum=${previousEntry?.seqNum}, prevHash=${previousHash.substring(0, 10)}...`);
 
-  await storeAuditEntry(entry);
+      // Construct the payload to be hashed (excluding sig and chainHash)
+      const payload = {
+        kmsVersion: 2 as const,
+        seqNum: mySeqNum,
+        timestamp,
+        op: op.op,
+        kid: op.kid,
+        requestId: op.requestId,
+        origin: op.origin,
+        leaseId: op.leaseId,
+        unlockTime: op.unlockTime,
+        lockTime: op.lockTime,
+        duration: op.duration,
+        details: op.details,
+        previousHash,
+        signer: activeSigner.type,
+        signerId: activeSigner.keyId,
+      };
+
+      // Canonical JSON representation for hashing
+      const payloadString = JSON.stringify(payload);
+
+      // Compute chain hash = SHA256(previousHash + payloadString)
+      const chainInput = new TextEncoder().encode(previousHash + payloadString);
+      const chainHashBuf = await crypto.subtle.digest('SHA-256', chainInput);
+      const chainHash = arrayBufferToBase64url(chainHashBuf);
+
+      // Sign the chain hash
+      const chainHashBytes = new TextEncoder().encode(chainHash);
+      const sigBuf = await crypto.subtle.sign('Ed25519', activeSigner.keyPair.privateKey, chainHashBytes);
+      const sig = arrayBufferToBase64url(sigBuf);
+
+      // Construct entry
+      const entry: AuditEntryV2 = {
+        kmsVersion: payload.kmsVersion,
+        seqNum: payload.seqNum,
+        timestamp: payload.timestamp,
+        op: payload.op,
+        kid: payload.kid,
+        requestId: payload.requestId,
+        ...(payload.origin !== undefined && { origin: payload.origin }),
+        ...(payload.leaseId !== undefined && { leaseId: payload.leaseId }),
+        ...(payload.unlockTime !== undefined && { unlockTime: payload.unlockTime }),
+        ...(payload.lockTime !== undefined && { lockTime: payload.lockTime}),
+        ...(payload.duration !== undefined && { duration: payload.duration }),
+        ...(payload.details !== undefined && { details: payload.details }),
+        previousHash: payload.previousHash,
+        chainHash,
+        signer: payload.signer,
+        signerId: payload.signerId,
+        ...(activeSigner.cert !== undefined && { cert: activeSigner.cert }),
+        sig,
+      };
+
+      console.log(`[Audit] 💾 WRITE ${callId}: Calling storeAuditEntry(seqNum=${mySeqNum})`);
+      await storeAuditEntry(entry);
+      console.log(`[Audit] ✅ STORED ${callId}: Entry written to DB, resolving promise`);
+      resolver!();
+    } catch (err) {
+      console.log(`[Audit] ❌ ERROR ${callId}: ${err}`);
+      rejecter!(err as Error);
+    }
+  }).catch(() => {
+    // Swallow errors to keep chain alive
+    console.log(`[Audit] 🔇 CATCH ${callId}: Error swallowed to keep chain alive`);
+  });
+
+  console.log(`[Audit] 🔄 RETURN ${callId}: Returning resultPromise to caller`);
+  // Return the result promise to the caller
+  return resultPromise;
 }
 
 /**
@@ -576,5 +618,6 @@ export async function exportAuditKey(_credentials: AuthCredentials): Promise<str
  */
 export function resetAuditLogger(): void {
   activeSigner = null;
-  seqCounter = 0;
+  auditChain = Promise.resolve();
+  // Note: seqNum is derived from database, not stored in memory
 }

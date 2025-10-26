@@ -856,6 +856,8 @@ async function handleIssueVAPIDJWT(
     leaseId: string;
     endpoint: { url: string; aud: string; eid: string };
     kid?: string; // Optional - auto-detect if not provided
+    jti?: string; // Optional - for batch issuance
+    exp?: number; // Optional - for staggered expirations
   },
   requestId: string
 ): Promise<{ jwt: string; jti: string; exp: number }> {
@@ -917,9 +919,9 @@ async function handleIssueVAPIDJWT(
     await putMeta(`quota:${leaseId}`, quotaState);
   }
 
-  // Build JWT payload
-  const jti = crypto.randomUUID();
-  const exp = Math.floor(Date.now() / 1000) + 900; // 15 min from now
+  // Build JWT payload (use provided jti/exp or generate new ones)
+  const jti = params.jti ?? crypto.randomUUID();
+  const exp = params.exp ?? (Math.floor(Date.now() / 1000) + 900); // 15 min from now if not provided
 
   const payload: VAPIDPayload = {
     aud: endpoint.aud,
@@ -1007,6 +1009,9 @@ async function handleIssueVAPIDJWT(
  *
  * This ensures seamless rotation: when JWT[0] reaches 60% TTL (9min), JWT[1] is already valid.
  *
+ * IMPLEMENTATION: Calls handleIssueVAPIDJWT sequentially for each JWT to ensure proper
+ * serialization and avoid race conditions in audit logging.
+ *
  * @param count Number of JWTs to issue (1-10, hard limit)
  */
 async function handleIssueVAPIDJWTs(
@@ -1018,154 +1023,41 @@ async function handleIssueVAPIDJWTs(
   },
   requestId: string
 ): Promise<Array<{ jwt: string; jti: string; exp: number }>> {
-  const { leaseId, endpoint, count } = params;
-  let { kid } = params;
+  const { leaseId, endpoint, count, kid } = params;
 
   // Validate count
   if (!Number.isInteger(count) || count < 1 || count > 10) {
     throw new Error('count must be an integer between 1 and 10');
   }
 
-  // Auto-detect VAPID key if kid not provided
-  if (!kid) {
-    const allKeys = await getAllWrappedKeys();
-    const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
-
-    if (vapidKeys.length === 0) {
-      throw new Error('No VAPID key found. Create a lease first to auto-generate one.');
-    }
-
-    if (vapidKeys.length > 1) {
-      throw new Error('Multiple VAPID keys found. Please specify kid explicitly.');
-    }
-
-    kid = vapidKeys[0]!.kid;
-  }
-
-  // Retrieve lease
-  const lease = (await getMeta(`lease:${leaseId}`)) as LeaseRecord | null;
-  if (!lease) {
-    throw new Error(`Lease not found: ${leaseId}`);
-  }
-
-  // Check expiration
-  if (Date.now() >= lease.exp) {
-    throw new Error('Lease expired');
-  }
-
-  // Load LAK for audit logging
-  await loadLAK(leaseId, lease.lakDelegationCert);
-
-  // Check endpoint is in lease
-  const endpointMatch = lease.subs.find((s) => s.eid === endpoint.eid);
-  if (!endpointMatch) {
-    throw new Error('Endpoint not authorized for this lease');
-  }
-
-  // Check quota (ensure we have enough quota for all JWTs)
-  const quotaState = (await getMeta(`quota:${leaseId}`)) as any;
-  if (quotaState) {
-    const hourAgo = Date.now() - 3600 * 1000;
-    if (quotaState.lastResetAt < hourAgo) {
-      quotaState.tokensIssued = 0;
-      quotaState.lastResetAt = Date.now();
-    }
-
-    if (quotaState.tokensIssued + count > lease.quotas.tokensPerHour) {
-      throw new Error(`Quota exceeded: need ${count} tokens but only ${lease.quotas.tokensPerHour - quotaState.tokensIssued} remaining`);
-    }
-
-    quotaState.tokensIssued += count;
-    await putMeta(`quota:${leaseId}`, quotaState);
-  }
-
-  // Get SessionKEK (from cache or load from DB)
-  let sessionKEK = sessionKEKCache.get(leaseId);
-  if (!sessionKEK) {
-    // Load from IndexedDB if not in cache
-    const sessionKEKFromDB = await getMeta<CryptoKey>(`sessionkek:${leaseId}`);
-    if (!sessionKEKFromDB) {
-      throw new Error(`SessionKEK not found for lease: ${leaseId}`);
-    }
-    sessionKEK = sessionKEKFromDB;
-    // Cache for next use
-    sessionKEKCache.set(leaseId, sessionKEK);
-  }
-
-  // Unwrap VAPID private key using SessionKEK (not MKEK - no credentials needed!)
-  const wrappedLeaseKey = lease.wrappedLeaseKey;
-  const iv = new Uint8Array(lease.wrappedLeaseKeyIV);
-
-  // Unwrap the key using WebCrypto unwrapKey API
-  const privateKey = await crypto.subtle.unwrapKey(
-    'pkcs8',
-    wrappedLeaseKey,
-    sessionKEK,
-    { name: 'AES-GCM', iv },
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false, // not extractable
-    ['sign']
-  );
-
   // Constants for staggering
   const TTL = 900; // 15 minutes in seconds
   const STAGGER_INTERVAL = Math.floor(TTL * 0.6); // 60% of TTL = 540s (9 minutes)
   const baseTime = Math.floor(Date.now() / 1000);
 
-  // Generate all JWTs with staggered expirations
+  // Generate JWTs sequentially by calling handleIssueVAPIDJWT
+  // This ensures audit logging is properly serialized
   const results: Array<{ jwt: string; jti: string; exp: number }> = [];
 
   for (let i = 0; i < count; i++) {
+    // Calculate staggered expiration for this JWT
     const jti = crypto.randomUUID();
     const exp = baseTime + TTL + (i * STAGGER_INTERVAL);
 
-    const payload: VAPIDPayload = {
-      aud: endpoint.aud,
-      sub: 'mailto:kms@example.com',
-      exp,
-      jti,
-      uid: lease.userId,
-      eid: endpoint.eid,
-    };
-
-    // Build JWT header
-    const header = { typ: 'JWT', alg: 'ES256', kid: lease.kid };
-    const headerB64 = arrayBufferToBase64url(new TextEncoder().encode(JSON.stringify(header)).buffer);
-
-    // Build JWT payload
-    const payloadB64 = arrayBufferToBase64url(new TextEncoder().encode(JSON.stringify(payload)).buffer);
-
-    // Sign
-    const signatureInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-    const signature = await crypto.subtle.sign(
-      { name: 'ECDSA', hash: 'SHA-256' },
-      privateKey,
-      signatureInput
+    // Call handleIssueVAPIDJWT with staggered expiration and unique requestId
+    // This function handles: LAK loading, quota check, key unwrapping, signing, and audit logging
+    const result = await handleIssueVAPIDJWT(
+      {
+        leaseId,
+        endpoint,
+        kid,
+        jti,
+        exp,
+      },
+      `${requestId}-${i}` // Unique requestId for each JWT
     );
 
-    // Modern browsers return P-1363 format (64 bytes) which is what JWS ES256 requires
-    const signatureB64 = arrayBufferToBase64url(signature);
-
-    // Final JWT
-    const jwt = `${headerB64}.${payloadB64}.${signatureB64}`;
-
-    results.push({ jwt, jti, exp });
-
-    // Log each JWT issuance
-    await logOperation({
-      op: 'sign',
-      kid: lease.kid,
-      requestId: `${requestId}-${i}`,
-      leaseId, // Top-level field signals audit system to use LAK
-      details: {
-        action: 'issue-lease-jwt-batch',
-        jti,
-        aud: endpoint.aud,
-        eid: endpoint.eid,
-        batchIndex: i,
-        batchSize: count,
-      },
-    });
+    results.push(result);
   }
 
   return results;

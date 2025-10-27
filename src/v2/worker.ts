@@ -64,6 +64,8 @@ import {
   deleteMeta,
   getAllAuditEntries,
   getUserLeases,
+  storeLease,
+  getLease,
 } from './storage';
 import {
   rawP256ToJwk,
@@ -863,7 +865,7 @@ async function handleCreateLease(
   };
 
   // Store lease
-  await putMeta(`lease:${leaseId}`, lease);
+  await storeLease(lease);
 
   // Initialize quota tracking
   await putMeta(`quota:${leaseId}`, {
@@ -927,7 +929,7 @@ async function handleIssueVAPIDJWT(
   }
 
   // Retrieve lease
-  const lease = (await getMeta(`lease:${leaseId}`)) as LeaseRecord | null;
+  const lease = await getLease(leaseId);
   if (!lease) {
     throw new Error(`Lease not found: ${leaseId}`);
   }
@@ -1195,8 +1197,10 @@ async function handleGetAuditPublicKey(): Promise<{ publicKey: string }> {
  * Get all leases for a user.
  */
 async function handleGetUserLeases(params: { userId: string }): Promise<{ leases: LeaseRecord[] }> {
+  console.log('[Worker] handleGetUserLeases called with userId:', params?.userId);
   const { userId } = params;
   const leases = await getUserLeases(userId);
+  console.log('[Worker] getUserLeases returned', leases.length, 'leases');
   return { leases };
 }
 

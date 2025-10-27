@@ -162,13 +162,23 @@ async function resetDemo(): Promise<void> {
 }
 
 /**
- * Display VAPID key information
+ * Display VAPID key information and active leases
  */
 async function displayVAPIDKeyInfo(): Promise<void> {
   try {
     console.log('[Full Demo] Fetching VAPID public key...');
     const vapidInfo = await kmsUser.getVAPIDPublicKey('demouser@ats.run');
     console.log('[Full Demo] VAPID public key fetched:', vapidInfo);
+
+    // Fetch active leases
+    console.log('[Full Demo] Fetching user leases...');
+    const { leases } = await kmsUser.getUserLeases('demouser@ats.run');
+    console.log('[Full Demo] User leases fetched:', leases);
+
+    // Filter for active (non-expired) leases
+    const now = Date.now();
+    const activeLeases = leases.filter((lease) => lease.exp > now);
+    const expiredLeases = leases.filter((lease) => lease.exp <= now);
 
     // Create a container for VAPID key info if it doesn't exist
     let vapidInfoEl = document.getElementById('vapid-key-info');
@@ -178,6 +188,31 @@ async function displayVAPIDKeyInfo(): Promise<void> {
       vapidInfoEl.style.marginTop = '2rem';
       // Insert before lease operation section
       leaseOperationEl.parentElement?.insertBefore(vapidInfoEl, leaseOperationEl);
+    }
+
+    // Build leases HTML
+    let leasesHTML = '';
+    if (activeLeases.length > 0) {
+      leasesHTML = activeLeases
+        .map(
+          (lease) => `
+        <div class="artifact-card">
+          <div class="artifact-title">Lease ID</div>
+          <div class="artifact-data"><code>${lease.leaseId}</code></div>
+          <div class="artifact-title">Expires</div>
+          <div class="artifact-data">${new Date(lease.exp).toLocaleString()}</div>
+          <div class="artifact-title">Subscriptions</div>
+          <div class="artifact-data">${lease.subs.length} endpoint(s)</div>
+        </div>
+      `
+        )
+        .join('');
+    } else {
+      leasesHTML = '<div class="info-message">No active leases. Create a lease below to enable JWT signing.</div>';
+    }
+
+    if (expiredLeases.length > 0) {
+      leasesHTML += `<div class="info-message" style="color: #888; font-size: 0.8rem;">${expiredLeases.length} expired lease(s) not shown</div>`;
     }
 
     vapidInfoEl.innerHTML = `
@@ -195,9 +230,13 @@ async function displayVAPIDKeyInfo(): Promise<void> {
           This is your VAPID public key for Web Push notifications. Share this key with push services to subscribe to notifications.
         </div>
       </div>
+      <div class="vapid-key-card" style="margin-top: 1rem;">
+        <h4>📋 Active Leases (${activeLeases.length})</h4>
+        ${leasesHTML}
+      </div>
     `;
   } catch (error) {
-    console.error('[Full Demo] Failed to fetch VAPID key:', error);
+    console.error('[Full Demo] Failed to fetch VAPID key or leases:', error);
     // Don't show error UI - it's okay if this fails (e.g., no VAPID key yet)
   }
 }
@@ -694,6 +733,8 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
     // Add event listener for creating another lease
     document.getElementById('create-another-lease-btn')?.addEventListener('click', () => createLease(status));
 
+    // Refresh VAPID key info to show the new lease
+    await displayVAPIDKeyInfo();
     await loadAuditLog();
   } catch (error) {
     console.error('[Full Demo] Lease creation failed:', error);

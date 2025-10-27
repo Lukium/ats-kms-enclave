@@ -27,6 +27,8 @@
     "demo:phase-1-iframe-isolation:parent": "vite --config example/vite.config.phase-1-iframe-isolation-parent.ts",
     "demo:phase-1-iframe-isolation:kms": "vite --config example/vite.config.phase-1-iframe-isolation-kms.ts",
     "demo:phase-1-iframe-isolation:integration": "vite --config example/vite.config.phase-1-integration-tests.ts",
+    "demo:phase-1-full:parent": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-full-parent.ts",
+    "demo:phase-1-full:kms": "lsof -ti:5174 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-full-kms.ts",
     "demo:enhanced": "vite --config example/vite.config.ts --open /index-enhanced.html"
   },
   "keywords": [

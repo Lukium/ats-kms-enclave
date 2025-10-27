@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Full Demo - Interactive VAPID Flow</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="demo-container">
+    <header class="demo-header">
+      <h1>🔐 KMS Full Demo</h1>
+      <p>Interactive demonstration of cross-origin isolated KMS</p>
+    </header>
+
+    <div class="two-pane-layout">
+      <!-- Left Pane: Operations & Artifacts -->
+      <div class="left-pane">
+        <h2>Operations & Artifacts</h2>
+        <div id="operations-content">
+          <button id="reset-demo-btn" class="reset-btn">🔄 Reset Demo</button>
+
+          <div class="operation-section">
+            <h3>Setup Authentication</h3>
+            <div id="setup-operation"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Pane: Audit Log -->
+      <div class="right-pane">
+        <h2>Audit Log</h2>
+        <div id="audit-log">
+          <p class="loading">Loading audit log...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./parent.ts"></script>
+</body>
+</html>

@@ -277,6 +277,7 @@ async function setupPassphrase(): Promise<void> {
 
 /**
  * Setup WebAuthn authentication with PRF/Gate auto-detection
+ * Checks for existing passkey first to avoid creating duplicates
  */
 async function setupWebAuthn(): Promise<void> {
   // Fixed demo credentials
@@ -285,18 +286,61 @@ async function setupWebAuthn(): Promise<void> {
   const rpId = 'localhost';
 
   try {
-    console.log('[Full Demo] Setting up WebAuthn with PRF auto-detection...');
+    console.log('[Full Demo] Checking for existing passkey...');
 
-    // Generate app salt for PRF
-    const appSalt = crypto.getRandomValues(new Uint8Array(32));
+    // First, try to authenticate with an existing passkey
+    // This will show the user their existing passkeys for this RP
+    let credential: PublicKeyCredential | null = null;
+    let appSalt: Uint8Array;
+    let isExistingPasskey = false;
 
-    // Run WebAuthn ceremony with PRF extension
-    const credential = await navigator.credentials.create({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: { id: rpId, name: 'ATS KMS V2' },
-        user: {
-          id: new TextEncoder().encode(userId),
+    try {
+      // Try to get existing passkey with conditional UI
+      const existingAppSalt = localStorage.getItem('kms:appSalt');
+      if (existingAppSalt) {
+        appSalt = new Uint8Array(existingAppSalt.split(',').map(n => parseInt(n, 10)));
+        console.log('[Full Demo] Found existing appSalt, attempting to authenticate...');
+
+        credential = await navigator.credentials.get({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rpId: rpId,
+            userVerification: 'required',
+            extensions: {
+              prf: {
+                eval: {
+                  first: appSalt,
+                },
+              },
+            },
+          },
+        }) as PublicKeyCredential;
+
+        if (credential) {
+          console.log('[Full Demo] Authenticated with existing passkey!');
+          isExistingPasskey = true;
+        }
+      } else {
+        // No stored appSalt, will create new passkey
+        throw new Error('No existing passkey configuration found');
+      }
+    } catch (authError) {
+      console.log('[Full Demo] No existing passkey found or auth failed, creating new passkey...');
+      isExistingPasskey = false;
+    }
+
+    // If no existing passkey, create a new one
+    if (!isExistingPasskey) {
+      // Generate app salt for PRF
+      appSalt = crypto.getRandomValues(new Uint8Array(32));
+
+      // Run WebAuthn ceremony with PRF extension
+      credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { id: rpId, name: 'ATS KMS V2' },
+          user: {
+            id: new TextEncoder().encode(userId),
           name,
           displayName: name,
         },
@@ -319,6 +363,10 @@ async function setupWebAuthn(): Promise<void> {
       },
     }) as PublicKeyCredential;
 
+      // Store appSalt for future unlock operations (only for new passkeys)
+      localStorage.setItem('kms:appSalt', Array.from(appSalt).toString());
+    }
+
     // Check if PRF extension succeeded
     const prfExt = (credential as any).getClientExtensionResults().prf;
     const prfOutput = prfExt?.results?.first;
@@ -327,24 +375,19 @@ async function setupWebAuthn(): Promise<void> {
     let method;
 
     if (prfOutput) {
-      // PRF available - use setupPasskeyPRF with the credential from first ceremony
-      console.log('[Full Demo] PRF available, using setupPasskeyPRF');
-      method = 'Passkey PRF';
-      result = await kmsUser.setupPasskeyPRF({
+      // PRF available - use setupPasskeyPRF
+      console.log(`[Full Demo] PRF available, using setupPasskeyPRF (${isExistingPasskey ? 'existing' : 'new'} passkey)`);
+      method = `Passkey PRF${isExistingPasskey ? ' (Existing)' : ''}`;
+      result = await kmsUser.sendRequest<any>('setupPasskeyPRF', {
         userId: 'demouser@ats.run',
-        name,
+        credentialId: credential.rawId,
+        prfOutput: prfOutput,
         rpId,
       });
-
-      // Store appSalt for future unlock operations
-      localStorage.setItem('kms:appSalt', Array.from(appSalt).toString());
     } else {
-      // PRF not available - use Gate with credential from first ceremony (no second ceremony!)
-      console.log('[Full Demo] PRF not available, using setupPasskeyGate with existing credential');
-      method = 'Passkey Gate';
-
-      // Pass the credential data from the FIRST ceremony to avoid double ceremony
-      // kmsUser.setupPasskeyGate will use this credential instead of running a new ceremony
+      // PRF not available - use Gate
+      console.log(`[Full Demo] PRF not available, using setupPasskeyGate (${isExistingPasskey ? 'existing' : 'new'} passkey)`);
+      method = `Passkey Gate${isExistingPasskey ? ' (Existing)' : ''}`;
       result = await kmsUser.sendRequest<any>('setupPasskeyGate', {
         userId: 'demouser@ats.run',
         credentialId: credential.rawId,
@@ -480,6 +523,7 @@ async function addEnrollmentPassphrase(status: { isSetup: boolean; methods: stri
 async function getPreferredCredentials(status: { methods: string[] }): Promise<any> {
   const hasPasskey = status.methods.includes('passkey');
   const hasPassphrase = status.methods.includes('passphrase');
+  const userId = 'demouser@ats.run';
 
   // Prefer passkey if available
   if (hasPasskey) {
@@ -507,9 +551,9 @@ async function getPreferredCredentials(status: { methods: string[] }): Promise<a
       const prfOutput = prfExt?.results?.first;
 
       if (prfOutput) {
-        return { method: 'passkey-prf', prfOutput };
+        return { method: 'passkey-prf', prfOutput, userId };
       } else {
-        return { method: 'passkey-gate' };
+        return { method: 'passkey-gate', userId };
       }
     } catch (error) {
       console.error('[Full Demo] Passkey authentication failed:', error);
@@ -520,7 +564,7 @@ async function getPreferredCredentials(status: { methods: string[] }): Promise<a
     if (!passphrase) {
       throw new Error('Passphrase required');
     }
-    return { method: 'passphrase', passphrase };
+    return { method: 'passphrase', passphrase, userId };
   } else {
     throw new Error('No enrolled authentication methods available');
   }

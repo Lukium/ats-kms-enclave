@@ -22,6 +22,7 @@ const kmsUser = new KMSUser({
 const auditLogEl = document.getElementById('audit-log')!;
 const resetDemoBtn = document.getElementById('reset-demo-btn')!;
 const setupOperationEl = document.getElementById('setup-operation')!;
+const leaseOperationEl = document.getElementById('lease-operation')!;
 
 /**
  * Display audit log entries
@@ -54,6 +55,7 @@ function displayAuditLog(entries: AuditEntryV2[]): void {
           </div>
           <div class="audit-details">
             <div><strong>Operation:</strong> ${entry.op}</div>
+            <div><strong>User ID:</strong> <code>${entry.userId}</code></div>
             <div><strong>Request ID:</strong> <code>${entry.requestId}</code></div>
             ${entry.leaseId ? `<div><strong>Lease ID:</strong> <code>${entry.leaseId}</code></div>` : ''}
             ${entry.kid ? `<div><strong>Key ID:</strong> <code>${entry.kid}</code></div>` : ''}
@@ -97,9 +99,12 @@ async function initKMS(): Promise<StatusResult> {
     // Wait a moment for KIAK initialization to complete
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Check setup status
-    const status = await kmsUser.isSetup();
+    // Check setup status (with userId to also fetch leases)
+    const status = await kmsUser.isSetup('demouser@ats.run');
     console.log('[Full Demo] Setup status:', status);
+    if (status.leases) {
+      console.log('[Full Demo] Found', status.leases.length, 'existing leases');
+    }
 
     // Load initial audit log (should show KIAK initialization)
     await loadAuditLog();
@@ -236,7 +241,7 @@ async function setupPassphrase(): Promise<void> {
 
   try {
     console.log('[Full Demo] Setting up passphrase...');
-    const result = await kmsUser.setupPassphrase(passphrase);
+    const result = await kmsUser.setupPassphrase('demouser@ats.run', passphrase);
     console.log('[Full Demo] Passphrase setup complete:', result);
 
     // Show success and reload audit log
@@ -261,8 +266,9 @@ async function setupPassphrase(): Promise<void> {
     await loadAuditLog();
 
     // Reload setup UI to reflect new enrollment
-    const status = await kmsUser.isSetup();
+    const status = await kmsUser.isSetup('demouser@ats.run');
     renderSetupUI(status);
+    renderLeaseUI(status);
   } catch (error) {
     console.error('[Full Demo] Passphrase setup failed:', error);
     alert(`Setup failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -325,9 +331,9 @@ async function setupWebAuthn(): Promise<void> {
       console.log('[Full Demo] PRF available, using setupPasskeyPRF');
       method = 'Passkey PRF';
       result = await kmsUser.setupPasskeyPRF({
+        userId: 'demouser@ats.run',
         name,
         rpId,
-        userId,
       });
 
       // Store appSalt for future unlock operations
@@ -340,6 +346,7 @@ async function setupWebAuthn(): Promise<void> {
       // Pass the credential data from the FIRST ceremony to avoid double ceremony
       // kmsUser.setupPasskeyGate will use this credential instead of running a new ceremony
       result = await kmsUser.sendRequest<any>('setupPasskeyGate', {
+        userId: 'demouser@ats.run',
         credentialId: credential.rawId,
         rpId,
       });
@@ -369,8 +376,9 @@ async function setupWebAuthn(): Promise<void> {
     await loadAuditLog();
 
     // Reload setup UI to reflect new enrollment
-    const status = await kmsUser.isSetup();
+    const status = await kmsUser.isSetup('demouser@ats.run');
     renderSetupUI(status);
+    renderLeaseUI(status);
   } catch (error) {
     console.error('[Full Demo] WebAuthn setup failed:', error);
     alert(`Setup failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -437,6 +445,7 @@ async function addEnrollmentPassphrase(status: { isSetup: boolean; methods: stri
   try {
     console.log('[Full Demo] Adding passphrase enrollment...');
     const result = await kmsUser.addEnrollment(
+      'demouser@ats.run',
       'passphrase',
       credentials,
       { passphrase }
@@ -457,11 +466,150 @@ async function addEnrollmentPassphrase(status: { isSetup: boolean; methods: stri
     await loadAuditLog();
 
     // Reload setup UI
-    const newStatus = await kmsUser.isSetup();
+    const newStatus = await kmsUser.isSetup('demouser@ats.run');
     renderSetupUI(newStatus);
   } catch (error) {
     console.error('[Full Demo] Add enrollment failed:', error);
     alert(`Add enrollment failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Get preferred credentials for operations (prefer passkey over passphrase)
+ */
+async function getPreferredCredentials(status: { methods: string[] }): Promise<any> {
+  const hasPasskey = status.methods.includes('passkey');
+  const hasPassphrase = status.methods.includes('passphrase');
+
+  // Prefer passkey if available
+  if (hasPasskey) {
+    alert('Please authenticate with your passkey...');
+    const appSalt = localStorage.getItem('kms:appSalt');
+
+    try {
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rpId: 'localhost',
+          userVerification: 'required',
+          extensions: appSalt ? {
+            prf: {
+              eval: {
+                first: new Uint8Array(appSalt.split(',').map(n => parseInt(n, 10))),
+              },
+            },
+          } : undefined,
+        },
+      }) as PublicKeyCredential;
+
+      // Check if PRF was used and succeeded
+      const prfExt = (assertion as any).getClientExtensionResults().prf;
+      const prfOutput = prfExt?.results?.first;
+
+      if (prfOutput) {
+        return { method: 'passkey-prf', prfOutput };
+      } else {
+        return { method: 'passkey-gate' };
+      }
+    } catch (error) {
+      console.error('[Full Demo] Passkey authentication failed:', error);
+      throw error;
+    }
+  } else if (hasPassphrase) {
+    const passphrase = prompt('Enter your passphrase:');
+    if (!passphrase) {
+      throw new Error('Passphrase required');
+    }
+    return { method: 'passphrase', passphrase };
+  } else {
+    throw new Error('No enrolled authentication methods available');
+  }
+}
+
+/**
+ * Render lease operation UI
+ */
+function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
+  if (!status.isSetup) {
+    leaseOperationEl.innerHTML = '<div class="info-message">Please setup authentication first</div>';
+    return;
+  }
+
+  const html = `
+    <div class="lease-section">
+      <h3>VAPID Lease Generation</h3>
+      <p>Generate a time-limited VAPID authorization lease for push subscriptions.</p>
+      <button id="create-lease-btn" class="operation-btn">🎫 Create Lease</button>
+    </div>
+  `;
+
+  leaseOperationEl.innerHTML = html;
+
+  // Add event listener
+  document.getElementById('create-lease-btn')?.addEventListener('click', () => createLease(status));
+}
+
+/**
+ * Create a VAPID lease
+ */
+async function createLease(status: { isSetup: boolean; methods: string[] }): Promise<void> {
+  try {
+    console.log('[Full Demo] Creating VAPID lease...');
+
+    // Get credentials (prefer passkey)
+    const credentials = await getPreferredCredentials(status);
+
+    // For demo, use simple subscription parameters
+    const userId = 'demouser@ats.run';
+    const subs = [
+      {
+        url: 'https://demo-push-endpoint.example.com/subscription-1',
+        aud: 'https://demo-push-endpoint.example.com',
+        eid: 'sub-001',
+      },
+    ];
+    const ttlHours = 24; // 24 hour lease
+
+    console.log('[Full Demo] Calling createLease with:', { userId, subs, ttlHours });
+    const result = await kmsUser.createLease({
+      userId,
+      subs,
+      ttlHours,
+      credentials,
+    });
+    console.log('[Full Demo] Lease created:', result);
+
+    // Show success with lease details
+    const exp = new Date(result.exp);
+    leaseOperationEl.innerHTML = `
+      <div class="success-message">
+        <h4>✅ VAPID Lease Created!</h4>
+        <div class="artifact-card">
+          <div class="artifact-title">Lease ID</div>
+          <div class="artifact-data"><code>${result.leaseId}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">Expiration</div>
+          <div class="artifact-data">${exp.toLocaleString()}</div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">Quotas</div>
+          <div class="artifact-data">
+            <div>Signs Remaining: ${result.quotas.signsRemaining}</div>
+            <div>Signs Used: ${result.quotas.signsUsed}</div>
+          </div>
+        </div>
+        <button id="create-another-lease-btn" class="operation-btn">🎫 Create Another Lease</button>
+      </div>
+    `;
+
+    // Add event listener for creating another lease
+    document.getElementById('create-another-lease-btn')?.addEventListener('click', () => createLease(status));
+
+    await loadAuditLog();
+  } catch (error) {
+    console.error('[Full Demo] Lease creation failed:', error);
+    alert(`Lease creation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -579,7 +727,7 @@ async function addEnrollmentWebAuthn(status: { isSetup: boolean; methods: string
     }
 
     console.log('[Full Demo] About to call addEnrollment with:', { method, credentials, newCredentials });
-    result = await kmsUser.addEnrollment(method, credentials, newCredentials);
+    result = await kmsUser.addEnrollment('demouser@ats.run', method, credentials, newCredentials);
     console.log('[Full Demo] addEnrollment returned successfully');
     console.log(`[Full Demo] WebAuthn enrollment added (${method}):`, result);
     console.log('[Full Demo] Result type:', typeof result, 'Result value:', result);
@@ -603,7 +751,7 @@ async function addEnrollmentWebAuthn(status: { isSetup: boolean; methods: string
     await loadAuditLog();
 
     // Reload setup UI
-    const newStatus = await kmsUser.isSetup();
+    const newStatus = await kmsUser.isSetup('demouser@ats.run');
     renderSetupUI(newStatus);
   } catch (error) {
     console.error('[Full Demo] Add enrollment failed:', error);
@@ -617,6 +765,7 @@ resetDemoBtn.addEventListener('click', resetDemo);
 // Start
 initKMS().then((status) => {
   renderSetupUI(status);
+  renderLeaseUI(status);
 }).catch((error) => {
   console.error('[Full Demo] Failed to initialize:', error);
 });

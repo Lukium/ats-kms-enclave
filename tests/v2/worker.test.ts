@@ -47,7 +47,7 @@ function createRequest(method: string, params: any = {}): RPCRequest {
 }
 
 function createPassphraseCredentials(passphrase: string): AuthCredentials {
-  return { method: 'passphrase', passphrase };
+  return { method: 'passphrase', passphrase, userId: 'test@example.com' };
 }
 
 // ============================================================================
@@ -95,6 +95,7 @@ describe('RPC message handling', () => {
 describe('setupPassphrase', () => {
   it('should setup passphrase successfully', async () => {
     const request = createRequest('setupPassphrase', {
+      userId: 'test@example.com',
       passphrase: 'my-secure-passphrase-123',
     });
 
@@ -110,7 +111,7 @@ describe('setupPassphrase', () => {
   });
 
   it('should reject short passphrase', async () => {
-    const request = createRequest('setupPassphrase', { passphrase: 'short' });
+    const request = createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'short' });
     const response = await handleMessage(request);
 
     expect(response.error).toBeDefined();
@@ -118,7 +119,7 @@ describe('setupPassphrase', () => {
   });
 
   it('should reject empty passphrase', async () => {
-    const request = createRequest('setupPassphrase', { passphrase: '' });
+    const request = createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: '' });
     const response = await handleMessage(request);
 
     expect(response.error).toBeDefined();
@@ -131,6 +132,7 @@ describe('setupPasskeyPRF', () => {
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
     const request = createRequest('setupPasskeyPRF', {
+      userId: 'test@example.com',
       credentialId,
       prfOutput,
       rpId: 'example.com',
@@ -149,7 +151,7 @@ describe('setupPasskeyPRF', () => {
 
   it('should reject missing credentialId', async () => {
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    const request = createRequest('setupPasskeyPRF', { prfOutput });
+    const request = createRequest('setupPasskeyPRF', { userId: 'test@example.com', prfOutput });
 
     const response = await handleMessage(request);
 
@@ -161,7 +163,7 @@ describe('setupPasskeyPRF', () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = new Uint8Array(16).buffer; // Wrong size
 
-    const request = createRequest('setupPasskeyPRF', { credentialId, prfOutput });
+    const request = createRequest('setupPasskeyPRF', { userId: 'test@example.com', credentialId, prfOutput });
     const response = await handleMessage(request);
 
     expect(response.error).toBeDefined();
@@ -174,6 +176,7 @@ describe('setupPasskeyGate', () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
 
     const request = createRequest('setupPasskeyGate', {
+      userId: 'test@example.com',
       credentialId,
       rpId: 'example.com',
     });
@@ -190,7 +193,7 @@ describe('setupPasskeyGate', () => {
   });
 
   it('should reject missing credentialId', async () => {
-    const request = createRequest('setupPasskeyGate', {});
+    const request = createRequest('setupPasskeyGate', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.error).toBeDefined();
@@ -201,7 +204,7 @@ describe('addEnrollment (multi-enrollment)', () => {
   it('should add passkey PRF to existing passphrase', async () => {
     // Setup passphrase first
     await handleMessage(
-      createRequest('setupPassphrase', { passphrase: 'initial-passphrase-123' })
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'initial-passphrase-123' })
     );
 
     // Add passkey PRF
@@ -209,8 +212,9 @@ describe('addEnrollment (multi-enrollment)', () => {
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
     const request = createRequest('addEnrollment', {
+      userId: 'test@example.com',
       method: 'passkey-prf',
-      credentials: { method: 'passphrase', passphrase: 'initial-passphrase-123' },
+      credentials: { method: 'passphrase', passphrase: 'initial-passphrase-123', userId: 'test@example.com' },
       newCredentials: { credentialId, prfOutput, rpId: 'example.com' },
     });
 
@@ -225,12 +229,13 @@ describe('addEnrollment (multi-enrollment)', () => {
 
   it('should reject with invalid credentials', async () => {
     await handleMessage(
-      createRequest('setupPassphrase', { passphrase: 'correct-passphrase-123' })
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'correct-passphrase-123' })
     );
 
     const request = createRequest('addEnrollment', {
+      userId: 'test@example.com',
       method: 'passphrase',
-      credentials: { method: 'passphrase', passphrase: 'wrong-passphrase' },
+      credentials: { method: 'passphrase', passphrase: 'wrong-passphrase', userId: 'test@example.com' },
       newCredentials: { passphrase: 'second-passphrase-456' },
     });
 
@@ -248,7 +253,7 @@ describe('generateVAPID', () => {
   it('should generate VAPID keypair successfully', async () => {
     // Setup first
     await handleMessage(
-      createRequest('setupPassphrase', { passphrase: 'test-passphrase-123' })
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-123' })
     );
 
     const credentials = createPassphraseCredentials('test-passphrase-123');
@@ -275,7 +280,7 @@ describe('generateVAPID', () => {
 
   it('should fail with wrong credentials', async () => {
     await handleMessage(
-      createRequest('setupPassphrase', { passphrase: 'correct-passphrase-123' })
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'correct-passphrase-123' })
     );
 
     const credentials = createPassphraseCredentials('wrong-passphrase');
@@ -293,7 +298,7 @@ describe('signJWT', () => {
 
   beforeEach(async () => {
     // Setup and generate VAPID key
-    await handleMessage(createRequest('setupPassphrase', { passphrase }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
 
     const vapidResponse = await handleMessage(
       createRequest('generateVAPID', { credentials: createPassphraseCredentials(passphrase) })
@@ -400,7 +405,7 @@ describe('createLease', () => {
   const passphrase = 'lease-creation-passphrase-123';
 
   beforeEach(async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
   });
 
   it('should create lease successfully', async () => {
@@ -459,7 +464,7 @@ describe('issueVAPIDJWT', () => {
 
   beforeEach(async () => {
     // Setup
-    await handleMessage(createRequest('setupPassphrase', { passphrase }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
 
     // Generate VAPID key
     const vapidResponse = await handleMessage(
@@ -571,7 +576,7 @@ describe('issueVAPIDJWT', () => {
 
 describe('isSetup', () => {
   it('should return false when not setup', async () => {
-    const request = createRequest('isSetup');
+    const request = createRequest('isSetup', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
@@ -580,9 +585,9 @@ describe('isSetup', () => {
   });
 
   it('should return true after passphrase setup', async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-123' }));
 
-    const request = createRequest('isSetup');
+    const request = createRequest('isSetup', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.result.isSetup).toBe(true);
@@ -594,10 +599,10 @@ describe('isSetup', () => {
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
     await handleMessage(
-      createRequest('setupPasskeyPRF', { credentialId, prfOutput })
+      createRequest('setupPasskeyPRF', { userId: 'test@example.com', credentialId, prfOutput })
     );
 
-    const request = createRequest('isSetup');
+    const request = createRequest('isSetup', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.result.isSetup).toBe(true);
@@ -607,7 +612,7 @@ describe('isSetup', () => {
 
 describe('getEnrollments', () => {
   it('should return empty array when no enrollments', async () => {
-    const request = createRequest('getEnrollments');
+    const request = createRequest('getEnrollments', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
@@ -615,24 +620,30 @@ describe('getEnrollments', () => {
   });
 
   it('should return passphrase enrollment', async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-123' }));
 
-    const request = createRequest('getEnrollments');
+    const request = createRequest('getEnrollments', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.result.enrollments).toContain('enrollment:passphrase:v2');
   });
 
   it('should return multiple enrollments', async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-123' }));
 
+    // Add passkey PRF as additional enrollment (shares same MS)
     const credentialId = new Uint8Array([1, 2, 3]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
     await handleMessage(
-      createRequest('setupPasskeyPRF', { credentialId, prfOutput })
+      createRequest('addEnrollment', {
+        userId: 'test@example.com',
+        method: 'passkey-prf',
+        credentials: { method: 'passphrase', passphrase: 'test-123', userId: 'test@example.com' },
+        newCredentials: { credentialId, prfOutput },
+      })
     );
 
-    const request = createRequest('getEnrollments');
+    const request = createRequest('getEnrollments', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
     expect(response.result.enrollments).toContain('enrollment:passphrase:v2');
@@ -651,7 +662,7 @@ describe('verifyAuditChain', () => {
   });
 
   it('should verify audit chain after operations', async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'audit-test-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'audit-test-123' }));
     await handleMessage(
       createRequest('generateVAPID', {
         credentials: createPassphraseCredentials('audit-test-123'),
@@ -670,7 +681,7 @@ describe('getPublicKey', () => {
   let kid: string;
 
   beforeEach(async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'pubkey-test-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'pubkey-test-123' }));
 
     const vapidResponse = await handleMessage(
       createRequest('generateVAPID', {
@@ -701,7 +712,7 @@ describe('getPublicKey', () => {
 describe('getAuditPublicKey', () => {
   it('should retrieve audit public key', async () => {
     // Setup KMS first to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'audit-key-test' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'audit-key-test' }));
 
     const request = createRequest('getAuditPublicKey');
     const response = await handleMessage(request);
@@ -719,21 +730,21 @@ describe('getAuditPublicKey', () => {
 describe('resetKMS', () => {
   it('should reset KMS successfully', async () => {
     // Setup first
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'reset-test-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'reset-test-123' }));
 
     // Verify setup
-    const setupCheck = await handleMessage(createRequest('isSetup'));
+    const setupCheck = await handleMessage(createRequest('isSetup', { userId: 'test@example.com' }));
     expect(setupCheck.result.isSetup).toBe(true);
 
     // Reset
-    const resetRequest = createRequest('resetKMS');
+    const resetRequest = createRequest('resetKMS', { userId: 'test@example.com' });
     const resetResponse = await handleMessage(resetRequest);
 
     expect(resetResponse.error).toBeUndefined();
     expect(resetResponse.result.success).toBe(true);
 
     // Verify not setup anymore
-    const afterReset = await handleMessage(createRequest('isSetup'));
+    const afterReset = await handleMessage(createRequest('isSetup', { userId: 'test@example.com' }));
     expect(afterReset.result.isSetup).toBe(false);
   });
 });
@@ -741,7 +752,7 @@ describe('resetKMS', () => {
 describe('removeEnrollment', () => {
   it('should remove enrollment successfully', async () => {
     const passphrase = 'remove-enrollment-123';
-    await handleMessage(createRequest('setupPassphrase', { passphrase }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
 
     const request = createRequest('removeEnrollment', {
       enrollmentId: 'enrollment:passphrase:v2',
@@ -755,7 +766,7 @@ describe('removeEnrollment', () => {
   });
 
   it('should require valid credentials', async () => {
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'correct-pass-123' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'correct-pass-123' }));
 
     const request = createRequest('removeEnrollment', {
       enrollmentId: 'enrollment:passphrase:v2',
@@ -778,7 +789,7 @@ describe('worker integration', () => {
 
     // 1. Setup
     const setupResponse = await handleMessage(
-      createRequest('setupPassphrase', { passphrase })
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
     );
     expect(setupResponse.error).toBeUndefined();
 
@@ -816,11 +827,11 @@ describe('worker integration', () => {
     expect(jwtResponse.result.jwt).toBeDefined();
 
     // 5. Verify audit chain
-    const auditResponse = await handleMessage(createRequest('verifyAuditChain'));
+    const auditResponse = await handleMessage(createRequest('verifyAuditChain', { userId: 'test@example.com' }));
     expect(auditResponse.result.valid).toBe(true);
 
     // 6. Check quota state
-    const enrollmentsResponse = await handleMessage(createRequest('getEnrollments'));
+    const enrollmentsResponse = await handleMessage(createRequest('getEnrollments', { userId: 'test@example.com' }));
     expect(enrollmentsResponse.result.enrollments).toContain('enrollment:passphrase:v2');
   });
 
@@ -828,7 +839,7 @@ describe('worker integration', () => {
     const pass1 = 'first-passphrase-123';
 
     // Setup passphrase
-    await handleMessage(createRequest('setupPassphrase', { passphrase: pass1 }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: pass1 }));
 
     // Add passkey PRF
     const credentialId = new Uint8Array([9, 10, 11, 12]).buffer;
@@ -836,8 +847,9 @@ describe('worker integration', () => {
 
     await handleMessage(
       createRequest('addEnrollment', {
+        userId: 'test@example.com',
         method: 'passkey-prf',
-        credentials: { method: 'passphrase', passphrase: pass1 },
+        credentials: { method: 'passphrase', passphrase: pass1, userId: 'test@example.com' },
         newCredentials: { credentialId, prfOutput },
       })
     );
@@ -852,7 +864,7 @@ describe('worker integration', () => {
 
     const vapidWithPRF = await handleMessage(
       createRequest('generateVAPID', {
-        credentials: { method: 'passkey-prf', prfOutput },
+        credentials: { method: 'passkey-prf', prfOutput, userId: 'test@example.com' },
       })
     );
     expect(vapidWithPRF.error).toBeUndefined();

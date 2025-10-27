@@ -19,9 +19,9 @@
  */
 
 export type AuthCredentials =
-  | { method: 'passphrase'; passphrase: string }
-  | { method: 'passkey-prf'; prfOutput: ArrayBuffer }
-  | { method: 'passkey-gate' };
+  | { method: 'passphrase'; passphrase: string; userId: string }
+  | { method: 'passkey-prf'; prfOutput: ArrayBuffer; userId: string }
+  | { method: 'passkey-gate'; userId: string };
 
 /* ------------------------------------------------------------------
  * Configuration schemas
@@ -140,6 +140,7 @@ export interface AuditOperation {
   op: string;
   kid: string;
   requestId: string;
+  userId: string;
   origin?: string;
   leaseId?: string; // If present, audit entry will be signed with LAK instead of UAK
   details?: Record<string, unknown>;
@@ -185,6 +186,7 @@ export interface AuditEntryV2 {
   op: string;
   kid: string;
   requestId: string;
+  userId: string;
   origin?: string;
   leaseId?: string; // Present if operation is lease-related
   unlockTime?: number;

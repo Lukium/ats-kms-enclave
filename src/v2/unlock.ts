@@ -29,12 +29,11 @@ import type {
   UnlockResult,
 } from './types';
 
-// Persistent config keys for enrolments. In a real implementation
-// these would include unique identifiers; here a single entry per
-// method suffices for demonstration.
-const PASSPHRASE_CONFIG_KEY = 'enrollment:passphrase:v2';
-const PASSKEY_PRF_CONFIG_KEY = 'enrollment:passkey-prf:v2';
-const PASSKEY_GATE_CONFIG_KEY = 'enrollment:passkey-gate:v2';
+// Persistent config keys for enrolments. Keys are namespaced by userId
+// to support multiple users in the same browser.
+const getPassphraseConfigKey = (userId: string) => `enrollment:passphrase:v2:${userId}`;
+const getPasskeyPRFConfigKey = (userId: string) => `enrollment:passkey-prf:v2:${userId}`;
+const getPasskeyGateConfigKey = (userId: string) => `enrollment:passkey-gate:v2:${userId}`;
 
 /**
  * Generate a new random 32‑byte master secret. The MS should never
@@ -53,6 +52,7 @@ function generateMasterSecret(): Uint8Array {
  * resulting configuration. Returns the cleartext MS to the caller.
  */
 export async function setupPassphrase(
+  userId: string,
   passphrase: string,
   existingMS?: Uint8Array
 ): Promise<UnlockResult> {
@@ -109,7 +109,7 @@ export async function setupPassphrase(
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  await putMeta(PASSPHRASE_CONFIG_KEY, config);
+  await putMeta(getPassphraseConfigKey(userId), config);
   return { success: true, ms };
 }
 
@@ -120,6 +120,7 @@ export async function setupPassphrase(
  * externally; here it is optional and defaults to an empty string.
  */
 export async function setupPasskeyPRF(
+  userId: string,
   credentialId: ArrayBuffer,
   prfOutput: ArrayBuffer,
   existingMS?: Uint8Array,
@@ -173,7 +174,7 @@ export async function setupPasskeyPRF(
     createdAt: now,
     updatedAt: now,
   };
-  await putMeta(PASSKEY_PRF_CONFIG_KEY, config);
+  await putMeta(getPasskeyPRFConfigKey(userId), config);
   return { success: true, ms };
 }
 
@@ -188,6 +189,7 @@ export async function setupPasskeyPRF(
  * PRF output provides entropy in setupPasskeyPRF.
  */
 export async function setupPasskeyGate(
+  userId: string,
   credentialId: ArrayBuffer,
   existingMS?: Uint8Array,
   rpId: string = ''
@@ -244,7 +246,7 @@ export async function setupPasskeyGate(
     updatedAt: now,
   };
 
-  await putMeta(PASSKEY_GATE_CONFIG_KEY, config);
+  await putMeta(getPasskeyGateConfigKey(userId), config);
   return { success: true, ms };
 }
 
@@ -253,8 +255,8 @@ export async function setupPasskeyGate(
  * configuration, derives the KEK and verifies the KCV. If the
  * verification passes the master secret is decrypted and returned.
  */
-export async function unlockWithPassphrase(passphrase: string): Promise<UnlockResult> {
-  const config = (await getMeta<PassphraseConfigV2>(PASSPHRASE_CONFIG_KEY));
+export async function unlockWithPassphrase(userId: string, passphrase: string): Promise<UnlockResult> {
+  const config = (await getMeta<PassphraseConfigV2>(getPassphraseConfigKey(userId)));
   if (!config) return { success: false, error: 'Passphrase not set up' };
   const passphraseKey = await crypto.subtle.importKey(
     'raw',
@@ -291,8 +293,8 @@ export async function unlockWithPassphrase(passphrase: string): Promise<UnlockRe
  * derive the KEK, decrypts the MS and returns it. No KCV is stored
  * for passkey enrolments in this simplified implementation.
  */
-export async function unlockWithPasskeyPRF(prfOutput: ArrayBuffer): Promise<UnlockResult> {
-  const config = (await getMeta<PasskeyPRFConfigV2>(PASSKEY_PRF_CONFIG_KEY));
+export async function unlockWithPasskeyPRF(userId: string, prfOutput: ArrayBuffer): Promise<UnlockResult> {
+  const config = (await getMeta<PasskeyPRFConfigV2>(getPasskeyPRFConfigKey(userId)));
   if (!config) return { success: false, error: 'Passkey not set up' };
   const hkdfSalt = config.kdf.hkdfSalt;
   const info = new TextEncoder().encode(config.kdf.info);
@@ -324,8 +326,8 @@ export async function unlockWithPasskeyPRF(prfOutput: ArrayBuffer): Promise<Unlo
  * authentication before the pepper can be accessed. This simplified version
  * assumes the pepper is accessible after device authentication.
  */
-export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
-  const config = await getMeta<PasskeyGateConfigV2>(PASSKEY_GATE_CONFIG_KEY);
+export async function unlockWithPasskeyGate(userId: string): Promise<UnlockResult> {
+  const config = await getMeta<PasskeyGateConfigV2>(getPasskeyGateConfigKey(userId));
   if (!config) return { success: false, error: 'Passkey gate not set up' };
 
   // Retrieve the pepper
@@ -360,26 +362,26 @@ export async function unlockWithPasskeyGate(): Promise<UnlockResult> {
  * Test whether any enrolment exists. Used by the UI to determine
  * whether setup is required.
  */
-export async function isSetup(): Promise<boolean> {
-  const pass = await getMeta(PASSPHRASE_CONFIG_KEY);
-  const prf = await getMeta(PASSKEY_PRF_CONFIG_KEY);
-  const gate = await getMeta(PASSKEY_GATE_CONFIG_KEY);
+export async function isSetup(userId: string): Promise<boolean> {
+  const pass = await getMeta(getPassphraseConfigKey(userId));
+  const prf = await getMeta(getPasskeyPRFConfigKey(userId));
+  const gate = await getMeta(getPasskeyGateConfigKey(userId));
   return !!(pass || prf || gate);
 }
 
 /**
  * Test whether a passphrase enrolment exists.
  */
-export async function isPassphraseSetup(): Promise<boolean> {
-  return !!(await getMeta(PASSPHRASE_CONFIG_KEY));
+export async function isPassphraseSetup(userId: string): Promise<boolean> {
+  return !!(await getMeta(getPassphraseConfigKey(userId)));
 }
 
 /**
  * Test whether any passkey enrolment exists (PRF or gate).
  */
-export async function isPasskeySetup(): Promise<boolean> {
-  const prf = await getMeta(PASSKEY_PRF_CONFIG_KEY);
-  const gate = await getMeta(PASSKEY_GATE_CONFIG_KEY);
+export async function isPasskeySetup(userId: string): Promise<boolean> {
+  const prf = await getMeta(getPasskeyPRFConfigKey(userId));
+  const gate = await getMeta(getPasskeyGateConfigKey(userId));
   return !!(prf || gate);
 }
 
@@ -422,13 +424,13 @@ export async function withUnlock<T>(
     let unlockResult: UnlockResult;
     switch (credentials.method) {
       case 'passphrase':
-        unlockResult = await unlockWithPassphrase(credentials.passphrase);
+        unlockResult = await unlockWithPassphrase(credentials.userId, credentials.passphrase);
         break;
       case 'passkey-prf':
-        unlockResult = await unlockWithPasskeyPRF(credentials.prfOutput);
+        unlockResult = await unlockWithPasskeyPRF(credentials.userId, credentials.prfOutput);
         break;
       case 'passkey-gate':
-        unlockResult = await unlockWithPasskeyGate();
+        unlockResult = await unlockWithPasskeyGate(credentials.userId);
         break;
       default:
         throw new Error('Unknown credential method');

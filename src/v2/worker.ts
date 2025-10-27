@@ -63,6 +63,7 @@ import {
   getMeta,
   deleteMeta,
   getAllAuditEntries,
+  getUserLeases,
 } from './storage';
 import {
   rawP256ToJwk,
@@ -206,11 +207,11 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       // === Status/Query Operations ===
       case 'isSetup':
-        result = await handleIsSetup();
+        result = await handleIsSetup(params);
         break;
 
       case 'getEnrollments':
-        result = await handleGetEnrollments();
+        result = await handleGetEnrollments(params);
         break;
 
       case 'verifyAuditChain':
@@ -227,6 +228,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'getAuditPublicKey':
         result = await handleGetAuditPublicKey();
+        break;
+
+      case 'getUserLeases':
+        result = await handleGetUserLeases(params);
         break;
 
       // === Management Operations ===
@@ -258,16 +263,16 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
  * Generates VAPID keypair and returns public key for immediate use.
  */
 async function handleSetupPassphrase(
-  params: { passphrase: string; existingMS?: Uint8Array },
+  params: { userId: string; passphrase: string; existingMS?: Uint8Array },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string }> {
-  const { passphrase, existingMS } = params;
+  const { userId, passphrase, existingMS } = params;
 
   if (!passphrase || passphrase.length < 8) {
     throw new Error('Passphrase must be at least 8 characters');
   }
 
-  const result = await setupPassphrase(passphrase, existingMS);
+  const result = await setupPassphrase(userId, passphrase, existingMS);
 
   if (!result.success) {
     throw new Error(result.error);
@@ -312,6 +317,7 @@ async function handleSetupPassphrase(
     op: 'setup',
     kid: '',
     requestId,
+    userId: userId,
     details: { method: 'passphrase', vapidKid: kid },
   });
 
@@ -330,6 +336,7 @@ async function handleSetupPassphrase(
  */
 async function handleSetupPasskeyPRF(
   params: {
+    userId: string;
     credentialId: ArrayBuffer;
     prfOutput: ArrayBuffer;
     rpId?: string;
@@ -337,7 +344,7 @@ async function handleSetupPasskeyPRF(
   },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string }> {
-  const { credentialId, prfOutput, rpId = '', existingMS } = params;
+  const { userId, credentialId, prfOutput, rpId = '', existingMS } = params;
 
   if (!credentialId || credentialId.byteLength === 0) {
     throw new Error('credentialId required');
@@ -347,7 +354,7 @@ async function handleSetupPasskeyPRF(
     throw new Error('prfOutput must be 32 bytes');
   }
 
-  const result = await setupPasskeyPRF(credentialId, prfOutput, existingMS, rpId);
+  const result = await setupPasskeyPRF(userId, credentialId, prfOutput, existingMS, rpId);
 
   if (!result.success) {
     throw new Error(result.error);
@@ -392,6 +399,7 @@ async function handleSetupPasskeyPRF(
     op: 'setup',
     kid: '',
     requestId,
+    userId: userId,
     details: { method: 'passkey-prf', credentialId: arrayBufferToBase64url(credentialId), vapidKid: kid },
   });
 
@@ -410,19 +418,20 @@ async function handleSetupPasskeyPRF(
  */
 async function handleSetupPasskeyGate(
   params: {
+    userId: string;
     credentialId: ArrayBuffer;
     rpId?: string;
     existingMS?: Uint8Array;
   },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string }> {
-  const { credentialId, rpId = '', existingMS } = params;
+  const { userId, credentialId, rpId = '', existingMS } = params;
 
   if (!credentialId || credentialId.byteLength === 0) {
     throw new Error('credentialId required');
   }
 
-  const result = await setupPasskeyGate(credentialId, existingMS, rpId);
+  const result = await setupPasskeyGate(userId, credentialId, existingMS, rpId);
 
   if (!result.success) {
     throw new Error(result.error);
@@ -467,6 +476,7 @@ async function handleSetupPasskeyGate(
     op: 'setup',
     kid: '',
     requestId,
+    userId: userId,
     details: { method: 'passkey-gate', credentialId: arrayBufferToBase64url(credentialId), vapidKid: kid },
   });
 
@@ -484,13 +494,14 @@ async function handleSetupPasskeyGate(
  */
 async function handleAddEnrollment(
   params: {
+    userId: string;
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
     credentials: AuthCredentials;
     newCredentials: any;
   },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string }> {
-  const { method, credentials, newCredentials } = params;
+  const { userId, method, credentials, newCredentials } = params;
 
   // Unlock to verify credentials and ensure audit key is loaded
   await withUnlock(credentials, async (mkek, _ms) => {
@@ -501,15 +512,15 @@ async function handleAddEnrollment(
   // Get the MS by unlocking again (we need the raw MS, not just verification)
   let ms: Uint8Array;
   if (credentials.method === 'passphrase') {
-    const result = await unlockWithPassphrase(credentials.passphrase);
+    const result = await unlockWithPassphrase(userId, credentials.passphrase);
     if (!result.success) throw new Error(result.error);
     ms = result.ms;
   } else if (credentials.method === 'passkey-prf') {
-    const result = await unlockWithPasskeyPRF(credentials.prfOutput);
+    const result = await unlockWithPasskeyPRF(userId, credentials.prfOutput);
     if (!result.success) throw new Error(result.error);
     ms = result.ms;
   } else if (credentials.method === 'passkey-gate') {
-    const result = await unlockWithPasskeyGate();
+    const result = await unlockWithPasskeyGate(userId);
     if (!result.success) throw new Error(result.error);
     ms = result.ms;
   } else {
@@ -519,16 +530,17 @@ async function handleAddEnrollment(
   // Setup new enrollment with existing MS
   let enrollmentResult;
   if (method === 'passphrase') {
-    enrollmentResult = await setupPassphrase(newCredentials.passphrase, ms);
+    enrollmentResult = await setupPassphrase(userId, newCredentials.passphrase, ms);
   } else if (method === 'passkey-prf') {
     enrollmentResult = await setupPasskeyPRF(
+      userId,
       newCredentials.credentialId,
       newCredentials.prfOutput,
       ms,
       newCredentials.rpId
     );
   } else if (method === 'passkey-gate') {
-    enrollmentResult = await setupPasskeyGate(newCredentials.credentialId, ms, newCredentials.rpId);
+    enrollmentResult = await setupPasskeyGate(userId, newCredentials.credentialId, ms, newCredentials.rpId);
   } else {
     throw new Error(`Unknown enrollment method: ${method}`);
   }
@@ -544,6 +556,7 @@ async function handleAddEnrollment(
     op: 'setup',
     kid: '',
     requestId,
+    userId: credentials.userId,
     details: { method, action: 'add-enrollment' },
   });
 
@@ -607,6 +620,7 @@ async function handleGenerateVAPID(
     op: 'generate',
     kid: result.result.kid,
     requestId,
+    userId: credentials.userId,
     unlockTime: result.unlockTime,
     lockTime: result.lockTime,
     duration: result.duration,
@@ -684,6 +698,7 @@ async function handleSignJWT(
     op: 'sign',
     kid,
     requestId,
+    userId: credentials.userId,
     unlockTime: result.unlockTime,
     lockTime: result.lockTime,
     duration: result.duration,
@@ -859,6 +874,7 @@ async function handleCreateLease(
     op: 'setup',
     kid,
     requestId,
+    userId: userId,
     details: {
       action: 'create-lease',
       leaseId,
@@ -1011,6 +1027,7 @@ async function handleIssueVAPIDJWT(
     op: 'sign',
     kid: lease.kid,
     requestId,
+    userId: lease.userId,
     leaseId, // Top-level field signals audit system to use LAK
     details: {
       action: 'issue-lease-jwt',
@@ -1096,27 +1113,37 @@ async function handleIssueVAPIDJWTs(
 /**
  * Check if KMS is setup (has at least one enrollment).
  */
-async function handleIsSetup(): Promise<{ isSetup: boolean; methods: string[] }> {
-  const setupResult = await isSetup();
+async function handleIsSetup(
+  params?: { userId?: string }
+): Promise<{ isSetup: boolean; methods: string[]; leases?: LeaseRecord[] }> {
+  const userId = params?.userId ?? 'default';
+  const setupResult = await isSetup(userId);
   const methods: string[] = [];
 
-  if (await isPassphraseSetup()) methods.push('passphrase');
-  if (await isPasskeySetup()) methods.push('passkey');
+  if (await isPassphraseSetup(userId)) methods.push('passphrase');
+  if (await isPasskeySetup(userId)) methods.push('passkey');
 
-  return { isSetup: setupResult, methods };
+  // If userId provided and setup is true, fetch leases
+  let leases: LeaseRecord[] | undefined;
+  if (setupResult && params?.userId) {
+    leases = await getUserLeases(params.userId);
+  }
+
+  return { isSetup: setupResult, methods, ...(leases !== undefined && { leases }) };
 }
 
 /**
  * Get list of all enrollment methods.
  */
-async function handleGetEnrollments(): Promise<{ enrollments: string[] }> {
+async function handleGetEnrollments(params?: { userId?: string }): Promise<{ enrollments: string[] }> {
+  const userId = params?.userId ?? 'default';
   const enrollments: string[] = [];
 
-  if (await isPassphraseSetup()) enrollments.push('enrollment:passphrase:v2');
-  if (await isPasskeySetup()) {
-    // Check both PRF and gate
-    const prfConfig = await getMeta('enrollment:passkey-prf:v2');
-    const gateConfig = await getMeta('enrollment:passkey-gate:v2');
+  if (await isPassphraseSetup(userId)) enrollments.push('enrollment:passphrase:v2');
+  if (await isPasskeySetup(userId)) {
+    // Check both PRF and gate with per-user keys
+    const prfConfig = await getMeta(`enrollment:passkey-prf:v2:${userId}`);
+    const gateConfig = await getMeta(`enrollment:passkey-gate:v2:${userId}`);
     if (prfConfig) enrollments.push('enrollment:passkey-prf:v2');
     if (gateConfig) enrollments.push('enrollment:passkey-gate:v2');
   }
@@ -1158,6 +1185,15 @@ async function handleGetPublicKey(params: { kid: string }): Promise<{ publicKey:
  */
 async function handleGetAuditPublicKey(): Promise<{ publicKey: string }> {
   return await getAuditPublicKey();
+}
+
+/**
+ * Get all leases for a user.
+ */
+async function handleGetUserLeases(params: { userId: string }): Promise<{ leases: LeaseRecord[] }> {
+  const { userId } = params;
+  const leases = await getUserLeases(userId);
+  return { leases };
 }
 
 // ============================================================================
@@ -1212,6 +1248,7 @@ async function handleRemoveEnrollment(
     op: 'reset',
     kid: '',
     requestId,
+    userId: credentials.userId,
     details: { action: 'remove-enrollment', enrollmentId },
   });
 
@@ -1242,6 +1279,7 @@ async function handleRemoveEnrollment(
         op: 'kms-init',
         kid: '',
         requestId: `init-${Date.now()}`,
+        userId: 'system',
         details: {
           kmsVersion: 'v2.0.0',
           timestamp: new Date().toISOString(),

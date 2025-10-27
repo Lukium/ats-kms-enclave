@@ -50,7 +50,7 @@ afterEach(() => {
 
 describe('setupPassphrase', () => {
   it('should setup passphrase and return MS', async () => {
-    const result = await setupPassphrase('my-secure-passphrase-123');
+    const result = await setupPassphrase('test@example.com', 'my-secure-passphrase-123');
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -63,7 +63,7 @@ describe('setupPassphrase', () => {
     const existingMS = new Uint8Array(32);
     crypto.getRandomValues(existingMS);
 
-    const result = await setupPassphrase('passphrase', existingMS);
+    const result = await setupPassphrase('test@example.com', 'passphrase', existingMS);
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -72,15 +72,15 @@ describe('setupPassphrase', () => {
   });
 
   it('should store config in storage', async () => {
-    await setupPassphrase('test-passphrase');
+    await setupPassphrase('test@example.com', 'test-passphrase');
 
     // Verify config exists by attempting unlock
-    const unlockResult = await unlockWithPassphrase('test-passphrase');
+    const unlockResult = await unlockWithPassphrase('test@example.com', 'test-passphrase');
     expect(unlockResult.success).toBe(true);
   });
 
   it('should calibrate PBKDF2 iterations', async () => {
-    const result = await setupPassphrase('passphrase');
+    const result = await setupPassphrase('test@example.com', 'passphrase');
     expect(result.success).toBe(true);
     // Iterations should be reasonable (50k-2M range)
     // We can't directly check iterations without exposing internal state,
@@ -90,10 +90,10 @@ describe('setupPassphrase', () => {
 
 describe('unlockWithPassphrase', () => {
   it('should unlock with correct passphrase', async () => {
-    const setupResult = await setupPassphrase('correct-passphrase');
+    const setupResult = await setupPassphrase('test@example.com', 'correct-passphrase');
     expect(setupResult.success).toBe(true);
 
-    const unlockResult = await unlockWithPassphrase('correct-passphrase');
+    const unlockResult = await unlockWithPassphrase('test@example.com', 'correct-passphrase');
     expect(unlockResult.success).toBe(true);
 
     if (setupResult.success && unlockResult.success) {
@@ -102,9 +102,9 @@ describe('unlockWithPassphrase', () => {
   });
 
   it('should fail with incorrect passphrase (KCV check)', async () => {
-    await setupPassphrase('correct-passphrase');
+    await setupPassphrase('test@example.com', 'correct-passphrase');
 
-    const result = await unlockWithPassphrase('wrong-passphrase');
+    const result = await unlockWithPassphrase('test@example.com', 'wrong-passphrase');
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBe('Invalid passphrase');
@@ -112,7 +112,7 @@ describe('unlockWithPassphrase', () => {
   });
 
   it('should fail when passphrase not set up', async () => {
-    const result = await unlockWithPassphrase('any-passphrase');
+    const result = await unlockWithPassphrase('test@example.com', 'any-passphrase');
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBe('Passphrase not set up');
@@ -120,11 +120,11 @@ describe('unlockWithPassphrase', () => {
   });
 
   it('should return same MS on multiple unlocks', async () => {
-    const setupResult = await setupPassphrase('passphrase');
+    const setupResult = await setupPassphrase('test@example.com', 'passphrase');
     expect(setupResult.success).toBe(true);
 
-    const unlock1 = await unlockWithPassphrase('passphrase');
-    const unlock2 = await unlockWithPassphrase('passphrase');
+    const unlock1 = await unlockWithPassphrase('test@example.com', 'passphrase');
+    const unlock2 = await unlockWithPassphrase('test@example.com', 'passphrase');
 
     expect(unlock1.success).toBe(true);
     expect(unlock2.success).toBe(true);
@@ -144,7 +144,7 @@ describe('setupPasskeyPRF', () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
-    const result = await setupPasskeyPRF(credentialId, prfOutput);
+    const result = await setupPasskeyPRF('test@example.com', credentialId, prfOutput);
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -160,7 +160,7 @@ describe('setupPasskeyPRF', () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
-    const result = await setupPasskeyPRF(credentialId, prfOutput, existingMS);
+    const result = await setupPasskeyPRF('test@example.com', credentialId, prfOutput, existingMS);
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -172,10 +172,10 @@ describe('setupPasskeyPRF', () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
-    await setupPasskeyPRF(credentialId, prfOutput, undefined, 'example.com');
+    await setupPasskeyPRF('test@example.com', credentialId, prfOutput, undefined, 'example.com');
 
     // Verify by unlocking
-    const unlockResult = await unlockWithPasskeyPRF(prfOutput);
+    const unlockResult = await unlockWithPasskeyPRF('test@example.com', prfOutput);
     expect(unlockResult.success).toBe(true);
   });
 });
@@ -185,10 +185,10 @@ describe('unlockWithPasskeyPRF', () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
-    const setupResult = await setupPasskeyPRF(credentialId, prfOutput);
+    const setupResult = await setupPasskeyPRF('test@example.com', credentialId, prfOutput);
     expect(setupResult.success).toBe(true);
 
-    const unlockResult = await unlockWithPasskeyPRF(prfOutput);
+    const unlockResult = await unlockWithPasskeyPRF('test@example.com', prfOutput);
     expect(unlockResult.success).toBe(true);
 
     if (setupResult.success && unlockResult.success) {
@@ -201,9 +201,9 @@ describe('unlockWithPasskeyPRF', () => {
     const correctPRF = crypto.getRandomValues(new Uint8Array(32)).buffer;
     const wrongPRF = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
-    await setupPasskeyPRF(credentialId, correctPRF);
+    await setupPasskeyPRF('test@example.com', credentialId, correctPRF);
 
-    const result = await unlockWithPasskeyPRF(wrongPRF);
+    const result = await unlockWithPasskeyPRF('test@example.com', wrongPRF);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBe('Decryption failed');
@@ -213,7 +213,7 @@ describe('unlockWithPasskeyPRF', () => {
   it('should fail when passkey PRF not set up', async () => {
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
 
-    const result = await unlockWithPasskeyPRF(prfOutput);
+    const result = await unlockWithPasskeyPRF('test@example.com', prfOutput);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBe('Passkey not set up');
@@ -229,7 +229,7 @@ describe('setupPasskeyGate', () => {
   it('should setup passkey gate and return MS', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
 
-    const result = await setupPasskeyGate(credentialId);
+    const result = await setupPasskeyGate('test@example.com', credentialId);
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -244,7 +244,7 @@ describe('setupPasskeyGate', () => {
 
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
 
-    const result = await setupPasskeyGate(credentialId, existingMS);
+    const result = await setupPasskeyGate('test@example.com', credentialId, existingMS);
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -255,10 +255,10 @@ describe('setupPasskeyGate', () => {
   it('should store config with RP ID', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
 
-    await setupPasskeyGate(credentialId, undefined, 'example.com');
+    await setupPasskeyGate('test@example.com', credentialId, undefined, 'example.com');
 
     // Verify by unlocking
-    const unlockResult = await unlockWithPasskeyGate();
+    const unlockResult = await unlockWithPasskeyGate('test@example.com');
     expect(unlockResult.success).toBe(true);
   });
 });
@@ -267,10 +267,10 @@ describe('unlockWithPasskeyGate', () => {
   it('should unlock successfully', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
 
-    const setupResult = await setupPasskeyGate(credentialId);
+    const setupResult = await setupPasskeyGate('test@example.com', credentialId);
     expect(setupResult.success).toBe(true);
 
-    const unlockResult = await unlockWithPasskeyGate();
+    const unlockResult = await unlockWithPasskeyGate('test@example.com');
     expect(unlockResult.success).toBe(true);
 
     if (setupResult.success && unlockResult.success) {
@@ -279,7 +279,7 @@ describe('unlockWithPasskeyGate', () => {
   });
 
   it('should fail when passkey gate not set up', async () => {
-    const result = await unlockWithPasskeyGate();
+    const result = await unlockWithPasskeyGate('test@example.com');
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBe('Passkey gate not set up');
@@ -288,10 +288,10 @@ describe('unlockWithPasskeyGate', () => {
 
   it('should return same MS on multiple unlocks', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
-    await setupPasskeyGate(credentialId);
+    await setupPasskeyGate('test@example.com', credentialId);
 
-    const unlock1 = await unlockWithPasskeyGate();
-    const unlock2 = await unlockWithPasskeyGate();
+    const unlock1 = await unlockWithPasskeyGate('test@example.com');
+    const unlock2 = await unlockWithPasskeyGate('test@example.com');
 
     expect(unlock1.success).toBe(true);
     expect(unlock2.success).toBe(true);
@@ -309,7 +309,7 @@ describe('unlockWithPasskeyGate', () => {
 describe('multi-enrollment', () => {
   it('should support passphrase + passkey PRF with same MS', async () => {
     // Setup passphrase first
-    const passphraseResult = await setupPassphrase('passphrase');
+    const passphraseResult = await setupPassphrase('test@example.com', 'passphrase');
     expect(passphraseResult.success).toBe(true);
 
     if (!passphraseResult.success) return;
@@ -317,13 +317,13 @@ describe('multi-enrollment', () => {
     // Setup passkey PRF with same MS
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    const prfResult = await setupPasskeyPRF(credentialId, prfOutput, passphraseResult.ms);
+    const prfResult = await setupPasskeyPRF('test@example.com', credentialId, prfOutput, passphraseResult.ms);
 
     expect(prfResult.success).toBe(true);
 
     // Both methods should unlock to same MS
-    const passphraseUnlock = await unlockWithPassphrase('passphrase');
-    const prfUnlock = await unlockWithPasskeyPRF(prfOutput);
+    const passphraseUnlock = await unlockWithPassphrase('test@example.com', 'passphrase');
+    const prfUnlock = await unlockWithPasskeyPRF('test@example.com', prfOutput);
 
     expect(passphraseUnlock.success).toBe(true);
     expect(prfUnlock.success).toBe(true);
@@ -340,19 +340,19 @@ describe('multi-enrollment', () => {
     crypto.getRandomValues(sharedMS);
 
     // Setup all three methods
-    await setupPassphrase('passphrase', sharedMS);
+    await setupPassphrase('test@example.com', 'passphrase', sharedMS);
 
     const credId1 = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credId1, prfOutput, sharedMS);
+    await setupPasskeyPRF('test@example.com', credId1, prfOutput, sharedMS);
 
     const credId2 = new Uint8Array([5, 6, 7, 8]).buffer;
-    await setupPasskeyGate(credId2, sharedMS);
+    await setupPasskeyGate('test@example.com', credId2, sharedMS);
 
     // All should unlock to same MS
-    const unlock1 = await unlockWithPassphrase('passphrase');
-    const unlock2 = await unlockWithPasskeyPRF(prfOutput);
-    const unlock3 = await unlockWithPasskeyGate();
+    const unlock1 = await unlockWithPassphrase('test@example.com', 'passphrase');
+    const unlock2 = await unlockWithPasskeyPRF('test@example.com', prfOutput);
+    const unlock3 = await unlockWithPasskeyGate('test@example.com');
 
     expect(unlock1.success && unlock2.success && unlock3.success).toBe(true);
 
@@ -441,13 +441,13 @@ describe('deriveMKEKFromMS', () => {
 
 describe('withUnlock', () => {
   it('should execute operation with MKEK (passphrase)', async () => {
-    await setupPassphrase('passphrase');
+    await setupPassphrase('test@example.com', 'passphrase');
 
     let operationCalled = false;
     let receivedMkek: CryptoKey | null = null;
 
     const result = await withUnlock(
-      { method: 'passphrase', passphrase: 'passphrase' },
+      { method: 'passphrase', passphrase: 'passphrase', userId: 'test@example.com' },
       async (mkek) => {
         operationCalled = true;
         receivedMkek = mkek;
@@ -462,10 +462,10 @@ describe('withUnlock', () => {
   });
 
   it('should track timing information', async () => {
-    await setupPassphrase('passphrase');
+    await setupPassphrase('test@example.com', 'passphrase');
 
     const result = await withUnlock(
-      { method: 'passphrase', passphrase: 'passphrase' },
+      { method: 'passphrase', passphrase: 'passphrase', userId: 'test@example.com' },
       async () => {
         // Simulate some work
         await new Promise(resolve => setTimeout(resolve, 10));
@@ -480,11 +480,11 @@ describe('withUnlock', () => {
   });
 
   it('should zeroize MS after operation', async () => {
-    await setupPassphrase('passphrase');
+    await setupPassphrase('test@example.com', 'passphrase');
 
     // We can't directly observe MS zeroization, but we can verify the operation completes
     const result = await withUnlock(
-      { method: 'passphrase', passphrase: 'passphrase' },
+      { method: 'passphrase', passphrase: 'passphrase', userId: 'test@example.com' },
       async (mkek) => {
         // Operation uses mkek
         const testData = new Uint8Array([1, 2, 3]);
@@ -499,10 +499,10 @@ describe('withUnlock', () => {
   it('should work with passkey PRF credentials', async () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credentialId, prfOutput);
+    await setupPasskeyPRF('test@example.com', credentialId, prfOutput);
 
     const result = await withUnlock(
-      { method: 'passkey-prf', prfOutput },
+      { method: 'passkey-prf', prfOutput, userId: 'test@example.com' },
       async (mkek) => {
         expect(mkek.algorithm.name).toBe('AES-GCM');
         return 'prf-success';
@@ -514,10 +514,10 @@ describe('withUnlock', () => {
 
   it('should work with passkey gate credentials', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
-    await setupPasskeyGate(credentialId);
+    await setupPasskeyGate('test@example.com', credentialId);
 
     const result = await withUnlock(
-      { method: 'passkey-gate' },
+      { method: 'passkey-gate', userId: 'test@example.com' },
       async (mkek) => {
         expect(mkek.algorithm.name).toBe('AES-GCM');
         return 'gate-success';
@@ -528,11 +528,11 @@ describe('withUnlock', () => {
   });
 
   it('should propagate operation errors', async () => {
-    await setupPassphrase('passphrase');
+    await setupPassphrase('test@example.com', 'passphrase');
 
     await expect(
       withUnlock(
-        { method: 'passphrase', passphrase: 'passphrase' },
+        { method: 'passphrase', passphrase: 'passphrase', userId: 'test@example.com' },
         async () => {
           throw new Error('Operation failed');
         }
@@ -541,11 +541,11 @@ describe('withUnlock', () => {
   });
 
   it('should fail with incorrect credentials', async () => {
-    await setupPassphrase('correct');
+    await setupPassphrase('test@example.com', 'correct');
 
     await expect(
       withUnlock(
-        { method: 'passphrase', passphrase: 'wrong' },
+        { method: 'passphrase', passphrase: 'wrong', userId: 'test@example.com' },
         async () => 'should not reach here'
       )
     ).rejects.toThrow();
@@ -558,85 +558,85 @@ describe('withUnlock', () => {
 
 describe('isSetup', () => {
   it('should return false when no enrollment exists', async () => {
-    expect(await isSetup()).toBe(false);
+    expect(await isSetup('test@example.com')).toBe(false);
   });
 
   it('should return true when passphrase is set up', async () => {
-    await setupPassphrase('passphrase');
-    expect(await isSetup()).toBe(true);
+    await setupPassphrase('test@example.com', 'passphrase');
+    expect(await isSetup('test@example.com')).toBe(true);
   });
 
   it('should return true when passkey PRF is set up', async () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credentialId, prfOutput);
+    await setupPasskeyPRF('test@example.com', credentialId, prfOutput);
 
-    expect(await isSetup()).toBe(true);
+    expect(await isSetup('test@example.com')).toBe(true);
   });
 
   it('should return true when passkey gate is set up', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
-    await setupPasskeyGate(credentialId);
+    await setupPasskeyGate('test@example.com', credentialId);
 
-    expect(await isSetup()).toBe(true);
+    expect(await isSetup('test@example.com')).toBe(true);
   });
 
   it('should return true when multiple methods are set up', async () => {
     const sharedMS = new Uint8Array(32);
     crypto.getRandomValues(sharedMS);
 
-    await setupPassphrase('passphrase', sharedMS);
+    await setupPassphrase('test@example.com', 'passphrase', sharedMS);
 
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credentialId, prfOutput, sharedMS);
+    await setupPasskeyPRF('test@example.com', credentialId, prfOutput, sharedMS);
 
-    expect(await isSetup()).toBe(true);
+    expect(await isSetup('test@example.com')).toBe(true);
   });
 });
 
 describe('isPassphraseSetup', () => {
   it('should return false when not set up', async () => {
-    expect(await isPassphraseSetup()).toBe(false);
+    expect(await isPassphraseSetup('test@example.com')).toBe(false);
   });
 
   it('should return true when passphrase is set up', async () => {
-    await setupPassphrase('passphrase');
-    expect(await isPassphraseSetup()).toBe(true);
+    await setupPassphrase('test@example.com', 'passphrase');
+    expect(await isPassphraseSetup('test@example.com')).toBe(true);
   });
 
   it('should return false when only passkey is set up', async () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credentialId, prfOutput);
+    await setupPasskeyPRF('test@example.com', credentialId, prfOutput);
 
-    expect(await isPassphraseSetup()).toBe(false);
+    expect(await isPassphraseSetup('test@example.com')).toBe(false);
   });
 });
 
 describe('isPasskeySetup', () => {
   it('should return false when not set up', async () => {
-    expect(await isPasskeySetup()).toBe(false);
+    expect(await isPasskeySetup('test@example.com')).toBe(false);
   });
 
   it('should return true when passkey PRF is set up', async () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credentialId, prfOutput);
+    await setupPasskeyPRF('test@example.com', credentialId, prfOutput);
 
-    expect(await isPasskeySetup()).toBe(true);
+    expect(await isPasskeySetup('test@example.com')).toBe(true);
   });
 
   it('should return true when passkey gate is set up', async () => {
     const credentialId = new Uint8Array([5, 6, 7, 8]).buffer;
-    await setupPasskeyGate(credentialId);
+    await setupPasskeyGate('test@example.com', credentialId);
 
-    expect(await isPasskeySetup()).toBe(true);
+    expect(await isPasskeySetup('test@example.com')).toBe(true);
   });
 
   it('should return false when only passphrase is set up', async () => {
-    await setupPassphrase('passphrase');
-    expect(await isPasskeySetup()).toBe(false);
+    await setupPassphrase('test@example.com', 'passphrase');
+    expect(await isPasskeySetup('test@example.com')).toBe(false);
   });
 
   it('should return true when both PRF and gate are set up', async () => {
@@ -645,11 +645,11 @@ describe('isPasskeySetup', () => {
 
     const credId1 = new Uint8Array([1, 2, 3, 4]).buffer;
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
-    await setupPasskeyPRF(credId1, prfOutput, sharedMS);
+    await setupPasskeyPRF('test@example.com', credId1, prfOutput, sharedMS);
 
     const credId2 = new Uint8Array([5, 6, 7, 8]).buffer;
-    await setupPasskeyGate(credId2, sharedMS);
+    await setupPasskeyGate('test@example.com', credId2, sharedMS);
 
-    expect(await isPasskeySetup()).toBe(true);
+    expect(await isPasskeySetup('test@example.com')).toBe(true);
   });
 });

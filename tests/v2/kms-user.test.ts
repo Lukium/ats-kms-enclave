@@ -331,7 +331,7 @@ describe('RPC communication', () => {
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
     // Send request
-    const requestPromise = kmsUser.setupPassphrase('short');
+    const requestPromise = kmsUser.setupPassphrase('test@example.com', 'short');
 
     // Get request ID
     const [request] = postMessageSpy.mock.calls[0]! as [any, string];
@@ -349,7 +349,7 @@ describe('RPC communication', () => {
 
   it('should timeout requests', async () => {
     // Send request with short timeout (but don't await it)
-    kmsUser.setupPassphrase('test-passphrase-123');
+    kmsUser.setupPassphrase('test@example.com', 'test-passphrase-123');
 
     // Don't send response - should timeout after default 10 seconds
     // For testing, we'd need to mock timers, but the implementation is correct
@@ -448,10 +448,11 @@ describe('setup operations', () => {
     const iframe = env.getCurrentIframe();
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
-    const requestPromise = kmsUser.setupPassphrase('test-passphrase-123');
+    const requestPromise = kmsUser.setupPassphrase('test@example.com', 'test-passphrase-123');
 
     const [request] = postMessageSpy.mock.calls[0]! as [any, string];
     expect(request.method).toBe('setupPassphrase');
+    expect(request.params.userId).toBe('test@example.com');
     expect(request.params.passphrase).toBe('test-passphrase-123');
 
     env.simulateIframeMessage({
@@ -472,9 +473,9 @@ describe('setup operations', () => {
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
     const requestPromise = kmsUser.setupPasskeyPRF({
+      userId: 'test@example.com',
       name: 'Test User',
       rpId: 'localhost',
-      userId: 'user-123',
     });
 
     // Wait for async WebAuthn and RPC request to complete
@@ -510,9 +511,9 @@ describe('setup operations', () => {
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
     const requestPromise = kmsUser.setupPasskeyGate({
+      userId: 'test@example.com',
       name: 'Test User',
       rpId: 'localhost',
-      userId: 'user-123',
     });
 
     // Wait for async WebAuthn and RPC request to complete
@@ -567,7 +568,7 @@ describe('VAPID operations', () => {
     const iframe = env.getCurrentIframe();
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123' };
+    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
     const requestPromise = kmsUser.generateVAPID(credentials);
 
     const [request] = postMessageSpy.mock.calls[0]! as [any, string];
@@ -587,7 +588,7 @@ describe('VAPID operations', () => {
     const iframe = env.getCurrentIframe();
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123' };
+    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
     const payload = {
       aud: 'https://fcm.googleapis.com',
       sub: 'mailto:test@example.com',
@@ -662,7 +663,7 @@ describe('lease operations', () => {
     const iframe = env.getCurrentIframe();
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123' };
+    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
     const requestPromise = kmsUser.createLease({
       userId: 'user-123',
       subs: [{ url: 'https://push.example.com/sub', aud: 'https://fcm.googleapis.com', eid: 'ep-1' }],
@@ -825,7 +826,7 @@ describe('status and management', () => {
     const iframe = env.getCurrentIframe();
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123' };
+    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
     const requestPromise = kmsUser.removeEnrollment('enrollment:passkey-prf:v2', credentials);
 
     const [request] = postMessageSpy.mock.calls[0]! as [any, string];

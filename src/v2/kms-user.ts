@@ -26,6 +26,7 @@ import type {
   RPCMethod,
   AuthCredentials,
   VAPIDPayload,
+  LeaseRecord,
 } from './types.js';
 
 /**
@@ -112,6 +113,7 @@ export interface JWTResult {
 export interface StatusResult {
   isSetup: boolean;
   methods: string[];
+  leases?: LeaseRecord[];
 }
 
 /**
@@ -364,11 +366,12 @@ export class KMSUser {
   /**
    * Setup KMS with passphrase authentication
    *
+   * @param userId - User ID
    * @param passphrase - User passphrase (min 8 characters)
    * @returns Setup result
    */
-  async setupPassphrase(passphrase: string): Promise<SetupResult> {
-    return this.sendRequest<SetupResult>('setupPassphrase', { passphrase });
+  async setupPassphrase(userId: string, passphrase: string): Promise<SetupResult> {
+    return this.sendRequest<SetupResult>('setupPassphrase', { userId, passphrase });
   }
 
   /**
@@ -381,9 +384,9 @@ export class KMSUser {
    * @returns Setup result
    */
   async setupPasskeyPRF(config: {
+    userId: string;
     name: string;
     rpId: string;
-    userId: string;
   }): Promise<SetupResult> {
     if (typeof navigator === 'undefined' || !navigator.credentials) {
       throw new Error('WebAuthn not supported');
@@ -432,6 +435,7 @@ export class KMSUser {
 
       // Send to KMS
       const result = await this.sendRequest<SetupResult>('setupPasskeyPRF', {
+        userId: config.userId,
         credentialId: credential.rawId,
         prfOutput: prfOutput,
         rpId: config.rpId,
@@ -456,9 +460,9 @@ export class KMSUser {
    * @returns Setup result
    */
   async setupPasskeyGate(config: {
+    userId: string;
     name: string;
     rpId: string;
-    userId: string;
   }): Promise<SetupResult> {
     if (typeof navigator === 'undefined' || !navigator.credentials) {
       throw new Error('WebAuthn not supported');
@@ -489,6 +493,7 @@ export class KMSUser {
 
       // Send to KMS
       return await this.sendRequest<SetupResult>('setupPasskeyGate', {
+        userId: config.userId,
         credentialId: credential.rawId,
         rpId: config.rpId,
       });
@@ -500,17 +505,20 @@ export class KMSUser {
   /**
    * Add additional enrollment method (multi-enrollment)
    *
+   * @param userId - User ID
    * @param method - Method to add
    * @param credentials - Current credentials to unlock
    * @param newCredentials - New credentials to add
    * @returns Setup result
    */
   async addEnrollment(
+    userId: string,
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate',
     credentials: AuthCredentials,
     newCredentials: any
   ): Promise<SetupResult> {
     return this.sendRequest<SetupResult>('addEnrollment', {
+      userId,
       method,
       credentials,
       newCredentials,
@@ -706,10 +714,11 @@ export class KMSUser {
   /**
    * Check if KMS is setup
    *
-   * @returns Setup status
+   * @param userId - Optional user ID to fetch leases for
+   * @returns Setup status (includes leases if userId provided and setup is true)
    */
-  async isSetup(): Promise<StatusResult> {
-    return this.sendRequest<StatusResult>('isSetup', {});
+  async isSetup(userId?: string): Promise<StatusResult> {
+    return this.sendRequest<StatusResult>('isSetup', { userId });
   }
 
   /**
@@ -746,6 +755,16 @@ export class KMSUser {
    */
   async getAuditPublicKey(): Promise<{ publicKey: string }> {
     return this.sendRequest<{ publicKey: string }>('getAuditPublicKey', {});
+  }
+
+  /**
+   * Get all leases for a user
+   *
+   * @param userId - User ID to query leases for
+   * @returns Array of lease records with expiration timestamps
+   */
+  async getUserLeases(userId: string): Promise<{ leases: LeaseRecord[] }> {
+    return this.sendRequest<{ leases: LeaseRecord[] }>('getUserLeases', { userId });
   }
 
   /**

@@ -119,6 +119,7 @@ describe('logOperation', () => {
       op: 'sign',
       kid: 'test-key-1',
       requestId: 'req-123',
+      userId: 'test-user',
     };
 
     await logOperation(op);
@@ -134,9 +135,9 @@ describe('logOperation', () => {
   it('should increment sequence numbers', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
-    await logOperation({ op: 'unlock', kid: '', requestId: 'req-2' });
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3' });
+    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', userId: 'test-user' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
     expect(entries).toHaveLength(3);
@@ -149,7 +150,7 @@ describe('logOperation', () => {
     await ensureKIAK();
 
     const before = Date.now();
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'test-user' });
     const after = Date.now();
 
     const entries = await getAllAuditEntries();
@@ -164,6 +165,7 @@ describe('logOperation', () => {
       op: 'sign',
       kid: 'key-1',
       requestId: 'req-1',
+      userId: 'test-user',
       origin: 'https://example.com',
       unlockTime: 100,
       lockTime: 200,
@@ -184,8 +186,8 @@ describe('logOperation', () => {
   it('should create chain hash linking to previous entry', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2' });
+    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
     expect(entries[0]!.previousHash).toBe(''); // First entry has no previous
@@ -195,8 +197,8 @@ describe('logOperation', () => {
   it('should create unique chain hashes for different operations', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2' });
+    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
     expect(entries[0]!.chainHash).not.toBe(entries[1]!.chainHash);
@@ -205,7 +207,7 @@ describe('logOperation', () => {
   it('should include signer ID in entries', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
     expect(entries[0]!.signerId).toBeDefined();
@@ -215,7 +217,7 @@ describe('logOperation', () => {
   it('should include signature in entries', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
     expect(entries[0]!.sig).toBeDefined();
@@ -239,7 +241,7 @@ describe('verifyAuditChain', () => {
   it('should verify a single entry', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'test-user' });
 
     const result = await verifyAuditChain();
 
@@ -251,9 +253,9 @@ describe('verifyAuditChain', () => {
   it('should verify multiple entries', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1' });
-    await logOperation({ op: 'unlock', kid: '', requestId: 'req-2' });
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3' });
+    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', userId: 'test-user' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user' });
 
     const result = await verifyAuditChain();
 
@@ -270,7 +272,7 @@ describe('verifyAuditChain', () => {
 describe('getAuditPublicKey', () => {
   it('should export base64url encoded SPKI public key', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
 
     const { publicKey } = await getAuditPublicKey();
 
@@ -281,7 +283,7 @@ describe('getAuditPublicKey', () => {
 
   it('should return UAK public key after setup', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
 
     const { publicKey } = await getAuditPublicKey();
 
@@ -291,7 +293,7 @@ describe('getAuditPublicKey', () => {
 
   it('should return consistent public key', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
 
     const { publicKey: key1 } = await getAuditPublicKey();
     const { publicKey: key2 } = await getAuditPublicKey();
@@ -307,9 +309,9 @@ describe('getAuditPublicKey', () => {
 describe('exportAuditKey', () => {
   it('should export base64url encoded PKCS#8 private key', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
 
-    const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test' });
+    const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test', userId: 'test@example.com' });
 
     // Base64url should not contain +, /, or =
     expect(privateKey).not.toMatch(/[+/=]/);
@@ -318,9 +320,9 @@ describe('exportAuditKey', () => {
 
   it('should export UAK after setup', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
 
-    const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test' });
+    const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test', userId: 'test@example.com' });
 
     expect(privateKey).toBeDefined();
     expect(privateKey.length).toBeGreaterThan(0);
@@ -328,10 +330,10 @@ describe('exportAuditKey', () => {
 
   it('should export different key than public key', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
 
     const { publicKey } = await getAuditPublicKey();
-    const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test' });
+    const privateKey = await exportAuditKey({ method: 'passphrase', passphrase: 'test', userId: 'test@example.com' });
 
     expect(privateKey).not.toBe(publicKey);
     // Private key PKCS#8 should be longer than public key SPKI
@@ -347,8 +349,8 @@ describe('resetAuditLogger', () => {
   it('should reset sequence counter', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1' });
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2', userId: 'test-user' });
 
     const entriesBefore = await getAllAuditEntries();
     expect(entriesBefore[1]!.seqNum).toBe(2);
@@ -361,7 +363,7 @@ describe('resetAuditLogger', () => {
     await initDB();
     await ensureKIAK();
 
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3' });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user' });
 
     const entriesAfter = await getAllAuditEntries();
     expect(entriesAfter[0]!.seqNum).toBe(1);
@@ -369,7 +371,7 @@ describe('resetAuditLogger', () => {
 
   it('should generate new key pair after reset', async () => {
     // Setup KMS to initialize UAK
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
     const { publicKey: key1 } = await getAuditPublicKey();
 
     // Reset with fresh database to get new UAK (simulates new installation)
@@ -377,7 +379,7 @@ describe('resetAuditLogger', () => {
     closeDB();
     globalThis.indexedDB = new IDBFactory();
     await initDB();
-    await handleMessage(createRequest('setupPassphrase', { passphrase: 'test-passphrase-1234' }));
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'test-passphrase-1234' }));
     const { publicKey: key2 } = await getAuditPublicKey();
 
     expect(key1).not.toBe(key2);
@@ -393,11 +395,11 @@ describe('audit integration', () => {
     await ensureKIAK();
 
     // Simulate a typical KMS session
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', details: { method: 'passphrase' } });
-    await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', unlockTime: 100 });
-    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', duration: 50, details: { algorithm: 'ECDSA' } });
-    await logOperation({ op: 'unwrap', kid: 'key-2', requestId: 'req-4', duration: 30 });
-    await logOperation({ op: 'reset', kid: '', requestId: 'req-5', lockTime: 500 });
+    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user', details: { method: 'passphrase' } });
+    await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', userId: 'test-user', unlockTime: 100 });
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user', duration: 50, details: { algorithm: 'ECDSA' } });
+    await logOperation({ op: 'unwrap', kid: 'key-2', requestId: 'req-4', userId: 'test-user', duration: 30 });
+    await logOperation({ op: 'reset', kid: '', requestId: 'req-5', userId: 'test-user', lockTime: 500 });
 
     const result = await verifyAuditChain();
 
@@ -413,6 +415,7 @@ describe('audit integration', () => {
       op: 'sign',
       kid: 'key-1',
       requestId: 'req-1',
+      userId: 'test-user',
       origin: 'https://example.com',
       unlockTime: 100,
       lockTime: 200,

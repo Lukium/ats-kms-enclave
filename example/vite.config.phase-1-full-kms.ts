@@ -5,6 +5,16 @@ import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'full-reload',
+      handleHotUpdate({ server }) {
+        // Force full reload instead of HMR to prevent duplicate worker instances
+        server.ws.send({ type: 'full-reload' });
+        return [];
+      },
+    },
+  ],
   root: path.resolve(__dirname, './phase-1/full'),
   publicDir: false,
   build: {

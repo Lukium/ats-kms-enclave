@@ -61,6 +61,52 @@ Worker (worker.ts - crypto operations)
 
 ---
 
+## ⚠️ CRITICAL: KMSClient Auto-Initialization
+
+**The KMSClient automatically initializes when imported in a browser environment.** This is intentional and provides a better developer experience by eliminating manual initialization code.
+
+### ✅ CORRECT Usage (Iframe Entry Point)
+
+When creating your KMS iframe entry point (e.g., `kms.ts`), simply import the client module:
+
+```typescript
+// kms.ts - Iframe entry point
+import '@/client';  // Auto-initializes KMSClient
+
+console.log('[KMS] Ready (using auto-initialized KMSClient)');
+```
+
+The auto-initialization will:
+- Create a single KMSClient instance
+- Create a single dedicated worker
+- Set up message handlers automatically
+- Export the instance to `window.__kmsClient` for debugging
+
+### ❌ INCORRECT Usage
+
+**DO NOT manually create a KMSClient instance in your iframe entry point.** This will create duplicate instances and cause duplicate message processing:
+
+```typescript
+// ❌ WRONG - Creates duplicate instance and worker!
+import { KMSClient } from '@/client';
+const client = new KMSClient({ parentOrigin: '...' });
+await client.init();  // Second worker created - messages processed twice!
+```
+
+### Symptoms of Duplicate Instances
+
+If you accidentally create a second KMSClient instance, you'll see:
+- Duplicate log messages in console (same request ID logged twice)
+- "No pending request for ID" errors
+- Race conditions between workers
+- Inconsistent behavior (first worker's response wins, second is ignored)
+
+### For Testing/Manual Control
+
+If you need manual control (e.g., in unit tests), the auto-initialization only runs in browser environments (`typeof window !== 'undefined'`). In Node/test environments, you must manually create instances.
+
+---
+
 ## Key Concepts
 
 ### Per-Operation Authentication
@@ -240,30 +286,159 @@ Setup KMS with passkey gate authentication (fallback for non-PRF passkeys).
 
 #### `addEnrollment(method, credentials, newCredentials)`
 
-Add additional enrollment method to existing Master Secret (multi-enrollment).
+Add additional enrollment method to existing Master Secret (multi-enrollment). All enrollments share the same Master Secret (MS), encrypted with different Key Encryption Keys (KEKs).
+
+**Architecture:**
+```
+         Master Secret (32 bytes)
+                 |
+  ┌──────────────┼──────────────┐
+  │              │              │
+KEK₁          KEK₂          KEK₃
+(passphrase)  (passkey PRF)  (passkey gate)
+```
 
 **Parameters:**
 - `method: 'passphrase' | 'passkey-prf' | 'passkey-gate'` - Method to add
-- `credentials: AuthCredentials` - Current credentials to unlock
-- `newCredentials: any` - New credentials to add
+- `credentials: AuthCredentials` - Current credentials to unlock and authorize
+- `newCredentials: any` - New method credentials (method-specific structure)
+
+**newCredentials Structure:**
+
+**For Passphrase:**
+```typescript
+{
+  passphrase: string  // Min 8 characters
+}
+```
+
+**For Passkey PRF:**
+```typescript
+{
+  credentialId: ArrayBuffer,  // From credential.rawId
+  prfOutput: ArrayBuffer,     // From credential.getClientExtensionResults().prf
+  rpId: string               // Relying Party ID (e.g., "localhost", "example.com")
+}
+```
+
+**For Passkey Gate:**
+```typescript
+{
+  credentialId: ArrayBuffer,  // From credential.rawId
+  rpId: string               // Relying Party ID
+}
+```
 
 **Returns:**
 ```typescript
 {
   success: true,
-  enrollmentId: string
+  enrollmentId: string  // e.g., "enrollment:passphrase:v2"
 }
 ```
 
-**Example:**
+**Examples:**
+
+**1. Add Passphrase to Existing Passkey Enrollment:**
 ```typescript
-// Add passphrase to existing passkey enrollment
+// Unlock with existing passkey PRF
+const prfOutput = /* ... from WebAuthn get assertion ... */;
+
 await kmsUser.addEnrollment(
   'passphrase',
-  { method: 'passkey-prf', prfOutput: ... },
-  { passphrase: 'new-passphrase-123' }
+  { method: 'passkey-prf', prfOutput },
+  { passphrase: 'my-new-secure-passphrase-123' }
 );
 ```
+
+**2. Add Passkey to Existing Passphrase Enrollment:**
+```typescript
+// Unlock with existing passphrase
+const passphraseCredentials = {
+  method: 'passphrase',
+  passphrase: 'my-current-passphrase',
+};
+
+// Create new WebAuthn credential
+const credential = await navigator.credentials.create({
+  publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { id: 'localhost', name: 'Demo' },
+    user: {
+      id: new TextEncoder().encode('user-123'),
+      name: 'Demo User',
+      displayName: 'Demo User',
+    },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform',
+      requireResidentKey: true,
+      userVerification: 'required',
+    },
+    extensions: {
+      prf: {
+        eval: {
+          first: crypto.getRandomValues(new Uint8Array(32)),  // appSalt
+        },
+      },
+    },
+  },
+}) as PublicKeyCredential;
+
+// Check if PRF succeeded
+const prfExt = (credential as any).getClientExtensionResults().prf;
+const prfOutput = prfExt?.results?.first;
+
+if (prfOutput) {
+  // PRF available - use passkey-prf
+  await kmsUser.addEnrollment(
+    'passkey-prf',
+    passphraseCredentials,
+    {
+      credentialId: credential.rawId,
+      prfOutput,
+      rpId: 'localhost',
+    }
+  );
+} else {
+  // PRF not available - fallback to passkey-gate
+  await kmsUser.addEnrollment(
+    'passkey-gate',
+    passphraseCredentials,
+    {
+      credentialId: credential.rawId,
+      rpId: 'localhost',
+    }
+  );
+}
+```
+
+**How It Works:**
+
+1. **Unlock with Existing Credentials**: Authenticates user and retrieves Master Secret
+2. **Derive New KEK**: Generates KEK for new authentication method
+3. **Wrap Master Secret**: Encrypts same MS with new KEK
+4. **Store Enrollment**: Saves new enrollment record to IndexedDB
+5. **Audit Logging**: Logs operation with UAK (User Audit Key)
+
+**Security Properties:**
+
+- **Single Master Secret**: All enrollments decrypt to the same MS
+- **Independent KEKs**: Compromising one enrollment doesn't compromise others
+- **Key Isolation**: Each enrollment uses different key derivation parameters
+- **Enrollment Independence**: Can remove any enrollment (except last) without affecting others
+
+**Important Notes:**
+
+- Cannot remove the last enrollment (would lock user out)
+- PRF/Gate auto-detection recommended for optimal UX (see example 2)
+- Always request PRF extension during WebAuthn create, check if succeeded
+- Store `appSalt` in localStorage for PRF enrollments (needed for unlock)
+- Different user IDs recommended for multiple passkeys (avoid conflicts)
+
+**Performance:** < 2000ms (includes unlock + key derivation + wrapping)
+
+**Audit Entry:** Signed by UAK
 
 ---
 

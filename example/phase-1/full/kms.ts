@@ -3,9 +3,12 @@
  *
  * This file runs in a sandboxed iframe on http://localhost:5174
  * The parent PWA runs on http://localhost:5173 (different origin = isolated)
+ *
+ * Note: KMSClient auto-initializes when client.ts is imported, so we just
+ * need to import it to trigger initialization. No need to create our own instance.
  */
 
-import { KMSClient } from '@/client';
+import '@/client';
 
 console.log('[KMS Enclave] Initializing...');
 console.log('[KMS Enclave] 🔍 CRITICAL: Running on origin:', window.location.origin);
@@ -31,14 +34,6 @@ if (window.location.origin === parentOrigin) {
   console.log('[KMS] ✅ Cross-origin isolation verified: KMS and parent are on different origins');
 }
 
-// Create and initialize KMSClient
-const kmsClient = new KMSClient({ parentOrigin });
-
-(async () => {
-  try {
-    await kmsClient.init();
-    console.log('[KMS Enclave] Ready');
-  } catch (error) {
-    console.error('[KMS] Initialization failed:', error);
-  }
-})();
+// KMSClient is auto-initialized by client.ts when imported
+// Access it via window.__kmsClient if needed for debugging
+console.log('[KMS Enclave] Ready (using auto-initialized KMSClient)');

@@ -299,8 +299,10 @@ export class KMSUser {
       const errorMsg = typeof response.error === 'string'
         ? response.error
         : response.error.message || JSON.stringify(response.error);
+      console.error(`[KMS User] Method ${pending.method} failed:`, errorMsg);
       pending.reject(new Error(errorMsg));
     } else {
+      console.log(`[KMS User] Method ${pending.method} succeeded:`, response.result);
       pending.resolve(response.result);
     }
   }

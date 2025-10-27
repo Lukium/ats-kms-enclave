@@ -296,6 +296,13 @@ export interface QuotaState {
   sendsPerMinutePerEid: number;
 }
 
+export interface LeaseVerificationResult {
+  leaseId: string;
+  valid: boolean;
+  reason?: string;
+  kid: string;
+}
+
 export interface VAPIDPayload {
   aud: string;
   exp: number;

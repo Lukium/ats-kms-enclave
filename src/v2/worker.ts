@@ -27,6 +27,7 @@ import type {
   LeaseRecord,
   QuotaState,
   AuditEntryV2,
+  LeaseVerificationResult,
 } from './types';
 import {
   setupPassphrase,
@@ -234,6 +235,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'getUserLeases':
         result = await handleGetUserLeases(params);
+        break;
+
+      case 'verifyLease':
+        result = await handleVerifyLease(params);
         break;
 
       case 'getVAPIDKid':
@@ -1202,6 +1207,72 @@ async function handleGetUserLeases(params: { userId: string }): Promise<{ leases
   const leases = await getUserLeases(userId);
   console.log('[Worker] getUserLeases returned', leases.length, 'leases');
   return { leases };
+}
+
+/**
+ * Verify a lease against the current VAPID key (read-only, no audit log).
+ *
+ * Checks:
+ * - Lease exists
+ * - Lease is not expired
+ * - Lease kid matches current VAPID key
+ *
+ * This is a read-only operation and does not create audit entries.
+ */
+async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVerificationResult> {
+  const { leaseId } = params;
+
+  // Retrieve lease
+  const lease = await getLease(leaseId);
+  if (!lease) {
+    return {
+      leaseId,
+      valid: false,
+      reason: 'not-found',
+      kid: '',
+    };
+  }
+
+  // Check expiration
+  if (Date.now() >= lease.exp) {
+    return {
+      leaseId,
+      valid: false,
+      reason: 'expired',
+      kid: lease.kid,
+    };
+  }
+
+  // Get current VAPID key
+  const allKeys = await getAllWrappedKeys();
+  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+
+  if (vapidKeys.length === 0) {
+    return {
+      leaseId,
+      valid: false,
+      reason: 'no-vapid-key',
+      kid: lease.kid,
+    };
+  }
+
+  // Check if lease kid matches current VAPID key
+  const currentKid = vapidKeys[0]!.kid;
+  if (lease.kid !== currentKid) {
+    return {
+      leaseId,
+      valid: false,
+      reason: 'wrong-key',
+      kid: lease.kid,
+    };
+  }
+
+  // Lease is valid
+  return {
+    leaseId,
+    valid: true,
+    kid: lease.kid,
+  };
 }
 
 /**

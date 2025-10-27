@@ -135,7 +135,7 @@ describe('logOperation', () => {
   it('should increment sequence numbers', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'setup-passphrase', kid: '', requestId: 'req-1', userId: 'test-user' });
     await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', userId: 'test-user' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user' });
 
@@ -186,7 +186,7 @@ describe('logOperation', () => {
   it('should create chain hash linking to previous entry', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'setup-passphrase', kid: '', requestId: 'req-1', userId: 'test-user' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
@@ -197,7 +197,7 @@ describe('logOperation', () => {
   it('should create unique chain hashes for different operations', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'setup-passphrase', kid: '', requestId: 'req-1', userId: 'test-user' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-2', userId: 'test-user' });
 
     const entries = await getAllAuditEntries();
@@ -253,7 +253,7 @@ describe('verifyAuditChain', () => {
   it('should verify multiple entries', async () => {
     await ensureKIAK();
 
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user' });
+    await logOperation({ op: 'setup-passphrase', kid: '', requestId: 'req-1', userId: 'test-user' });
     await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', userId: 'test-user' });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user' });
 
@@ -395,7 +395,7 @@ describe('audit integration', () => {
     await ensureKIAK();
 
     // Simulate a typical KMS session
-    await logOperation({ op: 'setup', kid: '', requestId: 'req-1', userId: 'test-user', details: { method: 'passphrase' } });
+    await logOperation({ op: 'setup-passphrase', kid: '', requestId: 'req-1', userId: 'test-user', details: { method: 'passphrase' } });
     await logOperation({ op: 'unlock', kid: '', requestId: 'req-2', userId: 'test-user', unlockTime: 100 });
     await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-3', userId: 'test-user', duration: 50, details: { algorithm: 'ECDSA' } });
     await logOperation({ op: 'unwrap', kid: 'key-2', requestId: 'req-4', userId: 'test-user', duration: 30 });

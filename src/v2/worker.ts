@@ -318,7 +318,7 @@ async function handleSetupPassphrase(
   result.ms.fill(0);
 
   await logOperation({
-    op: 'setup',
+    op: 'setup-passphrase',
     kid: '',
     requestId,
     userId: userId,
@@ -400,7 +400,7 @@ async function handleSetupPasskeyPRF(
   result.ms.fill(0);
 
   await logOperation({
-    op: 'setup',
+    op: 'setup-passkey-prf',
     kid: '',
     requestId,
     userId: userId,
@@ -477,7 +477,7 @@ async function handleSetupPasskeyGate(
   result.ms.fill(0);
 
   await logOperation({
-    op: 'setup',
+    op: 'setup-passkey-gate',
     kid: '',
     requestId,
     userId: userId,
@@ -557,7 +557,7 @@ async function handleAddEnrollment(
   }
 
   await logOperation({
-    op: 'setup',
+    op: 'add-enrollment',
     kid: '',
     requestId,
     userId: credentials.userId,
@@ -875,7 +875,7 @@ async function handleCreateLease(
 
   console.log('[Worker] Logging operation...');
   await logOperation({
-    op: 'setup',
+    op: 'create-lease',
     kid,
     requestId,
     userId: userId,

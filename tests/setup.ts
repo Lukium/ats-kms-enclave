@@ -11,9 +11,8 @@ import { IDBKeyRange } from 'fake-indexeddb';
 globalThis.indexedDB = new IDBFactory();
 globalThis.IDBKeyRange = IDBKeyRange;
 
-// Mock self for Worker context (needed for coverage collection)
-// @ts-expect-error - self is a Worker global, not available in Node test environment
-if (typeof self === 'undefined') {
-  // @ts-expect-error - Adding self to globalThis for Worker compatibility
-  globalThis.self = globalThis;
+// Mock self for Worker context (needed for module imports with Worker code)
+// Worker modules reference 'self' at module level, so we must provide it before imports
+if (!globalThis.self) {
+  (globalThis as any).self = globalThis;
 }

@@ -327,7 +327,7 @@ async function setupPassphrase(): Promise<void> {
  */
 async function setupWebAuthn(): Promise<void> {
   // Fixed demo credentials
-  const name = 'Demo User';
+  const name = 'demouser@ats.run';
   const userId = 'demouser@ats.run';
   const rpId = 'localhost';
 
@@ -706,7 +706,7 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
  */
 async function addEnrollmentWebAuthn(status: { isSetup: boolean; methods: string[] }): Promise<void> {
   // Fixed demo credentials
-  const name = 'Demo User';
+  const name = 'demouser@ats.run';
   const userId = 'demouser@ats.run';
   const rpId = 'localhost';
 

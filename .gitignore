@@ -79,3 +79,6 @@ test-output/
 # Documentation builds
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+
+# Demo build artifacts
+example/**/dist-*/

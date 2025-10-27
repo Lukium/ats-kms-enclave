@@ -647,6 +647,28 @@ export class KMSUser {
     return this.sendRequest<{ publicKey: string }>('getPublicKey', { kid });
   }
 
+  /**
+   * Get VAPID public key for user (convenience method)
+   *
+   * This is a convenience wrapper that retrieves the user's VAPID public key
+   * without requiring the key ID. It internally calls getVAPIDKid() to get the
+   * key ID, then calls getPublicKey() with that kid.
+   *
+   * @param _userId - User ID (currently unused, but kept for API consistency)
+   * @returns VAPID public key (base64url-encoded) and key ID
+   * @throws Error if no VAPID key exists or multiple keys found
+   */
+  async getVAPIDPublicKey(_userId: string): Promise<{ publicKey: string; kid: string }> {
+    // Get the VAPID kid (will throw if not found or multiple found)
+    const { kid } = await this.sendRequest<{ kid: string }>('getVAPIDKid', {});
+    // Get the public key for that kid
+    const result = await this.getPublicKey(kid);
+    return {
+      publicKey: result.publicKey,
+      kid,
+    };
+  }
+
   // ========================================================================
   // VAPID Lease Operations
   // ========================================================================

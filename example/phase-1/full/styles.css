@@ -861,6 +861,35 @@ body {
   font-size: 0.9rem;
 }
 
+/* VAPID key information card */
+.vapid-key-card {
+  background: #faf5ff;
+  border: 2px solid #9f7aea;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.vapid-key-card h4 {
+  margin: 0 0 1rem 0;
+  color: #44337a;
+  font-size: 1rem;
+}
+
+.vapid-key-card .artifact-card {
+  margin-bottom: 1rem;
+}
+
+.vapid-key-card .artifact-card:last-of-type {
+  margin-bottom: 1rem;
+}
+
+.vapid-key-card .info-message {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
 /* Info message */
 .info-message {
   background: #bee3f8;

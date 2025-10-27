@@ -162,9 +162,50 @@ async function resetDemo(): Promise<void> {
 }
 
 /**
+ * Display VAPID key information
+ */
+async function displayVAPIDKeyInfo(): Promise<void> {
+  try {
+    console.log('[Full Demo] Fetching VAPID public key...');
+    const vapidInfo = await kmsUser.getVAPIDPublicKey('demouser@ats.run');
+    console.log('[Full Demo] VAPID public key fetched:', vapidInfo);
+
+    // Create a container for VAPID key info if it doesn't exist
+    let vapidInfoEl = document.getElementById('vapid-key-info');
+    if (!vapidInfoEl) {
+      vapidInfoEl = document.createElement('div');
+      vapidInfoEl.id = 'vapid-key-info';
+      vapidInfoEl.style.marginTop = '2rem';
+      // Insert before lease operation section
+      leaseOperationEl.parentElement?.insertBefore(vapidInfoEl, leaseOperationEl);
+    }
+
+    vapidInfoEl.innerHTML = `
+      <div class="vapid-key-card">
+        <h4>🔑 VAPID Public Key</h4>
+        <div class="artifact-card">
+          <div class="artifact-title">Key ID (kid)</div>
+          <div class="artifact-data"><code>${vapidInfo.kid}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">Public Key</div>
+          <div class="artifact-data"><code>${vapidInfo.publicKey}</code></div>
+        </div>
+        <div class="info-message">
+          This is your VAPID public key for Web Push notifications. Share this key with push services to subscribe to notifications.
+        </div>
+      </div>
+    `;
+  } catch (error) {
+    console.error('[Full Demo] Failed to fetch VAPID key:', error);
+    // Don't show error UI - it's okay if this fails (e.g., no VAPID key yet)
+  }
+}
+
+/**
  * Render setup operation UI
  */
-function renderSetupUI(status: { isSetup: boolean; methods: string[] }): void {
+async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): Promise<void> {
   const hasPassphrase = status.methods.includes('passphrase');
   const hasPasskey = status.methods.includes('passkey');
   const hasAnyMethod = status.isSetup && status.methods.length > 0;
@@ -206,6 +247,11 @@ function renderSetupUI(status: { isSetup: boolean; methods: string[] }): void {
   }
 
   setupOperationEl.innerHTML = html;
+
+  // Display VAPID key info if setup is complete
+  if (hasAnyMethod) {
+    await displayVAPIDKeyInfo();
+  }
 
   // Add event listeners
   if (hasAnyMethod) {
@@ -449,7 +495,6 @@ async function addEnrollmentPassphrase(status: { isSetup: boolean; methods: stri
     if (!existingPassphrase) return;
     credentials = { method: 'passphrase', passphrase: existingPassphrase };
   } else if (existingMethod === 'passkey') {
-    alert('Please authenticate with your passkey...');
     // For passkey, we need to run WebAuthn get ceremony
     const appSalt = localStorage.getItem('kms:appSalt');
 
@@ -527,7 +572,6 @@ async function getPreferredCredentials(status: { methods: string[] }): Promise<a
 
   // Prefer passkey if available
   if (hasPasskey) {
-    alert('Please authenticate with your passkey...');
     const appSalt = localStorage.getItem('kms:appSalt');
 
     try {

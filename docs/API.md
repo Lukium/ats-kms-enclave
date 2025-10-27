@@ -751,6 +751,36 @@ console.log(result.publicKey); // "BFkj..."
 
 ---
 
+#### `getVAPIDPublicKey(userId: string)`
+
+Get VAPID public key for user (convenience method). This is a convenience wrapper that retrieves the user's VAPID public key without requiring the key ID. It internally calls `getVAPIDKid()` to get the key ID, then calls `getPublicKey()` with that kid.
+
+**Parameters:**
+- `userId: string` - User ID (currently unused, kept for API consistency)
+
+**Returns:**
+```typescript
+{
+  publicKey: string     // base64url-encoded raw public key
+  kid: string           // Key ID (JWK thumbprint)
+}
+```
+
+**Example:**
+```typescript
+const result = await kmsUser.getVAPIDPublicKey('user@example.com');
+console.log(result.publicKey); // "BFkj..."
+console.log(result.kid);       // "abc123..."
+```
+
+**Throws:**
+- `Error` if no VAPID key found
+- `Error` if multiple VAPID keys found (must use `getPublicKey(kid)` with explicit kid)
+
+**Audit Entry:** None (read-only operation)
+
+---
+
 ### VAPID Lease Operations
 
 #### `createLease(params)`

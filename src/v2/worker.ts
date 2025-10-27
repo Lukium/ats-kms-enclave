@@ -234,6 +234,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleGetUserLeases(params);
         break;
 
+      case 'getVAPIDKid':
+        result = await handleGetVAPIDKid();
+        break;
+
       // === Management Operations ===
       case 'resetKMS':
         result = await handleResetKMS();
@@ -1194,6 +1198,25 @@ async function handleGetUserLeases(params: { userId: string }): Promise<{ leases
   const { userId } = params;
   const leases = await getUserLeases(userId);
   return { leases };
+}
+
+/**
+ * Get VAPID key ID for the user (convenience method).
+ * Returns the first VAPID key found, or throws if none exists.
+ */
+async function handleGetVAPIDKid(): Promise<{ kid: string }> {
+  const allKeys = await getAllWrappedKeys();
+  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+
+  if (vapidKeys.length === 0) {
+    throw new Error('No VAPID key found');
+  }
+
+  if (vapidKeys.length > 1) {
+    throw new Error('Multiple VAPID keys found. Please use getPublicKey(kid) with explicit kid.');
+  }
+
+  return { kid: vapidKeys[0]!.kid };
 }
 
 // ============================================================================

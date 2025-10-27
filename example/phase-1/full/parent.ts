@@ -199,6 +199,8 @@ async function displayVAPIDKeyInfo(): Promise<void> {
         <div class="artifact-card">
           <div class="artifact-title">Lease ID</div>
           <div class="artifact-data"><code>${lease.leaseId}</code></div>
+          <div class="artifact-title">VAPID Key ID</div>
+          <div class="artifact-data"><code>${lease.kid}</code></div>
           <div class="artifact-title">Expires</div>
           <div class="artifact-data">${new Date(lease.exp).toLocaleString()}</div>
           <div class="artifact-title">Subscriptions</div>
@@ -669,6 +671,18 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
       <p>Generate a time-limited VAPID authorization lease for push subscriptions.</p>
       <button id="create-lease-btn" class="operation-btn">🎫 Create Lease</button>
       <button id="verify-leases-btn" class="operation-btn">🔍 Verify All Leases</button>
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <label for="jwt-count-input" style="font-size: 0.9rem;">JWTs to issue:</label>
+        <input
+          type="number"
+          id="jwt-count-input"
+          min="1"
+          max="10"
+          value="1"
+          style="width: 80px; padding: 0.5rem; border: 1px solid #333; background: #1a1a1a; color: #fff; border-radius: 4px;"
+        />
+        <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
+      </div>
     </div>
   `;
 
@@ -677,6 +691,7 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
   // Add event listeners
   document.getElementById('create-lease-btn')?.addEventListener('click', () => createLease(status));
   document.getElementById('verify-leases-btn')?.addEventListener('click', () => verifyAllLeases());
+  document.getElementById('issue-jwts-btn')?.addEventListener('click', () => issueJWTsFromLease());
 }
 
 /**
@@ -742,6 +757,116 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
   } catch (error) {
     console.error('[Full Demo] Lease creation failed:', error);
     alert(`Lease creation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Issue JWTs from an existing lease
+ */
+async function issueJWTsFromLease(): Promise<void> {
+  try {
+    console.log('[Full Demo] Issuing JWTs from lease...');
+
+    // Get JWT count from input field
+    const countInput = document.getElementById('jwt-count-input') as HTMLInputElement;
+    if (!countInput) {
+      console.error('[Full Demo] JWT count input not found');
+      return;
+    }
+
+    const count = parseInt(countInput.value, 10);
+
+    // Validate count (1-10)
+    if (isNaN(count) || count < 1 || count > 10) {
+      alert('Please enter a valid number between 1 and 10');
+      return;
+    }
+
+    // Get all leases for the user
+    const userId = 'demouser@ats.run';
+    const { leases } = await kmsUser.getUserLeases(userId);
+
+    // Filter for active (non-expired) leases
+    const now = Date.now();
+    const activeLeases = leases.filter((lease) => lease.exp > now);
+
+    if (activeLeases.length === 0) {
+      alert('No active leases found. Please create a lease first.');
+      return;
+    }
+
+    // Use the first active lease (in production, we'd let user select)
+    const lease = activeLeases[0];
+    console.log(`[Full Demo] Using lease: ${lease.leaseId}`);
+
+    // Get the first subscription endpoint from the lease
+    if (lease.subs.length === 0) {
+      alert('Selected lease has no subscriptions');
+      return;
+    }
+    const endpoint = lease.subs[0];
+
+    // Issue JWTs
+    console.log(`[Full Demo] Issuing ${count} JWT(s) for endpoint ${endpoint.eid}...`);
+    const startTime = performance.now();
+    const jwts = await kmsUser.issueVAPIDJWTs({
+      leaseId: lease.leaseId,
+      endpoint,
+      count,
+    });
+    const duration = performance.now() - startTime;
+    console.log(`[Full Demo] ${count} JWT(s) issued successfully in ${duration.toFixed(2)}ms`);
+
+    // Display results in the lease verification results area
+    const resultsContainer = document.getElementById('lease-verification-results');
+    if (!resultsContainer) return;
+
+    const jwtListHTML = jwts
+      .map(
+        (jwt, idx) => `
+      <div class="artifact-card">
+        <div class="artifact-title">JWT ${idx + 1}</div>
+        <div class="artifact-data"><code style="font-size: 0.8rem; word-break: break-all;">${jwt.jwt}</code></div>
+        <div class="artifact-title">Expires</div>
+        <div class="artifact-data">${new Date(jwt.exp * 1000).toLocaleString()}</div>
+        <div class="artifact-title">JTI</div>
+        <div class="artifact-data"><code>${jwt.jti}</code></div>
+      </div>
+    `
+      )
+      .join('');
+
+    resultsContainer.innerHTML = `
+      <div class="success-message">
+        <h4>✅ ${count} JWT(s) Issued Successfully!</h4>
+        <div class="artifact-card">
+          <div class="artifact-title">Lease ID</div>
+          <div class="artifact-data"><code>${lease.leaseId}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">Endpoint ID</div>
+          <div class="artifact-data"><code>${endpoint.eid}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">Audience</div>
+          <div class="artifact-data"><code>${endpoint.aud}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">Generation Time</div>
+          <div class="artifact-data">${duration.toFixed(2)}ms</div>
+        </div>
+        ${jwtListHTML}
+        <button id="dismiss-jwt-results-btn" class="operation-btn">✖ Dismiss</button>
+      </div>
+    `;
+
+    // Add dismiss button listener
+    document.getElementById('dismiss-jwt-results-btn')?.addEventListener('click', () => {
+      resultsContainer.innerHTML = '';
+    });
+  } catch (error) {
+    console.error('[Full Demo] JWT issuance failed:', error);
+    alert(`JWT issuance failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

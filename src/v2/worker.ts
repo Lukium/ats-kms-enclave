@@ -1243,7 +1243,7 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
     };
   }
 
-  // Get current VAPID key
+  // Get current VAPID key (most recently created)
   const allKeys = await getAllWrappedKeys();
   const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
 
@@ -1256,7 +1256,10 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
     };
   }
 
-  // Check if lease kid matches current VAPID key
+  // Sort by createdAt descending to get the most recent key first
+  vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
+
+  // Check if lease kid matches current VAPID key (most recent)
   const currentKid = vapidKeys[0]!.kid;
   if (lease.kid !== currentKid) {
     return {

@@ -663,17 +663,20 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
   }
 
   const html = `
+    <div id="lease-verification-results"></div>
     <div class="lease-section">
-      <h3>VAPID Lease Generation</h3>
+      <h3>VAPID Lease Operations</h3>
       <p>Generate a time-limited VAPID authorization lease for push subscriptions.</p>
       <button id="create-lease-btn" class="operation-btn">🎫 Create Lease</button>
+      <button id="verify-leases-btn" class="operation-btn">🔍 Verify All Leases</button>
     </div>
   `;
 
   leaseOperationEl.innerHTML = html;
 
-  // Add event listener
+  // Add event listeners
   document.getElementById('create-lease-btn')?.addEventListener('click', () => createLease(status));
+  document.getElementById('verify-leases-btn')?.addEventListener('click', () => verifyAllLeases());
 }
 
 /**
@@ -739,6 +742,86 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
   } catch (error) {
     console.error('[Full Demo] Lease creation failed:', error);
     alert(`Lease creation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Verify all leases against the current VAPID key
+ */
+async function verifyAllLeases(): Promise<void> {
+  try {
+    console.log('[Full Demo] Verifying all leases...');
+
+    // Get all leases for the user
+    const userId = 'demouser@ats.run';
+    const { leases } = await kmsUser.getUserLeases(userId);
+
+    const resultsContainer = document.getElementById('lease-verification-results');
+    if (!resultsContainer) return;
+
+    if (leases.length === 0) {
+      resultsContainer.innerHTML = `
+        <div class="info-message">
+          <h4>No Leases Found</h4>
+          <p>Create a lease first to test verification.</p>
+          <button id="dismiss-results-btn" class="operation-btn">✖  Dismiss</button>
+        </div>
+      `;
+      document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+        resultsContainer.innerHTML = '';
+      });
+      return;
+    }
+
+    console.log(`[Full Demo] Found ${leases.length} lease(s), verifying...`);
+
+    // Verify each lease
+    const results = [];
+    for (const lease of leases) {
+      const result = await kmsUser.verifyLease(lease.leaseId);
+      results.push({ lease, result });
+    }
+
+    // Display results
+    const resultsHtml = results
+      .map(
+        ({ lease, result }) => `
+      <div class="artifact-card ${result.valid ? 'valid' : 'invalid'}">
+        <div class="artifact-title">
+          ${result.valid ? '✅' : '❌'} Lease: ${lease.leaseId.slice(0, 16)}...
+        </div>
+        <div class="artifact-data">
+          <div><strong>Status:</strong> ${result.valid ? 'Valid' : 'Invalid'}</div>
+          ${result.reason ? `<div><strong>Reason:</strong> ${result.reason}</div>` : ''}
+          <div><strong>Key ID:</strong> ${result.kid}</div>
+          <div><strong>Expires:</strong> ${new Date(lease.exp).toLocaleString()}</div>
+        </div>
+      </div>
+    `
+      )
+      .join('');
+
+    const validCount = results.filter((r) => r.result.valid).length;
+    const invalidCount = results.length - validCount;
+
+    resultsContainer.innerHTML = `
+      <div class="${validCount === results.length ? 'success' : 'warning'}-message">
+        <h4>Lease Verification Results</h4>
+        <p>Verified ${results.length} lease(s): ${validCount} valid, ${invalidCount} invalid</p>
+        ${resultsHtml}
+        <button id="verify-again-btn" class="operation-btn">🔍 Verify Again</button>
+        <button id="dismiss-results-btn" class="operation-btn">✖  Dismiss</button>
+      </div>
+    `;
+
+    // Add event listeners
+    document.getElementById('verify-again-btn')?.addEventListener('click', () => verifyAllLeases());
+    document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+      resultsContainer.innerHTML = '';
+    });
+  } catch (error) {
+    console.error('[Full Demo] Lease verification failed:', error);
+    alert(`Lease verification failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

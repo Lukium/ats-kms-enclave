@@ -27,6 +27,7 @@ import type {
   AuthCredentials,
   VAPIDPayload,
   LeaseRecord,
+  LeaseVerificationResult,
 } from './types.js';
 
 /**
@@ -787,6 +788,19 @@ export class KMSUser {
    */
   async getUserLeases(userId: string): Promise<{ leases: LeaseRecord[] }> {
     return this.sendRequest<{ leases: LeaseRecord[] }>('getUserLeases', { userId });
+  }
+
+  /**
+   * Verify a single lease against the current VAPID key
+   *
+   * Checks if the lease is valid (exists, not expired, matches current VAPID key).
+   * This is a read-only operation that does not create audit entries.
+   *
+   * @param leaseId - Lease ID to verify
+   * @returns Verification result with validity status and reason if invalid
+   */
+  async verifyLease(leaseId: string): Promise<LeaseVerificationResult> {
+    return this.sendRequest<LeaseVerificationResult>('verifyLease', { leaseId });
   }
 
   /**

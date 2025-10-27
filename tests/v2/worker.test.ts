@@ -457,6 +457,109 @@ describe('createLease', () => {
   });
 });
 
+describe('verifyLease', () => {
+  let kid: string;
+  let leaseId: string;
+  const passphrase = 'verify-lease-passphrase-123';
+
+  beforeEach(async () => {
+    // Setup passphrase and generate VAPID
+    await handleMessage(
+      createRequest('setupPassphrase', {
+        userId: 'test@example.com',
+        passphrase,
+      })
+    );
+
+    const vapidResponse = await handleMessage(
+      createRequest('generateVAPID', {
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+    kid = vapidResponse.result!.kid;
+
+    // Create a lease
+    const leaseResponse = await handleMessage(
+      createRequest('createLease', {
+        userId: 'test@example.com',
+        subs: [{ url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' }],
+        ttlHours: 1,
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+    leaseId = leaseResponse.result!.leaseId;
+  });
+
+  it('should verify valid lease successfully', async () => {
+    const request = createRequest('verifyLease', { leaseId });
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('valid', true);
+    expect(response.result).toHaveProperty('leaseId', leaseId);
+    expect(response.result).toHaveProperty('kid'); // Should return the lease's kid
+    expect(response.result.reason).toBeUndefined();
+  });
+
+  it('should return invalid for non-existent lease', async () => {
+    const request = createRequest('verifyLease', { leaseId: 'lease-does-not-exist' });
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('valid', false);
+    expect(response.result).toHaveProperty('reason', 'not-found');
+    expect(response.result).toHaveProperty('kid', '');
+  });
+
+  it('should return invalid for expired lease', async () => {
+    // Create an expired lease by manipulating the lease record
+    // First create a valid lease
+    const expiredLeaseResponse = await handleMessage(
+      createRequest('createLease', {
+        userId: 'test@example.com',
+        subs: [{ url: 'https://push.example.com/sub2', aud: 'https://fcm.googleapis.com', eid: 'ep-2' }],
+        ttlHours: 0.001, // Very short TTL (3.6 seconds)
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+    const expiredLeaseId = expiredLeaseResponse.result!.leaseId;
+
+    // Wait for lease to expire
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    const request = createRequest('verifyLease', { leaseId: expiredLeaseId });
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('valid', false);
+    expect(response.result).toHaveProperty('reason', 'expired');
+    expect(response.result).toHaveProperty('kid'); // Should return the lease's kid
+  });
+
+  it('should return invalid for lease with wrong key', async () => {
+    // Save the old kid before regenerating
+    const oldKid = kid;
+
+    // Regenerate VAPID key (creates new kid)
+    const newVapidResponse = await handleMessage(
+      createRequest('generateVAPID', {
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+    const newKid = newVapidResponse.result!.kid;
+
+    // The old lease is now bound to the old kid, not the new one
+    const request = createRequest('verifyLease', { leaseId });
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('valid', false);
+    expect(response.result).toHaveProperty('reason', 'wrong-key');
+    expect(response.result).toHaveProperty('kid'); // Should return the lease's kid (old kid)
+    expect(oldKid).not.toBe(newKid); // Verify keys are different
+  });
+});
+
 describe('issueVAPIDJWT', () => {
   let kid: string;
   let leaseId: string;

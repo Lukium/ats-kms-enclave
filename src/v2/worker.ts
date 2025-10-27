@@ -765,7 +765,10 @@ async function handleCreateLease(
     throw new Error('No VAPID key found. VAPID key should have been generated during setup.');
   }
 
-  // Use first VAPID key (multi-key rotation is future work)
+  // Sort by createdAt descending to get the most recent key first (same logic as verifyLease)
+  vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
+
+  // Use most recent VAPID key (multi-key rotation is future work)
   const vapidKeyRecord = vapidKeys[0]!;
   const kid = vapidKeyRecord.kid;
   console.log('[Worker] Using VAPID key:', kid);

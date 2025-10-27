@@ -180,14 +180,11 @@ async function displayVAPIDKeyInfo(): Promise<void> {
     const activeLeases = leases.filter((lease) => lease.exp > now);
     const expiredLeases = leases.filter((lease) => lease.exp <= now);
 
-    // Create a container for VAPID key info if it doesn't exist
-    let vapidInfoEl = document.getElementById('vapid-key-info');
+    // Use the dedicated vapid-info-section container
+    const vapidInfoEl = document.getElementById('vapid-info-section');
     if (!vapidInfoEl) {
-      vapidInfoEl = document.createElement('div');
-      vapidInfoEl.id = 'vapid-key-info';
-      vapidInfoEl.style.marginTop = '2rem';
-      // Insert before lease operation section
-      leaseOperationEl.parentElement?.insertBefore(vapidInfoEl, leaseOperationEl);
+      console.error('[Full Demo] vapid-info-section element not found');
+      return;
     }
 
     // Build leases HTML
@@ -666,23 +663,20 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
 
   const html = `
     <div id="lease-verification-results"></div>
-    <div class="lease-section">
-      <h3>VAPID Lease Operations</h3>
-      <p>Generate a time-limited VAPID authorization lease for push subscriptions.</p>
-      <button id="create-lease-btn" class="operation-btn">🎫 Create Lease</button>
-      <button id="verify-leases-btn" class="operation-btn">🔍 Verify All Leases</button>
-      <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
-        <label for="jwt-count-input" style="font-size: 0.9rem;">JWTs to issue:</label>
-        <input
-          type="number"
-          id="jwt-count-input"
-          min="1"
-          max="10"
-          value="1"
-          style="width: 80px; padding: 0.5rem; border: 1px solid #333; background: #1a1a1a; color: #fff; border-radius: 4px;"
-        />
-        <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
-      </div>
+    <p>Generate a time-limited VAPID authorization lease for push subscriptions.</p>
+    <button id="create-lease-btn" class="operation-btn">🎫 Create Lease</button>
+    <button id="verify-leases-btn" class="operation-btn">🔍 Verify All Leases</button>
+    <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+      <label for="jwt-count-input" style="font-size: 0.9rem;">JWTs to issue:</label>
+      <input
+        type="number"
+        id="jwt-count-input"
+        min="1"
+        max="10"
+        value="1"
+        style="width: 80px; padding: 0.5rem; border: 1px solid #333; background: #1a1a1a; color: #fff; border-radius: 4px;"
+      />
+      <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
     </div>
   `;
 
@@ -724,32 +718,37 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
     });
     console.log('[Full Demo] Lease created:', result);
 
-    // Show success with lease details
+    // Show success with lease details (above the operation section)
     const exp = new Date(result.exp);
-    leaseOperationEl.innerHTML = `
-      <div class="success-message">
-        <h4>✅ VAPID Lease Created!</h4>
-        <div class="artifact-card">
-          <div class="artifact-title">Lease ID</div>
-          <div class="artifact-data"><code>${result.leaseId}</code></div>
-        </div>
-        <div class="artifact-card">
-          <div class="artifact-title">Expiration</div>
-          <div class="artifact-data">${exp.toLocaleString()}</div>
-        </div>
-        <div class="artifact-card">
-          <div class="artifact-title">Quotas</div>
-          <div class="artifact-data">
-            <div>Signs Remaining: ${result.quotas.signsRemaining}</div>
-            <div>Signs Used: ${result.quotas.signsUsed}</div>
+    const leaseResultEl = document.getElementById('lease-result');
+    if (leaseResultEl) {
+      leaseResultEl.innerHTML = `
+        <div class="success-message" style="margin-bottom: 1.5rem;">
+          <h4>✅ VAPID Lease Created!</h4>
+          <div class="artifact-card">
+            <div class="artifact-title">Lease ID</div>
+            <div class="artifact-data"><code>${result.leaseId}</code></div>
           </div>
+          <div class="artifact-card">
+            <div class="artifact-title">Expiration</div>
+            <div class="artifact-data">${exp.toLocaleString()}</div>
+          </div>
+          <div class="artifact-card">
+            <div class="artifact-title">Quotas</div>
+            <div class="artifact-data">
+              <div>Signs Remaining: ${result.quotas.signsRemaining}</div>
+              <div>Signs Used: ${result.quotas.signsUsed}</div>
+            </div>
+          </div>
+          <button id="dismiss-lease-result-btn" class="operation-btn">✖ Dismiss</button>
         </div>
-        <button id="create-another-lease-btn" class="operation-btn">🎫 Create Another Lease</button>
-      </div>
-    `;
+      `;
 
-    // Add event listener for creating another lease
-    document.getElementById('create-another-lease-btn')?.addEventListener('click', () => createLease(status));
+      // Add dismiss button listener
+      document.getElementById('dismiss-lease-result-btn')?.addEventListener('click', () => {
+        leaseResultEl.innerHTML = '';
+      });
+    }
 
     // Refresh VAPID key info to show the new lease
     await displayVAPIDKeyInfo();
@@ -817,8 +816,8 @@ async function issueJWTsFromLease(): Promise<void> {
     const duration = performance.now() - startTime;
     console.log(`[Full Demo] ${count} JWT(s) issued successfully in ${duration.toFixed(2)}ms`);
 
-    // Display results in the lease verification results area
-    const resultsContainer = document.getElementById('lease-verification-results');
+    // Display results in the lease-result area (same as lease creation)
+    const resultsContainer = document.getElementById('lease-result');
     if (!resultsContainer) return;
 
     const jwtListHTML = jwts
@@ -837,7 +836,7 @@ async function issueJWTsFromLease(): Promise<void> {
       .join('');
 
     resultsContainer.innerHTML = `
-      <div class="success-message">
+      <div class="success-message" style="margin-bottom: 1.5rem;">
         <h4>✅ ${count} JWT(s) Issued Successfully!</h4>
         <div class="artifact-card">
           <div class="artifact-title">Lease ID</div>
@@ -864,6 +863,9 @@ async function issueJWTsFromLease(): Promise<void> {
     document.getElementById('dismiss-jwt-results-btn')?.addEventListener('click', () => {
       resultsContainer.innerHTML = '';
     });
+
+    // Refresh audit log to show JWT issuance entries
+    await loadAuditLog();
   } catch (error) {
     console.error('[Full Demo] JWT issuance failed:', error);
     alert(`JWT issuance failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -881,12 +883,12 @@ async function verifyAllLeases(): Promise<void> {
     const userId = 'demouser@ats.run';
     const { leases } = await kmsUser.getUserLeases(userId);
 
-    const resultsContainer = document.getElementById('lease-verification-results');
+    const resultsContainer = document.getElementById('lease-result');
     if (!resultsContainer) return;
 
     if (leases.length === 0) {
       resultsContainer.innerHTML = `
-        <div class="info-message">
+        <div class="info-message" style="margin-bottom: 1.5rem;">
           <h4>No Leases Found</h4>
           <p>Create a lease first to test verification.</p>
           <button id="dismiss-results-btn" class="operation-btn">✖  Dismiss</button>
@@ -913,12 +915,13 @@ async function verifyAllLeases(): Promise<void> {
         ({ lease, result }) => `
       <div class="artifact-card ${result.valid ? 'valid' : 'invalid'}">
         <div class="artifact-title">
-          ${result.valid ? '✅' : '❌'} Lease: ${lease.leaseId.slice(0, 16)}...
+          ${result.valid ? '✅' : '❌'} Lease Verification
         </div>
         <div class="artifact-data">
+          <div><strong>Lease ID:</strong> <code style="word-break: break-all;">${lease.leaseId}</code></div>
           <div><strong>Status:</strong> ${result.valid ? 'Valid' : 'Invalid'}</div>
           ${result.reason ? `<div><strong>Reason:</strong> ${result.reason}</div>` : ''}
-          <div><strong>Key ID:</strong> ${result.kid}</div>
+          <div><strong>Key ID:</strong> <code>${result.kid}</code></div>
           <div><strong>Expires:</strong> ${new Date(lease.exp).toLocaleString()}</div>
         </div>
       </div>
@@ -930,7 +933,7 @@ async function verifyAllLeases(): Promise<void> {
     const invalidCount = results.length - validCount;
 
     resultsContainer.innerHTML = `
-      <div class="${validCount === results.length ? 'success' : 'warning'}-message">
+      <div class="${validCount === results.length ? 'success' : 'warning'}-message" style="margin-bottom: 1.5rem;">
         <h4>Lease Verification Results</h4>
         <p>Verified ${results.length} lease(s): ${validCount} valid, ${invalidCount} invalid</p>
         ${resultsHtml}

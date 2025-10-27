@@ -442,6 +442,211 @@ if (prfOutput) {
 
 ---
 
+#### Multi-Enrollment Implementation Guide
+
+This section provides a complete guide to implementing multi-enrollment UI that works correctly in both directions (passphrase→WebAuthn and WebAuthn→passphrase).
+
+**Step 1: Check Enrollment Status**
+
+Use `isSetup()` to determine what's already enrolled:
+
+```typescript
+const status = await kmsUser.isSetup();
+// status = { isSetup: boolean, methods: string[] }
+```
+
+**CRITICAL**: The `methods` array returns **generic method types**, not specific variants:
+- Returns `'passphrase'` for passphrase enrollments
+- Returns `'passkey'` for **any** passkey enrollment (PRF or Gate)
+- Does NOT return `'passkey-prf'` or `'passkey-gate'`
+
+**Example status values:**
+```typescript
+// No enrollment:
+{ isSetup: false, methods: [] }
+
+// Passphrase only:
+{ isSetup: true, methods: ['passphrase'] }
+
+// WebAuthn only (could be PRF or Gate):
+{ isSetup: true, methods: ['passkey'] }
+
+// Both enrolled:
+{ isSetup: true, methods: ['passphrase', 'passkey'] }
+```
+
+**Step 2: Detect Existing Method and Unlock**
+
+When adding a second enrollment, you must first unlock with the existing method:
+
+```typescript
+async function addSecondEnrollment(
+  status: { isSetup: boolean; methods: string[] },
+  newMethod: 'passphrase' | 'passkey'
+) {
+  // Get the existing method (first in array)
+  const existingMethod = status.methods[0];
+  let unlockCredentials: any;
+
+  if (existingMethod === 'passphrase') {
+    // Unlock with passphrase
+    const passphrase = prompt('Enter your CURRENT passphrase:');
+    unlockCredentials = { method: 'passphrase', passphrase };
+
+  } else if (existingMethod === 'passkey') {
+    // Unlock with WebAuthn (auto-detect PRF vs Gate)
+    const appSalt = localStorage.getItem('kms:appSalt');
+
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: 'localhost',
+        userVerification: 'required',
+        extensions: appSalt ? {
+          prf: {
+            eval: {
+              first: new Uint8Array(appSalt.split(',').map(n => parseInt(n, 10))),
+            },
+          },
+        } : undefined,
+      },
+    }) as PublicKeyCredential;
+
+    // Check if PRF succeeded
+    const prfExt = (assertion as any).getClientExtensionResults().prf;
+    const prfOutput = prfExt?.results?.first;
+
+    if (prfOutput) {
+      unlockCredentials = { method: 'passkey-prf', prfOutput };
+    } else {
+      unlockCredentials = { method: 'passkey-gate' };
+    }
+  }
+
+  // Now add the new enrollment using unlockCredentials
+  // (see Step 3)
+}
+```
+
+**Key Points:**
+- Check for `'passkey'` (not `'passkey-prf'` or `'passkey-gate'`)
+- Auto-detect PRF vs Gate by checking the WebAuthn assertion result
+- Always include PRF extension in the `get()` request if `appSalt` exists
+- The `prfOutput` presence determines which method was used
+
+**Step 3: Add New Enrollment**
+
+After unlocking, add the new enrollment:
+
+**Adding Passphrase (when passkey exists):**
+```typescript
+const newPassphrase = prompt('Enter NEW passphrase:');
+
+await kmsUser.addEnrollment(
+  'passphrase',
+  unlockCredentials,  // From Step 2
+  { passphrase: newPassphrase }
+);
+```
+
+**Adding WebAuthn (when passphrase exists):**
+```typescript
+// Create new WebAuthn credential
+const appSalt = crypto.getRandomValues(new Uint8Array(32));
+
+const credential = await navigator.credentials.create({
+  publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { id: 'localhost', name: 'My App' },
+    user: {
+      id: new TextEncoder().encode('user-123'),
+      name: 'Demo User',
+      displayName: 'Demo User',
+    },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform',
+      userVerification: 'required',
+      residentKey: 'required',
+    },
+    extensions: {
+      prf: {
+        eval: { first: appSalt },
+      },
+    },
+  },
+}) as PublicKeyCredential;
+
+// Check if PRF succeeded
+const prfExt = (credential as any).getClientExtensionResults().prf;
+const prfOutput = prfExt?.results?.first;
+
+if (prfOutput) {
+  // PRF available
+  await kmsUser.addEnrollment(
+    'passkey-prf',
+    unlockCredentials,  // From Step 2
+    {
+      credentialId: credential.rawId,
+      prfOutput,
+      rpId: 'localhost',
+    }
+  );
+
+  // Store appSalt for future unlocks
+  localStorage.setItem('kms:appSalt', Array.from(appSalt).toString());
+} else {
+  // Fallback to Gate
+  await kmsUser.addEnrollment(
+    'passkey-gate',
+    unlockCredentials,  // From Step 2
+    {
+      credentialId: credential.rawId,
+      rpId: 'localhost',
+    }
+  );
+}
+```
+
+**Step 4: Update UI**
+
+After adding enrollment, refresh the UI:
+
+```typescript
+const status = await kmsUser.isSetup();
+
+// Display enrolled methods
+const hasPassphrase = status.methods.includes('passphrase');
+const hasPasskey = status.methods.includes('passkey');
+
+if (hasPassphrase) {
+  console.log('✅ Passphrase enrolled');
+}
+if (hasPasskey) {
+  console.log('✅ WebAuthn enrolled');
+}
+```
+
+**Common Mistakes to Avoid:**
+
+1. ❌ Checking for `'passkey-prf'` or `'passkey-gate'` in `methods` array
+   - ✅ Always check for `'passkey'`
+
+2. ❌ Assuming passphrase is always first enrollment
+   - ✅ Check `status.methods[0]` to determine existing method
+
+3. ❌ Not including PRF extension when unlocking with passkey
+   - ✅ Always try PRF if `appSalt` exists, then check result
+
+4. ❌ Hardcoding unlock method in double enrollment flow
+   - ✅ Detect existing method dynamically from `isSetup()` result
+
+**Complete Working Example:**
+
+See `/example/phase-1/full/parent.ts` for a complete implementation with UI.
+
+---
+
 ### VAPID Key Management
 
 #### `generateVAPID(credentials: AuthCredentials)`

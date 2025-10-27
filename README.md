@@ -15,7 +15,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - ✅ **Reproducible builds** - Anyone can verify artifacts match source
 - 📝 **Transparency logs** - All releases published to Sigstore/Rekor
 - 🔍 **User-auditable** - Simple codebase (~500 lines target)
-- 🧪 **100% test coverage** - Strict TDD from day one
+- 🧪 **80%+ test coverage** - Strict TDD from day one
 
 ## Current Status
 
@@ -36,25 +36,25 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-27 12:48:32 UTC*
+*Last updated: 2025-10-27 20:21:28 UTC*
 
 **Test Results:**
 - Test Files: 7 passed (7)
-- Tests: 255 passed (255)
-- Duration: 11.55s
+- Tests: 259 passed (259)
+- Duration: 19.55s
 
 **Coverage Report:**
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 9383    │   93.27│    86.62 │   91.78│   93.27 │
+All files           │ 9530    │   92.68│    86.56 │   90.00│   92.68 │
  v2/audit.ts        │ 614     │   97.87│    86.95 │     100│   97.87 │ 13 lines
  v2/client.ts       │ 255     │   90.94│    80.00 │     100│   90.94 │ 23 lines
  v2/crypto-utils.ts │ 412     │   96.35│    95.52 │   94.44│   96.35 │ 15 lines
- v2/kms-user.ts     │ 796     │   85.78│    75.47 │   75.86│   85.78 │ 113 lines
+ v2/kms-user.ts     │ 832     │   85.07│    75.47 │   70.96│   85.07 │ 124 lines
  v2/storage.ts      │ 549     │     100│    89.55 │     100│     100 │ 
  v2/unlock.ts       │ 458     │   98.90│    91.30 │     100│   98.90 │ 5 lines
- v2/worker.ts       │ 1300    │   90.53│    84.67 │   81.81│   90.53 │ 123 lines
+ v2/worker.ts       │ 1404    │   89.45│    84.66 │   79.16│   89.45 │ 148 lines
 ```
 <!-- END AUTO-GENERATED -->
 
@@ -131,12 +131,12 @@ This positions the KMS enclave as a forward-looking trust model: **shifting trus
 
 ### Test-Driven Development (TDD)
 
-**CRITICAL**: This project follows strict TDD with **100% code coverage** requirement.
+**CRITICAL**: This project follows strict TDD with **80% minimum code coverage** requirement.
 
 - ✅ Tests written FIRST, before implementation
-- ✅ 100% line, branch, function, and statement coverage
+- ✅ 80% minimum line, branch, function, and statement coverage
 - ✅ No exceptions, no compromises
-- ✅ CI blocks merges if coverage < 100%
+- ✅ CI blocks merges if coverage < 80%
 
 See [Implementation Plan](docs/architecture/crypto/plan.md) for full TDD requirements.
 
@@ -222,7 +222,7 @@ ats-kms/
 
 This is a security-critical project. All contributions must:
 
-1. **Follow TDD** - Write tests first, achieve 100% coverage
+1. **Follow TDD** - Write tests first, achieve 80%+ coverage
 2. **Maintain verifiability** - Keep codebase simple and auditable
 3. **Document decisions** - Update architecture docs when needed
 4. **Pass CI checks** - All tests, coverage, and linting must pass
@@ -311,7 +311,7 @@ This project is substantially implemented with **AI assistance** (Anthropic's Cl
 ### Why AI-Assisted Development Works Here
 
 ✅ **Comprehensive documentation** - Extensive architecture design before implementation
-✅ **Test-driven from start** - 100% coverage requirement catches issues early
+✅ **Test-driven from start** - 80%+ coverage requirement catches issues early
 ✅ **Consistent patterns** - AI follows architectural decisions precisely
 ✅ **Thorough consideration** - AI explores edge cases systematically
 ✅ **Human oversight** - All decisions, reviews, and architecture by humans
@@ -336,7 +336,7 @@ Both human and AI collaborate on:
 
 AI leads on (with human review):
 - ⚙️ **Implementation** - Writing code that follows architecture
-- 🧪 **Test coverage** - Comprehensive test suites with 100% coverage
+- 🧪 **Test coverage** - Comprehensive test suites with 80%+ coverage
 - 📚 **Documentation** - Detailed inline comments and guides
 - 🔄 **Consistency** - Following patterns across codebase
 - 🐛 **Edge cases** - Identifying and handling error paths

@@ -292,6 +292,242 @@ describe('generateVAPID', () => {
   });
 });
 
+describe('regenerateVAPID', () => {
+  it('should regenerate VAPID keypair successfully', async () => {
+    // Setup first
+    const passphrase = 'regenerate-vapid-test-123';
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
+    );
+
+    // Generate initial VAPID key
+    const credentials = createPassphraseCredentials(passphrase);
+    const initialResponse = await handleMessage(createRequest('generateVAPID', { credentials }));
+    const initialKid = initialResponse.result.kid;
+
+    expect(initialResponse.error).toBeUndefined();
+    expect(initialKid).toBeDefined();
+
+    // Regenerate VAPID key
+    const regenerateRequest = createRequest('regenerateVAPID', { credentials });
+    const regenerateResponse = await handleMessage(regenerateRequest);
+
+    expect(regenerateResponse.error).toBeUndefined();
+    expect(regenerateResponse.result).toHaveProperty('kid');
+    expect(regenerateResponse.result).toHaveProperty('publicKey');
+    expect(regenerateResponse.result.kid).toBeDefined();
+    expect(regenerateResponse.result.publicKey).toBeDefined();
+
+    // New kid should be different from old kid
+    expect(regenerateResponse.result.kid).not.toBe(initialKid);
+
+    // Public key should be valid (65 bytes base64url-encoded)
+    expect(regenerateResponse.result.publicKey.length).toBeGreaterThan(0);
+  });
+
+  it('should delete old VAPID key after regeneration', async () => {
+    // Setup
+    const passphrase = 'delete-old-key-test-123';
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
+    );
+
+    // Generate initial VAPID key
+    const credentials = createPassphraseCredentials(passphrase);
+    const initialResponse = await handleMessage(createRequest('generateVAPID', { credentials }));
+    const initialKid = initialResponse.result.kid;
+
+    // Verify old key exists
+    const oldKeyResponse = await handleMessage(createRequest('getPublicKey', { kid: initialKid }));
+    expect(oldKeyResponse.error).toBeUndefined();
+
+    // Regenerate VAPID key
+    await handleMessage(createRequest('regenerateVAPID', { credentials }));
+
+    // Try to get old key - should fail
+    const afterRegenResponse = await handleMessage(createRequest('getPublicKey', { kid: initialKid }));
+    expect(afterRegenResponse.error).toBeDefined();
+    expect(afterRegenResponse.error).toContain('not found');
+  });
+
+  it('should create audit log entry for regeneration', async () => {
+    // Setup
+    const passphrase = 'audit-regen-test-123';
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
+    );
+
+    // Generate initial VAPID key
+    const credentials = createPassphraseCredentials(passphrase);
+    await handleMessage(createRequest('generateVAPID', { credentials }));
+
+    // Regenerate
+    await handleMessage(createRequest('regenerateVAPID', { credentials }));
+
+    // Check audit log
+    const auditRequest = createRequest('getAuditLog');
+    const auditResponse = await handleMessage(auditRequest);
+
+    expect(auditResponse.error).toBeUndefined();
+    expect(auditResponse.result.entries).toBeDefined();
+
+    // Find regenerate-vapid entry
+    const regenerateEntry = auditResponse.result.entries.find(
+      (entry: any) => entry.op === 'regenerate-vapid'
+    );
+
+    expect(regenerateEntry).toBeDefined();
+    expect(regenerateEntry.details).toHaveProperty('algorithm', 'ECDSA');
+    expect(regenerateEntry.details).toHaveProperty('curve', 'P-256');
+    expect(regenerateEntry.details).toHaveProperty('purpose', 'vapid');
+    expect(regenerateEntry.details).toHaveProperty('oldKids');
+    expect(regenerateEntry.details).toHaveProperty('deletedCount');
+  });
+
+  it('should fail without setup', async () => {
+    const credentials = createPassphraseCredentials('no-setup-passphrase');
+    const request = createRequest('regenerateVAPID', { credentials });
+
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeDefined();
+  });
+
+  it('should fail with wrong credentials', async () => {
+    // Setup with correct passphrase
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'correct-passphrase-123' })
+    );
+
+    // Generate initial key
+    const correctCredentials = createPassphraseCredentials('correct-passphrase-123');
+    await handleMessage(createRequest('generateVAPID', { credentials: correctCredentials }));
+
+    // Try to regenerate with wrong passphrase
+    const wrongCredentials = createPassphraseCredentials('wrong-passphrase');
+    const request = createRequest('regenerateVAPID', { credentials: wrongCredentials });
+
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeDefined();
+  });
+
+  it('should handle regeneration when no VAPID key exists', async () => {
+    // Setup without generating initial VAPID key
+    const passphrase = 'no-initial-key-test-123';
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
+    );
+
+    const credentials = createPassphraseCredentials(passphrase);
+    const request = createRequest('regenerateVAPID', { credentials });
+
+    const response = await handleMessage(request);
+
+    // Should succeed and generate a new key (even though there was none to delete)
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('kid');
+    expect(response.result).toHaveProperty('publicKey');
+  });
+
+  it('should handle regeneration with multiple existing VAPID keys', async () => {
+    // Setup
+    const passphrase = 'multiple-keys-test-123';
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
+    );
+
+    const credentials = createPassphraseCredentials(passphrase);
+
+    // Generate first key
+    const first = await handleMessage(createRequest('generateVAPID', { credentials }));
+    const firstKid = first.result.kid;
+
+    // Generate second key (this creates a second VAPID key)
+    const second = await handleMessage(createRequest('generateVAPID', { credentials }));
+    const secondKid = second.result.kid;
+
+    // Both keys should exist
+    expect(firstKid).not.toBe(secondKid);
+
+    // Regenerate - should delete ALL existing VAPID keys
+    const regenerateResponse = await handleMessage(createRequest('regenerateVAPID', { credentials }));
+    const newKid = regenerateResponse.result.kid;
+
+    expect(regenerateResponse.error).toBeUndefined();
+    expect(newKid).not.toBe(firstKid);
+    expect(newKid).not.toBe(secondKid);
+
+    // Verify old keys are gone
+    const firstKeyCheck = await handleMessage(createRequest('getPublicKey', { kid: firstKid }));
+    expect(firstKeyCheck.error).toBeDefined();
+
+    const secondKeyCheck = await handleMessage(createRequest('getPublicKey', { kid: secondKid }));
+    expect(secondKeyCheck.error).toBeDefined();
+
+    // New key should exist
+    const newKeyCheck = await handleMessage(createRequest('getPublicKey', { kid: newKid }));
+    expect(newKeyCheck.error).toBeUndefined();
+  });
+
+  it('should invalidate existing leases after regeneration', async () => {
+    // Setup
+    const passphrase = 'lease-invalidation-test-123';
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
+    );
+
+    const credentials = createPassphraseCredentials(passphrase);
+
+    // Generate initial VAPID key
+    const vapidResponse = await handleMessage(createRequest('generateVAPID', { credentials }));
+    const oldKid = vapidResponse.result.kid;
+
+    // Create a lease with the initial key
+    const leaseResponse = await handleMessage(
+      createRequest('createLease', {
+        kid: oldKid,
+        subs: [
+          {
+            url: 'https://example.com/push',
+            aud: 'https://example.com',
+            eid: 'test-endpoint-1',
+          },
+        ],
+        ttlHours: 24,
+        credentials,
+      })
+    );
+    const leaseId = leaseResponse.result.leaseId;
+
+    expect(leaseResponse.error).toBeUndefined();
+    expect(leaseId).toBeDefined();
+
+    // Verify lease is valid before regeneration
+    const verifyBeforeResponse = await handleMessage(
+      createRequest('verifyLease', { leaseId })
+    );
+    expect(verifyBeforeResponse.error).toBeUndefined();
+    expect(verifyBeforeResponse.result.valid).toBe(true);
+
+    // Regenerate VAPID key (should delete old key and create new one)
+    const regenerateResponse = await handleMessage(createRequest('regenerateVAPID', { credentials }));
+    const newKid = regenerateResponse.result.kid;
+
+    expect(regenerateResponse.error).toBeUndefined();
+    expect(newKid).not.toBe(oldKid);
+
+    // Verify lease is now invalid (because old kid is gone)
+    const verifyAfterResponse = await handleMessage(
+      createRequest('verifyLease', { leaseId })
+    );
+
+    // Lease verification should fail because the kid referenced in the lease no longer matches current key
+    expect(verifyAfterResponse.result.valid).toBe(false);
+    expect(verifyAfterResponse.result.reason).toBe('wrong-key');
+  });
+});
+
 describe('signJWT', () => {
   let kid: string;
   const passphrase = 'jwt-signing-passphrase-123';

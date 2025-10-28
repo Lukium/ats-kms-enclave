@@ -623,6 +623,23 @@ export class KMSUser {
   }
 
   /**
+   * Regenerate VAPID keypair, invalidating all existing leases
+   *
+   * This operation:
+   * - Deletes all existing VAPID keys for the authenticated user
+   * - Generates a new VAPID keypair with a new kid
+   * - All existing leases become invalid (they reference the old kid)
+   *
+   * Requires user authentication (UAK-signed operation).
+   *
+   * @param credentials - Authentication credentials
+   * @returns VAPID key result with new kid and public key
+   */
+  async regenerateVAPID(credentials: AuthCredentials): Promise<VAPIDKeyResult> {
+    return this.sendRequest<VAPIDKeyResult>('regenerateVAPID', { credentials });
+  }
+
+  /**
    * Sign JWT with VAPID key
    *
    * @param kid - Key ID

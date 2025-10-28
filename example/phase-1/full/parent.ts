@@ -234,9 +234,59 @@ async function displayVAPIDKeyInfo(): Promise<void> {
         ${leasesHTML}
       </div>
     `;
+
+    // Add event listener for regenerate button
+    document.getElementById('regenerate-vapid-btn')?.addEventListener('click', regenerateVAPIDKey);
   } catch (error) {
     console.error('[Full Demo] Failed to fetch VAPID key or leases:', error);
     // Don't show error UI - it's okay if this fails (e.g., no VAPID key yet)
+  }
+}
+
+/**
+ * Regenerate VAPID keypair (invalidates all active leases)
+ */
+async function regenerateVAPIDKey(): Promise<void> {
+  const confirmed = confirm(
+    '⚠️ Warning: Regenerating the VAPID key will:\n\n' +
+      '• Delete the current VAPID key\n' +
+      '• Invalidate ALL active leases\n' +
+      '• Generate a new VAPID keypair\n\n' +
+      'Are you sure you want to continue?'
+  );
+
+  if (!confirmed) return;
+
+  const passphrase = prompt('Enter your passphrase to confirm:');
+  if (!passphrase) return;
+
+  try {
+    console.log('[Full Demo] Regenerating VAPID key...');
+
+    // Call regenerateVAPID method (requires authentication)
+    const result = await kmsUser.regenerateVAPID({
+      method: 'passphrase',
+      passphrase,
+      userId: 'demouser@ats.run',
+    });
+
+    console.log('[Full Demo] VAPID key regenerated:', result);
+
+    // Show success message and refresh VAPID info
+    alert(
+      '✅ VAPID key regenerated successfully!\n\n' +
+        `New Key ID: ${result.kid.substring(0, 16)}...\n\n` +
+        'All previous leases are now invalid.'
+    );
+
+    // Refresh VAPID info display
+    await displayVAPIDKeyInfo();
+
+    // Reload audit log to show the regenerate-vapid operation
+    await loadAuditLog();
+  } catch (error: any) {
+    console.error('[Full Demo] Failed to regenerate VAPID key:', error);
+    alert(`❌ Failed to regenerate VAPID key:\n\n${error.message || error}`);
   }
 }
 
@@ -678,6 +728,13 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
       />
       <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
     </div>
+    <hr style="margin: 1.5rem 0; border: none; border-top: 2px solid #e2e8f0;">
+    <button id="regenerate-vapid-btn" class="operation-btn" style="background-color: #dc3545;">
+      🔄 Regenerate VAPID Key
+    </button>
+    <div class="info-message" style="color: #dc3545; margin-top: 0.5rem;">
+      ⚠️ Warning: Regenerating will invalidate all active leases!
+    </div>
   `;
 
   leaseOperationEl.innerHTML = html;
@@ -686,6 +743,7 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
   document.getElementById('create-lease-btn')?.addEventListener('click', () => createLease(status));
   document.getElementById('verify-leases-btn')?.addEventListener('click', () => verifyAllLeases());
   document.getElementById('issue-jwts-btn')?.addEventListener('click', () => issueJWTsFromLease());
+  document.getElementById('regenerate-vapid-btn')?.addEventListener('click', regenerateVAPIDKey);
 }
 
 /**

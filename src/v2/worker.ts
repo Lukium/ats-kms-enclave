@@ -60,6 +60,7 @@ import {
   unwrapKey,
   getWrappedKey,
   getAllWrappedKeys,
+  deleteWrappedKey,
   putMeta,
   getMeta,
   deleteMeta,
@@ -187,6 +188,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
       // === VAPID Operations ===
       case 'generateVAPID':
         result = await handleGenerateVAPID(params, id);
+        break;
+
+      case 'regenerateVAPID':
+        result = await handleRegenerateVAPID(params, id);
         break;
 
       case 'signJWT':
@@ -639,6 +644,92 @@ async function handleGenerateVAPID(
   });
 
   return result.result;
+}
+
+/**
+ * Regenerate VAPID keypair, invalidating all existing leases.
+ * Requires user authentication (UAK-signed operation).
+ *
+ * This operation:
+ * 1. Deletes all existing VAPID keys
+ * 2. Generates a new VAPID keypair with a new kid
+ * 3. All existing leases become invalid (they reference the old kid)
+ */
+async function handleRegenerateVAPID(
+  params: { credentials: AuthCredentials },
+  requestId: string
+): Promise<{ kid: string; publicKey: string }> {
+  const { credentials } = params;
+
+  const result = await withUnlock(credentials, async (mkek, _ms) => {
+    // Ensure audit key is loaded/generated
+    await ensureAuditKey(mkek);
+
+    // Get all wrapped keys and find VAPID keys
+    const allKeys = await getAllWrappedKeys();
+    const vapidKeys = allKeys.filter((key) => key.purpose === 'vapid');
+
+    // Delete all existing VAPID keys
+    for (const key of vapidKeys) {
+      await deleteWrappedKey(key.kid);
+    }
+
+    // Generate new ECDSA P-256 keypair
+    const keypair = (await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true, // temporarily extractable for wrapping
+      ['sign', 'verify']
+    )) as CryptoKeyPair;
+
+    // Export public key (raw format, 65 bytes)
+    const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
+
+    // Compute kid (JWK thumbprint)
+    const jwk = rawP256ToJwk(new Uint8Array(publicKeyRaw));
+    const kid = await jwkThumbprintP256(jwk);
+
+    // Wrap private key with MKEK
+    await wrapKey(
+      keypair.privateKey,
+      mkek,
+      kid,
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
+      ['sign'],
+      {
+        alg: 'ES256',
+        purpose: 'vapid',
+        publicKeyRaw,
+      }
+    );
+
+    return {
+      kid,
+      publicKey: arrayBufferToBase64url(publicKeyRaw),
+      oldKids: vapidKeys.map((k) => k.kid),
+    };
+  });
+
+  await logOperation({
+    op: 'regenerate-vapid',
+    kid: result.result.kid,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+    details: {
+      algorithm: 'ECDSA',
+      curve: 'P-256',
+      purpose: 'vapid',
+      oldKids: result.result.oldKids,
+      deletedCount: result.result.oldKids.length,
+    },
+  });
+
+  return {
+    kid: result.result.kid,
+    publicKey: result.result.publicKey,
+  };
 }
 
 /**

@@ -781,6 +781,100 @@ console.log(result.kid);       // "abc123..."
 
 ---
 
+#### `regenerateVAPID(credentials: AuthCredentials)`
+
+Regenerate VAPID keypair, automatically invalidating all existing leases. This is a destructive operation that deletes all existing VAPID keys for the authenticated user and generates a new ECDSA P-256 keypair with a new key ID.
+
+**Use Cases:**
+- Key rotation for security purposes
+- Compromised key recovery
+- Revocation of all active leases at once
+
+**Parameters:**
+- `credentials: AuthCredentials` - Authentication credentials (UAK-signed operation)
+
+**Returns:**
+```typescript
+{
+  kid: string,          // New key ID (JWK thumbprint)
+  publicKey: string     // New base64url-encoded raw public key (65 bytes)
+}
+```
+
+**Example:**
+```typescript
+const result = await kmsUser.regenerateVAPID({
+  method: 'passphrase',
+  passphrase: 'my-passphrase',
+});
+console.log('New VAPID key:', result.kid);
+console.log('Old leases now invalid');
+```
+
+**How it works:**
+1. Authenticates user with `withUnlock`
+2. Retrieves all wrapped keys from IndexedDB
+3. Filters for VAPID keys (`purpose === 'vapid'`)
+4. Deletes all existing VAPID keys via `deleteWrappedKey(kid)`
+5. Generates new ECDSA P-256 keypair
+6. Computes new kid via JWK thumbprint
+7. Wraps private key with MKEK
+8. Stores new wrapped key in IndexedDB
+9. Logs operation to audit chain
+
+**Lease Invalidation:**
+- Existing leases reference the old `kid`
+- When leases are verified, `verifyLease()` checks if `lease.kid === currentKid`
+- Leases with old kid return `{ valid: false, reason: 'wrong-key' }`
+- Lease records are **not** deleted (they expire naturally based on TTL)
+- This ensures audit trail is preserved
+
+**Security Properties:**
+- Requires user authentication (cannot be called with lease authorization)
+- All existing leases become immediately invalid
+- No way to recover old VAPID key (non-extractable + deleted)
+- Operation is irreversible (no way to "undo" regeneration)
+- Audit log preserves complete history (old kid + new kid recorded)
+
+**Performance:** < 1000ms (includes key generation + storage)
+
+**Audit Entry:**
+- Operation: `regenerate-vapid`
+- Signer: UAK (User Audit Key)
+- Details: Includes old kids, deleted count, new kid, algorithm parameters
+
+**Warning:** This operation invalidates **ALL** active leases for this user. Applications using those leases will need to:
+1. Detect JWT signing failures or lease verification failures
+2. Prompt user to re-authenticate
+3. Create new leases with the new VAPID key
+4. Issue new JWTs from the new leases
+
+**Example with Error Handling:**
+```typescript
+try {
+  // Confirm with user first
+  if (confirm('⚠️ This will invalidate ALL active leases. Continue?')) {
+    const result = await kmsUser.regenerateVAPID({
+      method: 'passphrase',
+      passphrase: await promptForPassphrase(),
+    });
+
+    console.log('✅ VAPID key regenerated');
+    console.log('New key ID:', result.kid);
+
+    // Update UI to show new key
+    await displayVAPIDKeyInfo();
+
+    // Refresh audit log
+    await loadAuditLog();
+  }
+} catch (error) {
+  console.error('Failed to regenerate VAPID key:', error.message);
+}
+```
+
+---
+
 ### VAPID Lease Operations
 
 #### `createLease(params)`

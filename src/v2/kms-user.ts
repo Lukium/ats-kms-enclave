@@ -25,7 +25,6 @@ import type {
   RPCResponse,
   RPCMethod,
   AuthCredentials,
-  VAPIDPayload,
   LeaseRecord,
   LeaseVerificationResult,
 } from './types.js';
@@ -544,93 +543,6 @@ export class KMSUser {
    * Unlock KMS with passphrase
    *
    * Note: This only validates the passphrase. Actual operations require
-   * passing credentials to each operation (per-operation auth).
-   *
-   * @param passphrase - User passphrase
-   * @returns Unlock result
-   */
-  async unlockWithPassphrase(_passphrase: string): Promise<UnlockResult> {
-    // For V2, unlock is per-operation, not session-based
-    // This method just validates that unlock is possible
-    // The actual passphrase is used per-operation when calling KMS methods
-    try {
-      // Try a no-op operation that requires auth
-      await this.isSetup();
-      return { success: true };
-    } catch {
-      return { success: false };
-    }
-  }
-
-  /**
-   * Unlock KMS with passkey PRF
-   *
-   * @param rpId - Relying party ID
-   * @returns Unlock result
-   */
-  async unlockWithPasskey(rpId: string): Promise<UnlockResult> {
-    if (typeof navigator === 'undefined' || !navigator.credentials) {
-      throw new Error('WebAuthn not supported');
-    }
-
-    // Retrieve stored appSalt
-    let appSalt: Uint8Array;
-    if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem('kms:appSalt');
-      if (stored) {
-        appSalt = new Uint8Array(stored.split(',').map((n) => parseInt(n, 10)));
-      } else {
-        throw new Error('No stored app salt. Setup passkey first.');
-      }
-    } else {
-      throw new Error('localStorage not available');
-    }
-
-    try {
-      // WebAuthn get ceremony
-      const assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rpId,
-          userVerification: 'required',
-          extensions: {
-            prf: {
-              eval: {
-                first: appSalt as BufferSource,
-              },
-            },
-          },
-        },
-      }) as PublicKeyCredential;
-
-      // Extract PRF output
-      const prfExt = (assertion as any).getClientExtensionResults().prf;
-      const prfOutput = prfExt?.results?.first;
-
-      if (!prfOutput) {
-        throw new Error('PRF extension not supported or failed');
-      }
-
-      // Validate by attempting an operation
-      return { success: true };
-    } catch (err: any) {
-      throw new Error(`Passkey unlock failed: ${err.message}`);
-    }
-  }
-
-  // ========================================================================
-  // VAPID Operations
-  // ========================================================================
-
-  /**
-   * Generate VAPID keypair
-   *
-   * @param credentials - Authentication credentials
-   * @returns VAPID key result
-   */
-  async generateVAPID(credentials: AuthCredentials): Promise<VAPIDKeyResult> {
-    return this.sendRequest<VAPIDKeyResult>('generateVAPID', { credentials });
-  }
 
   /**
    * Regenerate VAPID keypair, invalidating all existing leases
@@ -669,22 +581,6 @@ export class KMSUser {
       }
       throw error;
     }
-  }
-
-  /**
-   * Sign JWT with VAPID key
-   *
-   * @param kid - Key ID
-   * @param payload - JWT payload
-   * @param credentials - Authentication credentials
-   * @returns JWT result
-   */
-  async signJWT(
-    kid: string,
-    payload: VAPIDPayload,
-    credentials: AuthCredentials
-  ): Promise<JWTResult> {
-    return this.sendRequest<JWTResult>('signJWT', { kid, payload, credentials });
   }
 
   /**

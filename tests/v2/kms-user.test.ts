@@ -564,53 +564,6 @@ describe('VAPID operations', () => {
     env.cleanup();
   });
 
-  it('should generate VAPID key', async () => {
-    const iframe = env.getCurrentIframe();
-    const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
-
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
-    const requestPromise = kmsUser.generateVAPID(credentials);
-
-    const [request] = postMessageSpy.mock.calls[0]! as [any, string];
-    expect(request.method).toBe('generateVAPID');
-
-    env.simulateIframeMessage({
-      id: request.id,
-      result: { kid: 'test-kid-123', publicKey: 'test-pubkey-base64url' },
-    });
-
-    const result = await requestPromise;
-    expect(result.kid).toBe('test-kid-123');
-    expect(result.publicKey).toBe('test-pubkey-base64url');
-  });
-
-  it('should sign JWT', async () => {
-    const iframe = env.getCurrentIframe();
-    const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
-
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
-    const payload = {
-      aud: 'https://fcm.googleapis.com',
-      sub: 'mailto:test@example.com',
-      exp: Math.floor(Date.now() / 1000) + 600,
-      jti: crypto.randomUUID(),
-    };
-
-    const requestPromise = kmsUser.signJWT('test-kid', payload, credentials);
-
-    const [request] = postMessageSpy.mock.calls[0]! as [any, string];
-    expect(request.method).toBe('signJWT');
-    expect(request.params.kid).toBe('test-kid');
-    expect(request.params.payload).toEqual(payload);
-
-    env.simulateIframeMessage({
-      id: request.id,
-      result: { jwt: 'eyJhbGciOi...test-jwt' },
-    });
-
-    const result = await requestPromise;
-    expect(result.jwt).toContain('eyJhbGciOi');
-  });
 
   it('should get public key', async () => {
     const iframe = env.getCurrentIframe();

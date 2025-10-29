@@ -65,6 +65,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ['scripts/**/*.ts'],
+    rules: {
+      // Scripts are CLI tools - console output is expected
+      'no-console': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off',
+    },
+  },
+  {
     files: ['src/v2/worker.ts', 'src/v2/types.ts', 'src/v2/kms-user.ts', 'src/v2/client.ts', 'src/v2/storage.ts', 'src/v2/crypto-utils.ts'],
     rules: {
       // RPC handlers, DOM/WebAuthn APIs, and Node.js crypto work with untyped data

@@ -126,7 +126,6 @@ export class KMSClient {
     // These will show modal, collect credentials, then execute
     const authRequiredMethods = ['createLease', 'generateVAPID', 'signJWT', 'regenerateVAPID', 'addEnrollment'];
     if (request?.method && authRequiredMethods.includes(request.method)) {
-      console.log('[KMS Client] Operation requires authentication:', request.method);
       this.showUnlockModal(request);
       return; // Don't forward to worker yet
     }
@@ -342,13 +341,6 @@ export class KMSClient {
       const prfExt = (credential as any).getClientExtensionResults().prf;
       const prfOutput = prfExt?.results?.first;
 
-      console.log('[KMS Client] PRF extension result:', {
-        prfExt,
-        hasResults: !!prfExt?.results,
-        hasFirst: !!prfExt?.results?.first,
-        prfOutputType: prfOutput ? prfOutput.constructor.name : 'undefined'
-      });
-
       // WebAuthn succeeded - now execute the pending operation with credentials
       if (!this.pendingUnlockRequest) {
         throw new Error('No pending operation');
@@ -364,7 +356,6 @@ export class KMSClient {
       // We need to match the unlock method to the setup method
       const enrollments = await this.getEnrollments(userId);
 
-      console.log('[KMS Client] User enrollments:', enrollments);
 
       // Build credentials object based on enrollment type (include userId)
       // Use PRF only if user has PRF enrollment, otherwise use Gate
@@ -380,7 +371,6 @@ export class KMSClient {
         throw new Error('No passkey enrollment found for this user');
       }
 
-      console.log('[KMS Client] Built credentials:', { method: credentials.method, userId, hasPrfOutput: !!prfOutput });
 
       // Add credentials to the request params
       const requestWithCredentials: RPCRequest = {
@@ -549,7 +539,6 @@ export class KMSClient {
    * @returns Collected credentials
    */
   private async promptUnlockForEnrollment(enrollments: string[], userId: string): Promise<AuthCredentials> {
-    console.log('[KMS Client] Prompting unlock for multi-enrollment with enrollments:', enrollments);
 
     // Hide success message from previous setup (if visible)
     this.hideSetupSuccess();
@@ -806,19 +795,16 @@ export class KMSClient {
 
       // Check if user already has enrollments (multi-enrollment scenario)
       const enrollments = await this.getEnrollments(userId);
-      console.log('[KMS Client] Checking existing enrollments:', enrollments);
 
       // If enrollments exist, we need to collect existing credentials first
       let existingCredentials: AuthCredentials | null = null;
       if (enrollments.length > 0) {
-        console.log('[KMS Client] Multi-enrollment: User has existing enrollments, need to authenticate first');
         this.hideSetupLoading();
 
         // Prompt user to unlock with existing method
         existingCredentials = await this.promptUnlockForEnrollment(enrollments, userId);
 
         this.showSetupLoading();
-        console.log('[KMS Client] Multi-enrollment: User authenticated, proceeding with new enrollment');
       }
 
       // Generate app salt for PRF
@@ -863,12 +849,6 @@ export class KMSClient {
       const prfExt = (credential as any).getClientExtensionResults().prf;
       const prfEnabled = prfExt?.enabled === true;
 
-      console.log('[KMS Client] Setup PRF extension result:', {
-        prfExt,
-        prfEnabled,
-        willUsePRF: prfEnabled
-      });
-
       // If PRF is enabled, we need to call credentials.get() to obtain the actual PRF output
       let prfOutput: ArrayBuffer | undefined;
       if (prfEnabled) {
@@ -889,11 +869,6 @@ export class KMSClient {
 
         const getPrfExt = (assertion as any).getClientExtensionResults().prf;
         prfOutput = getPrfExt?.results?.first;
-
-        console.log('[KMS Client] PRF output from get():', {
-          hasPrfOutput: !!prfOutput,
-          prfOutputSize: prfOutput?.byteLength
-        });
       }
 
       // Determine method and params based on whether this is initial or multi-enrollment
@@ -968,7 +943,6 @@ export class KMSClient {
         }, '*'); // Parent will validate origin
       }
 
-      console.log('[KMS Client] WebAuthn setup complete, notified parent');
     } catch (err: any) {
       this.hideSetupLoading();
       this.showSetupError(`WebAuthn setup failed: ${err.message}`);
@@ -1009,19 +983,16 @@ export class KMSClient {
 
       // Check if user already has enrollments (multi-enrollment scenario)
       const enrollments = await this.getEnrollments(userId);
-      console.log('[KMS Client] Checking existing enrollments:', enrollments);
 
       // If enrollments exist, we need to collect existing credentials first
       let existingCredentials: AuthCredentials | null = null;
       if (enrollments.length > 0) {
-        console.log('[KMS Client] Multi-enrollment: User has existing enrollments, need to authenticate first');
         this.hideSetupLoading();
 
         // Prompt user to unlock with existing method
         existingCredentials = await this.promptUnlockForEnrollment(enrollments, userId);
 
         this.showSetupLoading();
-        console.log('[KMS Client] Multi-enrollment: User authenticated, proceeding with new enrollment');
       }
 
       // Determine method and params based on whether this is initial or multi-enrollment
@@ -1089,7 +1060,6 @@ export class KMSClient {
         }, '*'); // Parent will validate origin
       }
 
-      console.log('[KMS Client] Passphrase setup complete, notified parent');
     } catch (err: any) {
       this.hideSetupLoading();
       this.showSetupError(`Setup failed: ${err.message}`);
@@ -1206,12 +1176,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   const isIframe = window.self !== window.top;
   const isStandaloneSetup = !isIframe && window.opener !== null;
 
-  console.log('[KMS Client] Context detection:', {
-    isIframe,
-    isStandaloneSetup,
-    hasOpener: window.opener !== null,
-  });
-
   // Create and initialize client
   const client = new KMSClient({ parentOrigin });
 
@@ -1223,7 +1187,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
     // If standalone setup window, show setup modal immediately
     if (isStandaloneSetup) {
-      console.log('[KMS Client] Standalone setup window detected, showing setup modal');
       // Wait a bit for client to fully initialize
       setTimeout(() => {
         client.setupSetupModalHandlers();

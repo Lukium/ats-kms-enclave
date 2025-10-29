@@ -162,7 +162,6 @@ self.addEventListener('message', async (event: MessageEvent) => {
 export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
   const { id, method, params } = request;
 
-  console.log('[Worker] handleMessage called:', { id, method, paramsKeys: Object.keys(params || {}) });
 
   try {
     let result: any;
@@ -200,9 +199,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       // === VAPID Lease Operations ===
       case 'createLease':
-        console.log('[Worker] handleCreateLease called with params:', params);
         result = await handleCreateLease(params, id);
-        console.log('[Worker] handleCreateLease returned:', result);
         break;
 
       case 'issueVAPIDJWT':
@@ -839,7 +836,6 @@ async function handleCreateLease(
   },
   requestId: string
 ): Promise<{ leaseId: string; exp: number; quotas: QuotaState }> {
-  console.log('[Worker] handleCreateLease START');
   const { userId, subs, ttlHours, credentials } = params;
 
   // Validate TTL (max 24 hours)
@@ -847,10 +843,8 @@ async function handleCreateLease(
     throw new Error('ttlHours must be between 0 and 24');
   }
 
-  console.log('[Worker] Fetching all wrapped keys...');
   // Verify VAPID key exists (should have been generated during setup)
   const allKeys = await getAllWrappedKeys();
-  console.log('[Worker] Found keys:', allKeys.length);
   const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
   if (vapidKeys.length === 0) {
     throw new Error('No VAPID key found. VAPID key should have been generated during setup.');
@@ -862,50 +856,37 @@ async function handleCreateLease(
   // Use most recent VAPID key (multi-key rotation is future work)
   const vapidKeyRecord = vapidKeys[0]!;
   const kid = vapidKeyRecord.kid;
-  console.log('[Worker] Using VAPID key:', kid);
 
   // Generate lease ID and salt
   const leaseId = `lease-${crypto.randomUUID()}`;
   const leaseSalt = crypto.getRandomValues(new Uint8Array(32)) as Uint8Array<ArrayBuffer>;
-  console.log('[Worker] Generated lease ID:', leaseId);
 
   // Calculate lease expiration time (needed for LAK delegation cert)
   const now = Date.now();
   const exp = now + ttlHours * 3600 * 1000;
 
-  console.log('[Worker] Calling withUnlock...');
   // Perform key wrapping inside withUnlock context (need MS for SessionKEK derivation)
   const result = await withUnlock(credentials, async (mkek, ms) => {
-    console.log('[Worker] Inside withUnlock callback');
     // Ensure audit key (UAK) is loaded
-    console.log('[Worker] Ensuring audit key...');
     await ensureAuditKey(mkek);
-    console.log('[Worker] Audit key ensured');
 
     // Generate LAK (Lease Audit Key) with delegation certificate signed by UAK
-    console.log('[Worker] Generating LAK...');
     const { delegationCert } = await generateLAK(leaseId, exp);
-    console.log('[Worker] LAK generated');
 
     // Derive SessionKEK from MS + lease salt
-    console.log('[Worker] Deriving SessionKEK...');
     const sessionKEK = await deriveSessionKEK(ms as Uint8Array<ArrayBuffer>, leaseSalt);
-    console.log('[Worker] SessionKEK derived');
 
     // Unwrap VAPID private key using MKEK (must be extractable for re-wrapping)
     // Get the wrapped key record from storage
-    console.log('[Worker] Getting wrapped key record...');
     const wrappedKeyRecord = await getWrappedKey(kid);
     if (!wrappedKeyRecord) {
       throw new Error(`No wrapped key with id: ${kid}`);
     }
-    console.log('[Worker] Got wrapped key record');
 
     const keyIv = new Uint8Array(wrappedKeyRecord.iv);
     const aad = wrappedKeyRecord.aad;
 
     // Unwrap the VAPID key with extractable=true (needed for wrapKey to work)
-    console.log('[Worker] Unwrapping VAPID key...');
     const vapidPrivateKey = await crypto.subtle.unwrapKey(
       'pkcs8',
       wrappedKeyRecord.wrappedKey,
@@ -915,20 +896,16 @@ async function handleCreateLease(
       true, // extractable: true (required for wrapKey)
       ['sign']
     );
-    console.log('[Worker] VAPID key unwrapped');
 
     // Wrap VAPID private key with SessionKEK
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    console.log('[Worker] Wrapping VAPID key with SessionKEK...');
     const wrappedLeaseKey = await crypto.subtle.wrapKey(
       'pkcs8',
       vapidPrivateKey,
       sessionKEK,
       { name: 'AES-GCM', iv }
     );
-    console.log('[Worker] VAPID key wrapped with SessionKEK');
 
-    console.log('[Worker] withUnlock callback COMPLETE');
     return { wrappedLeaseKey, iv, sessionKEK, lakDelegationCert: delegationCert };
   });
 
@@ -974,7 +951,6 @@ async function handleCreateLease(
     perEndpoint: {},
   });
 
-  console.log('[Worker] Logging operation...');
   await logOperation({
     op: 'create-lease',
     kid,
@@ -989,7 +965,6 @@ async function handleCreateLease(
     },
   });
 
-  console.log('[Worker] handleCreateLease COMPLETE, returning:', { leaseId, exp, quotas });
   return { leaseId, exp, quotas };
 }
 
@@ -1296,10 +1271,8 @@ async function handleGetAuditPublicKey(): Promise<{ publicKey: string }> {
  * Get all leases for a user.
  */
 async function handleGetUserLeases(params: { userId: string }): Promise<{ leases: LeaseRecord[] }> {
-  console.log('[Worker] handleGetUserLeases called with userId:', params?.userId);
   const { userId } = params;
   const leases = await getUserLeases(userId);
-  console.log('[Worker] getUserLeases returned', leases.length, 'leases');
   return { leases };
 }
 

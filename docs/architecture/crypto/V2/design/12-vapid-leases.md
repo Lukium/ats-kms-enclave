@@ -2,7 +2,7 @@
 
 **Status**: Design Phase
 **Version**: V2
-**Date**: 2025-01-24
+**Date**: 2025-10-24
 **Priority**: High (Primary KMS use case until Signal Protocol)
 
 ---
@@ -980,7 +980,7 @@ function buildError(
 {
   error: {
     code: 'lease.revoked',
-    message: 'Lease was revoked at 2025-01-24T12:00:00Z',
+    message: 'Lease was revoked at 2025-10-24T12:00:00Z',
     retryAfterMs: null,  // Don't retry
     details: {
       leaseId: 'lease-abc123',

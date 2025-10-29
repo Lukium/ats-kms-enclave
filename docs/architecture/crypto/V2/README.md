@@ -1,7 +1,7 @@
 # KMS Architecture V2
 
 **Status**: Design Phase
-**Date**: 2025-01-24
+**Date**: 2025-10-24
 **Supersedes**: V1 Architecture (`docs/architecture/crypto/`)
 
 ---

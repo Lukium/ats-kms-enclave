@@ -1,7 +1,7 @@
 # KMS V2: Module Architecture & Separation of Concerns
 
 **Version**: 2.0
-**Date**: 2025-01-24
+**Date**: 2025-10-24
 **Status**: Design
 
 ---

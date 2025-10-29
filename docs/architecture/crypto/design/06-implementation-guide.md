@@ -63,7 +63,7 @@ Cache-Control: public, max-age=300
     "sha256": "abcd1234ef567890...",
     "sri": "sha256-ABCD...",
     "commit": "deadbeef",
-    "timestamp": "2025-01-22T12:00:00Z"
+    "timestamp": "2025-10-22T12:00:00Z"
   },
   "allowed": [
     {
@@ -223,7 +223,7 @@ fs.writeFileSync('dist/manifest.json', JSON.stringify({
   "sha256": "abcd1234ef567890...",
   "sri": "sha256-ABCD1234EF567890...",
   "commit": "deadbeef",
-  "timestamp": "2025-01-22T12:00:00Z",
+  "timestamp": "2025-10-22T12:00:00Z",
   "schema": 1
 }
 ```
@@ -808,7 +808,7 @@ const jwt = await signVAPIDJWT(
     exp: Math.floor(Date.now() / 1000) + 2 * 60 * 60,  // 2 hours
     relay_id: 'relay-alpha'  // Optional private claim
   },
-  'vapid-2025-01'  // Optional key ID
+  'vapid-2025-10'  // Optional key ID
 )
 
 // Build RFC 8292 headers
@@ -1338,7 +1338,7 @@ const valid = await enclave.verify(publicKey, jwtPayload, signature)
 │  Crypto Enclave Status                     │
 ├────────────────────────────────────────────┤
 │  Version: kms-abcd1234                     │
-│  Signed by: ATS Release Key 2025-01        │
+│  Signed by: ATS Release Key 2025-10        │
 │  Verified: ✅ Hash matches public repo      │
 │                                            │
 │  [Verify Manually]  [View Source]         │

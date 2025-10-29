@@ -1,7 +1,7 @@
 # ADR: Master Secret Pattern and Per-Operation Authentication
 
 **Status**: Adopted
-**Date**: 2025-01-24
+**Date**: 2025-10-24
 **Decision**: Implement Master Secret (MS) encryption pattern and eliminate persistent unlocked state
 
 ---

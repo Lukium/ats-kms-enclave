@@ -1,7 +1,7 @@
 # V2 Security Improvements: Detailed Rationale
 
 **Version**: 2.0
-**Date**: 2025-01-24
+**Date**: 2025-10-24
 
 This document explains the security rationale for each V2 improvement over V1, with specific attacks prevented and implementation guidance.
 

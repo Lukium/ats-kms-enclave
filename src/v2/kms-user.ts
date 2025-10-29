@@ -640,19 +640,18 @@ export class KMSUser {
    * - Generates a new VAPID keypair with a new kid
    * - All existing leases become invalid (they reference the old kid)
    *
-   * Requires user authentication (UAK-signed operation).
+   * SECURITY: Credentials are ALWAYS collected in KMS iframe. The parent
+   * MUST NOT pass credentials - doing so would bypass iframe isolation.
    *
-   * @param params - Parameters including userId and optional credentials
+   * @param params - Parameters (userId only)
    * @returns VAPID key result with new kid and public key
    */
   async regenerateVAPID(params: {
     userId: string;
-    credentials?: AuthCredentials;
   }): Promise<VAPIDKeyResult> {
-    // Show iframe for authentication if credentials not provided
-    if (!params.credentials) {
-      this.iframe.style.display = 'block';
-    }
+    // ALWAYS show iframe for authentication
+    // Credentials are collected in iframe, never passed from parent
+    this.iframe.style.display = 'block';
 
     try {
       const result = await this.sendRequest<VAPIDKeyResult>('regenerateVAPID', params);
@@ -721,19 +720,20 @@ export class KMSUser {
   /**
    * Create VAPID lease for relay authorization
    *
-   * @param params - Lease parameters
+   * SECURITY: Credentials are ALWAYS collected in KMS iframe. The parent
+   * MUST NOT pass credentials - doing so would bypass iframe isolation.
+   *
+   * @param params - Lease parameters (userId, subs, ttlHours only)
    * @returns Lease result
    */
   async createLease(params: {
     userId: string;
     subs: Array<{ url: string; aud: string; eid: string }>;
     ttlHours: number;
-    credentials?: AuthCredentials; // Optional - iframe will show modal if not provided
   }): Promise<LeaseResult> {
-    // Show iframe for authentication if credentials not provided
-    if (!params.credentials) {
-      this.iframe.style.display = 'block';
-    }
+    // ALWAYS show iframe for authentication
+    // Credentials are collected in iframe, never passed from parent
+    this.iframe.style.display = 'block';
 
     try {
       const result = await this.sendRequest<LeaseResult>('createLease', params);

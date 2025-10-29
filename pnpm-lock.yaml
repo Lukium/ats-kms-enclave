@@ -41,6 +41,9 @@ devDependencies:
   playwright:
     specifier: ^1.56.1
     version: 1.56.1
+  playwright-test-coverage:
+    specifier: ^1.2.12
+    version: 1.2.12(@playwright/test@1.56.1)
   typescript:
     specifier: ^5.3.3
     version: 5.9.3
@@ -2259,6 +2262,14 @@ packages:
     resolution: {integrity: sha512-hutraynyn31F+Bifme+Ps9Vq59hKuUCz7H1kDOcBs+2oGguKkWTU50bBWrtz34OUWmIwpBTWDxaRPXrIXkgvmQ==}
     engines: {node: '>=18'}
     hasBin: true
+    dev: true
+
+  /playwright-test-coverage@1.2.12(@playwright/test@1.56.1):
+    resolution: {integrity: sha512-WdR3shV+7IWtlB1AZcXSysUyZmyAqXM9+DT3iBSS1p4SkJoWZslkTqk04l5ZExSkuaM+5fKl0M9TyUuJWuGgLA==}
+    peerDependencies:
+      '@playwright/test': ^1.14.1
+    dependencies:
+      '@playwright/test': 1.56.1
     dev: true
 
   /playwright@1.56.1:

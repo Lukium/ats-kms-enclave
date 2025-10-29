@@ -443,6 +443,29 @@ describe('error handling', () => {
 
     consoleWarnSpy.mockRestore();
   });
+
+  it('should handle worker postMessage failure gracefully', () => {
+    const request = createRequest('isSetup');
+    const worker = env.getMockWorker();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Make worker.postMessage throw an error
+    vi.spyOn(worker!, 'postMessage').mockImplementation(() => {
+      throw new Error('postMessage failed');
+    });
+
+    // Should not throw, should log error and send error response to parent
+    simulateParentMessage(client, request);
+
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    // Should send error response to parent
+    const lastMessage = env.mockParent.getLastMessage();
+    expect(lastMessage.data.id).toBe(request.id);
+    expect(lastMessage.data.error).toContain('Failed to forward message');
+
+    consoleErrorSpy.mockRestore();
+  });
 });
 
 // ============================================================================
@@ -523,6 +546,59 @@ describe('legacy send() API', () => {
     expect(response.id).toBe(request.id);
     expect(response.error).toBeUndefined();
     expect(response.result).toBeDefined();
+  });
+});
+
+// ============================================================================
+// Authentication Interception Tests
+// ============================================================================
+
+describe('authentication interception', () => {
+  let env: ReturnType<typeof setupTestEnvironment>;
+  let client: KMSClient;
+
+  beforeEach(async () => {
+    env = setupTestEnvironment();
+    client = new KMSClient({
+      parentOrigin: 'https://allthe.services',
+    });
+    await client.init();
+    env.mockParent.clearMessages();
+  });
+
+  afterEach(async () => {
+    await client.terminate();
+    env.cleanup();
+  });
+
+  const authRequiredMethods = ['createLease', 'generateVAPID', 'signJWT', 'regenerateVAPID', 'addEnrollment'];
+
+  authRequiredMethods.forEach((method) => {
+    it(`should intercept ${method} and not forward to worker immediately`, () => {
+      const request = createRequest(method, { userId: 'test-user' });
+      const worker = env.getMockWorker();
+      const postMessageSpy = vi.spyOn(worker!, 'postMessage');
+
+      // Simulate parent sending auth-required request
+      simulateParentMessage(client, request);
+
+      // Should NOT be forwarded to worker immediately (modal shown instead)
+      expect(postMessageSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('should forward non-auth-required methods immediately', () => {
+    const nonAuthMethods = ['isSetup', 'getEnrollments', 'verifyAuditChain', 'getAuditLog'];
+
+    nonAuthMethods.forEach((method) => {
+      const request = createRequest(method);
+      const worker = env.getMockWorker();
+      const postMessageSpy = vi.spyOn(worker!, 'postMessage');
+
+      simulateParentMessage(client, request);
+
+      expect(postMessageSpy).toHaveBeenCalledWith(request);
+    });
   });
 });
 

@@ -96,6 +96,9 @@ async function initKMS(): Promise<StatusResult> {
     console.log('[Full Demo] KMS User initialized successfully');
     console.log('[Full Demo] Cross-origin isolation verified - KMS IndexedDB should NOT be visible in parent context');
 
+    // Expose kmsUser globally for Playwright tests
+    (window as any).kmsUser = kmsUser;
+
     // Setup postMessage listener for setup completion callbacks
     window.addEventListener('message', handleSetupComplete);
 

@@ -175,16 +175,21 @@ const lease = await kmsUser.createLease({
 
 ### Operations Requiring Authentication
 
-All operations that require `credentials` parameter MUST include `userId`:
+**⚠️ CRITICAL SECURITY POLICY:** Credentials are ALWAYS collected inside the KMS iframe. The parent PWA MUST NOT pass credentials - this would bypass the iframe isolation security boundary.
 
-- `createLease(params)`
-- `generateVAPID(credentials)`
-- `signJWT(kid, payload, credentials)`
-- `regenerateVAPID(credentials)`
-- `addEnrollment(method, credentials, newCredentials)`
-- `removeEnrollment(enrollmentId, credentials)`
+The following operations trigger iframe authentication automatically:
 
-**The `userId` is extracted from the operation parameters and included in the credentials automatically by the iframe.**
+- `createLease(params)` - Requires `userId` in params, iframe collects credentials
+- `generateVAPID(credentials)` - Requires credentials parameter
+- `signJWT(kid, payload, credentials)` - Requires credentials parameter
+- `regenerateVAPID(params)` - Requires `userId` in params, iframe collects credentials
+- `addEnrollment(method, credentials, newCredentials)` - Requires credentials parameter
+- `removeEnrollment(enrollmentId, credentials)` - Requires credentials parameter
+
+**For iframe-based operations (`createLease`, `regenerateVAPID`):**
+- Pass only `userId` in parameters
+- Iframe shows modal automatically to collect credentials
+- Credentials never exposed to parent PWA
 
 ---
 
@@ -909,9 +914,11 @@ console.log(result.kid);       // "abc123..."
 
 ---
 
-#### `regenerateVAPID(credentials: AuthCredentials)`
+#### `regenerateVAPID(params)`
 
 Regenerate VAPID keypair, automatically invalidating all existing leases. This is a destructive operation that deletes all existing VAPID keys for the authenticated user and generates a new ECDSA P-256 keypair with a new key ID.
+
+**⚠️ AUTHENTICATION:** This operation requires authentication. The KMS iframe will automatically show a modal to collect credentials. **Credentials MUST NOT be passed from parent** - this would bypass iframe isolation security.
 
 **Use Cases:**
 - Key rotation for security purposes
@@ -919,7 +926,11 @@ Regenerate VAPID keypair, automatically invalidating all existing leases. This i
 - Revocation of all active leases at once
 
 **Parameters:**
-- `credentials: AuthCredentials` - Authentication credentials (UAK-signed operation)
+```typescript
+{
+  userId: string  // ⚠️ REQUIRED - User ID for authentication
+}
+```
 
 **Returns:**
 ```typescript
@@ -929,11 +940,12 @@ Regenerate VAPID keypair, automatically invalidating all existing leases. This i
 }
 ```
 
-**Example:**
+**Example (Iframe-Based Authentication):**
 ```typescript
+// Credentials handled automatically by iframe modal
 const result = await kmsUser.regenerateVAPID({
-  method: 'passphrase',
-  passphrase: 'my-passphrase',
+  userId: 'user-123',  // ⚠️ REQUIRED
+  // No credentials parameter - iframe shows modal automatically
 });
 console.log('New VAPID key:', result.kid);
 console.log('Old leases now invalid');
@@ -982,9 +994,10 @@ console.log('Old leases now invalid');
 try {
   // Confirm with user first
   if (confirm('⚠️ This will invalidate ALL active leases. Continue?')) {
+    // Iframe will show modal to collect credentials automatically
     const result = await kmsUser.regenerateVAPID({
-      method: 'passphrase',
-      passphrase: await promptForPassphrase(),
+      userId: 'user-123',  // ⚠️ REQUIRED
+      // No credentials parameter - iframe handles authentication
     });
 
     console.log('✅ VAPID key regenerated');
@@ -1009,19 +1022,18 @@ try {
 
 Create VAPID lease for long-lived JWT issuance authorization. Derives SessionKEK from Master Secret and wraps VAPID key for credential-free JWT signing.
 
-**⚠️ AUTHENTICATION:** This operation requires authentication. The KMS iframe will automatically show a modal to collect credentials.
+**⚠️ AUTHENTICATION:** This operation requires authentication. The KMS iframe will automatically show a modal to collect credentials. **Credentials MUST NOT be passed from parent** - this would bypass iframe isolation security.
 
 **Parameters:**
 ```typescript
 {
-  userId: string,               // ⚠️ REQUIRED - User ID for authentication
+  userId: string,       // ⚠️ REQUIRED - User ID for authentication
   subs: Array<{
-    url: string,                // Push endpoint URL
-    aud: string,                // Audience (push service)
-    eid: string                 // Endpoint ID
+    url: string,        // Push endpoint URL
+    aud: string,        // Audience (push service)
+    eid: string         // Endpoint ID
   }>,
-  ttlHours: number,             // Lease TTL (max 24 hours)
-  credentials?: AuthCredentials // OPTIONAL - Collected automatically by iframe
+  ttlHours: number      // Lease TTL (max 24 hours)
 }
 ```
 

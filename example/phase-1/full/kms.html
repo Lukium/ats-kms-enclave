@@ -325,9 +325,23 @@
             type="password"
             id="kms-setup-passphrase-input"
             class="kms-input"
-            placeholder="Enter a strong passphrase (min 8 chars)"
+            placeholder="Enter a strong passphrase (min 12 chars)"
             autocomplete="off"
           />
+          <div id="kms-passphrase-char-count" style="margin: -0.5rem 0 0.5rem 0; font-size: 0.75rem; color: #666;">
+            0 / 12 characters
+          </div>
+          <label for="kms-setup-passphrase-confirm-input" class="kms-input-label">Confirm Passphrase</label>
+          <input
+            type="password"
+            id="kms-setup-passphrase-confirm-input"
+            class="kms-input"
+            placeholder="Re-enter your passphrase"
+            autocomplete="off"
+          />
+          <div id="kms-passphrase-match-feedback" style="margin: -0.5rem 0 0.5rem 0; font-size: 0.75rem; display: none;">
+            <!-- Feedback will be inserted here dynamically -->
+          </div>
           <button id="kms-setup-passphrase-btn" class="kms-auth-btn kms-secondary">
             <span class="kms-auth-icon">🔐</span>
             <span class="kms-auth-label">Setup with Passphrase</span>

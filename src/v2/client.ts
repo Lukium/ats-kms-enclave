@@ -548,6 +548,9 @@ export class KMSClient {
   private async promptUnlockForEnrollment(enrollments: string[], userId: string): Promise<AuthCredentials> {
     console.log('[KMS Client] Prompting unlock for multi-enrollment with enrollments:', enrollments);
 
+    // Hide success message from previous setup (if visible)
+    this.hideSetupSuccess();
+
     // Show the setup modal body temporarily with instructions
     const setupModalBody = document.querySelector('#setup-modal .kms-modal-body') as HTMLElement;
     if (setupModalBody) {
@@ -714,9 +717,11 @@ export class KMSClient {
   setupSetupModalHandlers(): void {
     const webauthnBtn = document.getElementById('kms-setup-webauthn-btn');
     const passphraseInput = document.getElementById('kms-setup-passphrase-input') as HTMLInputElement;
+    const passphraseConfirmInput = document.getElementById('kms-setup-passphrase-confirm-input') as HTMLInputElement;
     const passphraseBtn = document.getElementById('kms-setup-passphrase-btn');
+    const charCount = document.getElementById('kms-passphrase-char-count');
 
-    if (!webauthnBtn || !passphraseInput || !passphraseBtn) {
+    if (!webauthnBtn || !passphraseInput || !passphraseConfirmInput || !passphraseBtn) {
       console.error('[KMS Client] Setup modal elements not found');
       return;
     }
@@ -724,14 +729,63 @@ export class KMSClient {
     // Setup WebAuthn button handler
     webauthnBtn.onclick = () => this.handleWebAuthnSetup();
 
-    // Setup passphrase button handler
-    passphraseBtn.onclick = () => this.handlePassphraseSetup(passphraseInput.value);
+    // Setup character count for passphrase
+    const matchFeedback = document.getElementById('kms-passphrase-match-feedback');
 
-    // Setup Enter key for passphrase
-    passphraseInput.onkeydown = (e) => {
-      if (e.key === 'Enter') {
-        this.handlePassphraseSetup(passphraseInput.value);
+    const updateMatchFeedback = () => {
+      const passphrase = passphraseInput.value;
+      const confirm = passphraseConfirmInput.value;
+
+      if (!matchFeedback) return;
+
+      // Only show feedback if user has typed in confirmation field
+      if (confirm.length === 0) {
+        matchFeedback.style.display = 'none';
+        return;
       }
+
+      matchFeedback.style.display = 'block';
+
+      if (passphrase === confirm) {
+        matchFeedback.textContent = '✓ Passphrases match';
+        matchFeedback.style.color = '#48d391'; // green
+      } else {
+        matchFeedback.textContent = '✗ Passphrases do not match';
+        matchFeedback.style.color = '#ef4444'; // red
+      }
+    };
+
+    passphraseInput.oninput = () => {
+      const length = passphraseInput.value.length;
+      const minLength = 12;
+      if (charCount) {
+        charCount.textContent = `${length} / ${minLength} characters`;
+        if (length < minLength) {
+          charCount.style.color = '#ef4444'; // red
+        } else {
+          charCount.style.color = '#48d391'; // green
+        }
+      }
+      updateMatchFeedback();
+    };
+
+    // Update match feedback as user types in confirmation field
+    passphraseConfirmInput.oninput = updateMatchFeedback;
+
+    // Setup passphrase button handler
+    passphraseBtn.onclick = () => this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value);
+
+    // Setup Enter key for passphrase (in both fields)
+    const handleEnter = () => {
+      this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value);
+    };
+
+    passphraseInput.onkeydown = (e) => {
+      if (e.key === 'Enter') handleEnter();
+    };
+
+    passphraseConfirmInput.onkeydown = (e) => {
+      if (e.key === 'Enter') handleEnter();
     };
   }
 
@@ -923,14 +977,24 @@ export class KMSClient {
    * Handle passphrase setup
    * Supports both initial setup and multi-enrollment (adding second+ method)
    */
-  private async handlePassphraseSetup(passphrase: string): Promise<void> {
+  private async handlePassphraseSetup(passphrase: string, confirmPassphrase: string): Promise<void> {
     if (!passphrase || passphrase.trim().length === 0) {
       this.showSetupError('Please enter a passphrase');
       return;
     }
 
-    if (passphrase.length < 8) {
-      this.showSetupError('Passphrase must be at least 8 characters');
+    if (passphrase.length < 12) {
+      this.showSetupError('Passphrase must be at least 12 characters');
+      return;
+    }
+
+    if (!confirmPassphrase || confirmPassphrase.trim().length === 0) {
+      this.showSetupError('Please confirm your passphrase');
+      return;
+    }
+
+    if (passphrase !== confirmPassphrase) {
+      this.showSetupError('Passphrases do not match');
       return;
     }
 
@@ -1078,6 +1142,16 @@ export class KMSClient {
     const successDiv = document.getElementById('kms-setup-success');
     if (successDiv) {
       successDiv.style.display = 'block';
+    }
+  }
+
+  /**
+   * Hide setup success message
+   */
+  private hideSetupSuccess(): void {
+    const successDiv = document.getElementById('kms-setup-success');
+    if (successDiv) {
+      successDiv.style.display = 'none';
     }
   }
 

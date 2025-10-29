@@ -96,6 +96,9 @@ async function initKMS(): Promise<StatusResult> {
     console.log('[Full Demo] KMS User initialized successfully');
     console.log('[Full Demo] Cross-origin isolation verified - KMS IndexedDB should NOT be visible in parent context');
 
+    // Setup postMessage listener for setup completion callbacks
+    window.addEventListener('message', handleSetupComplete);
+
     // Wait a moment for KIAK initialization to complete
     await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -114,6 +117,51 @@ async function initKMS(): Promise<StatusResult> {
     console.error('[Full Demo] KMS initialization failed:', error);
     auditLogEl.innerHTML = `<p class="error">KMS initialization failed: ${error instanceof Error ? error.message : String(error)}</p>`;
     throw error;
+  }
+}
+
+/**
+ * Handle setup completion message from KMS setup window
+ */
+async function handleSetupComplete(event: MessageEvent): Promise<void> {
+  // Validate origin (should be from KMS)
+  if (event.origin !== KMS_ORIGIN) {
+    console.warn('[Full Demo] Ignored message from invalid origin:', event.origin);
+    return;
+  }
+
+  // Check message type
+  if (event.data?.type === 'kms:setup-complete') {
+    console.log('[Full Demo] Setup complete notification received:', event.data);
+
+    // Show success message
+    setupOperationEl.innerHTML = `
+      <div class="success-message">
+        <h4>✅ WebAuthn Setup Complete! (${event.data.method})</h4>
+        <div class="artifact-card">
+          <div class="artifact-title">Enrollment ID</div>
+          <div class="artifact-data"><code>${event.data.result.enrollmentId}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">VAPID Key ID</div>
+          <div class="artifact-data"><code>${event.data.result.vapidKid}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">VAPID Public Key</div>
+          <div class="artifact-data"><code>${event.data.result.vapidPublicKey}</code></div>
+        </div>
+      </div>
+    `;
+
+    // Reload audit log
+    await loadAuditLog();
+
+    // Reload setup UI to reflect new enrollment
+    const status = await kmsUser.isSetup('demouser@ats.run');
+    renderSetupUI(status);
+    renderLeaseUI(status);
+
+    console.log('[Full Demo] UI updated after setup completion');
   }
 }
 
@@ -410,156 +458,24 @@ async function setupPassphrase(): Promise<void> {
 }
 
 /**
- * Setup WebAuthn authentication with PRF/Gate auto-detection
- * Checks for existing passkey first to avoid creating duplicates
+ * Setup WebAuthn authentication - opens KMS in new window (first-party context)
  */
 async function setupWebAuthn(): Promise<void> {
-  // Fixed demo credentials
-  const name = 'demouser@ats.run';
-  const userId = 'demouser@ats.run';
-  const rpId = 'localhost';
+  console.log('[Full Demo] Opening KMS setup window...');
 
-  try {
-    console.log('[Full Demo] Checking for existing passkey...');
+  // Open KMS in new window for first-party WebAuthn registration
+  const setupWindow = window.open(
+    KMS_ORIGIN + '/kms.html?parentOrigin=' + encodeURIComponent(window.location.origin),
+    'kms-setup',
+    'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
+  );
 
-    // First, try to authenticate with an existing passkey
-    // This will show the user their existing passkeys for this RP
-    let credential: PublicKeyCredential | null = null;
-    let appSalt: Uint8Array;
-    let isExistingPasskey = false;
-
-    try {
-      // Try to get existing passkey with conditional UI
-      const existingAppSalt = localStorage.getItem('kms:appSalt');
-      if (existingAppSalt) {
-        appSalt = new Uint8Array(existingAppSalt.split(',').map(n => parseInt(n, 10)));
-        console.log('[Full Demo] Found existing appSalt, attempting to authenticate...');
-
-        credential = await navigator.credentials.get({
-          publicKey: {
-            challenge: crypto.getRandomValues(new Uint8Array(32)),
-            rpId: rpId,
-            userVerification: 'required',
-            extensions: {
-              prf: {
-                eval: {
-                  first: appSalt,
-                },
-              },
-            },
-          },
-        }) as PublicKeyCredential;
-
-        if (credential) {
-          console.log('[Full Demo] Authenticated with existing passkey!');
-          isExistingPasskey = true;
-        }
-      } else {
-        // No stored appSalt, will create new passkey
-        throw new Error('No existing passkey configuration found');
-      }
-    } catch (authError) {
-      console.log('[Full Demo] No existing passkey found or auth failed, creating new passkey...');
-      isExistingPasskey = false;
-    }
-
-    // If no existing passkey, create a new one
-    if (!isExistingPasskey) {
-      // Generate app salt for PRF
-      appSalt = crypto.getRandomValues(new Uint8Array(32));
-
-      // Run WebAuthn ceremony with PRF extension
-      credential = await navigator.credentials.create({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rp: { id: rpId, name: 'ATS KMS V2' },
-          user: {
-            id: new TextEncoder().encode(userId),
-          name,
-          displayName: name,
-        },
-        pubKeyCredParams: [
-          { type: 'public-key', alg: -7 }, // ES256
-          { type: 'public-key', alg: -257 }, // RS256
-        ],
-        authenticatorSelection: {
-          authenticatorAttachment: 'platform',
-          userVerification: 'required',
-          residentKey: 'required',
-        },
-        extensions: {
-          prf: {
-            eval: {
-              first: appSalt,
-            },
-          },
-        },
-      },
-    }) as PublicKeyCredential;
-
-      // Store appSalt for future unlock operations (only for new passkeys)
-      localStorage.setItem('kms:appSalt', Array.from(appSalt).toString());
-    }
-
-    // Check if PRF extension succeeded
-    const prfExt = (credential as any).getClientExtensionResults().prf;
-    const prfOutput = prfExt?.results?.first;
-
-    let result;
-    let method;
-
-    if (prfOutput) {
-      // PRF available - use setupPasskeyPRF
-      console.log(`[Full Demo] PRF available, using setupPasskeyPRF (${isExistingPasskey ? 'existing' : 'new'} passkey)`);
-      method = `Passkey PRF${isExistingPasskey ? ' (Existing)' : ''}`;
-      result = await kmsUser.sendRequest<any>('setupPasskeyPRF', {
-        userId: 'demouser@ats.run',
-        credentialId: credential.rawId,
-        prfOutput: prfOutput,
-        rpId,
-      });
-    } else {
-      // PRF not available - use Gate
-      console.log(`[Full Demo] PRF not available, using setupPasskeyGate (${isExistingPasskey ? 'existing' : 'new'} passkey)`);
-      method = `Passkey Gate${isExistingPasskey ? ' (Existing)' : ''}`;
-      result = await kmsUser.sendRequest<any>('setupPasskeyGate', {
-        userId: 'demouser@ats.run',
-        credentialId: credential.rawId,
-        rpId,
-      });
-    }
-
-    console.log(`[Full Demo] WebAuthn setup complete (${method}):`, result);
-
-    // Show success and reload audit log
-    setupOperationEl.innerHTML = `
-      <div class="success-message">
-        <h4>✅ WebAuthn Setup Complete! (${method})</h4>
-        <div class="artifact-card">
-          <div class="artifact-title">Enrollment ID</div>
-          <div class="artifact-data"><code>${result.enrollmentId}</code></div>
-        </div>
-        <div class="artifact-card">
-          <div class="artifact-title">VAPID Key ID</div>
-          <div class="artifact-data"><code>${result.vapidKid}</code></div>
-        </div>
-        <div class="artifact-card">
-          <div class="artifact-title">VAPID Public Key</div>
-          <div class="artifact-data"><code>${result.vapidPublicKey}</code></div>
-        </div>
-      </div>
-    `;
-
-    await loadAuditLog();
-
-    // Reload setup UI to reflect new enrollment
-    const status = await kmsUser.isSetup('demouser@ats.run');
-    renderSetupUI(status);
-    renderLeaseUI(status);
-  } catch (error) {
-    console.error('[Full Demo] WebAuthn setup failed:', error);
-    alert(`Setup failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (!setupWindow) {
+    alert('Failed to open setup window. Please allow popups for this site.');
+    return;
   }
+
+  console.log('[Full Demo] Setup window opened, waiting for completion...');
 }
 
 /**
@@ -651,55 +567,59 @@ async function addEnrollmentPassphrase(status: { isSetup: boolean; methods: stri
 }
 
 /**
- * Get preferred credentials for operations (prefer passkey over passphrase)
+ * Trigger unlock UI in iframe
+ *
+ * Instead of collecting credentials in parent context, this sends a message
+ * to the iframe to trigger its unlock modal. The modal collects credentials
+ * in the iframe context, ensuring WebAuthn is bound to kms.ats.run (correct RP).
  */
-async function getPreferredCredentials(status: { methods: string[] }): Promise<any> {
-  const hasPasskey = status.methods.includes('passkey');
-  const hasPassphrase = status.methods.includes('passphrase');
-  const userId = 'demouser@ats.run';
+async function triggerUnlockUI(): Promise<void> {
+  console.log('[Full Demo] Triggering unlock UI in iframe...');
 
-  // Prefer passkey if available
-  if (hasPasskey) {
-    const appSalt = localStorage.getItem('kms:appSalt');
-
-    try {
-      const assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rpId: 'localhost',
-          userVerification: 'required',
-          extensions: appSalt ? {
-            prf: {
-              eval: {
-                first: new Uint8Array(appSalt.split(',').map(n => parseInt(n, 10))),
-              },
-            },
-          } : undefined,
-        },
-      }) as PublicKeyCredential;
-
-      // Check if PRF was used and succeeded
-      const prfExt = (assertion as any).getClientExtensionResults().prf;
-      const prfOutput = prfExt?.results?.first;
-
-      if (prfOutput) {
-        return { method: 'passkey-prf', prfOutput, userId };
-      } else {
-        return { method: 'passkey-gate', userId };
-      }
-    } catch (error) {
-      console.error('[Full Demo] Passkey authentication failed:', error);
-      throw error;
-    }
-  } else if (hasPassphrase) {
-    const passphrase = prompt('Enter your passphrase:');
-    if (!passphrase) {
-      throw new Error('Passphrase required');
-    }
-    return { method: 'passphrase', passphrase, userId };
-  } else {
-    throw new Error('No enrolled authentication methods available');
+  // Show the iframe overlay
+  const iframe = document.querySelector('iframe[src*="kms.html"]') as HTMLIFrameElement;
+  if (!iframe) {
+    throw new Error('KMS iframe not found');
   }
+
+  // Show iframe overlay
+  iframe.style.display = 'block';
+
+  // Send message to iframe to trigger unlock modal
+  return new Promise((resolve, reject) => {
+    const messageHandler = (event: MessageEvent) => {
+      // Validate origin
+      if (event.origin !== KMS_ORIGIN) return;
+
+      // Check for unlock completion or error
+      if (event.data?.type === 'kms:unlock-complete') {
+        window.removeEventListener('message', messageHandler);
+        iframe.style.display = 'none'; // Hide iframe
+        console.log('[Full Demo] Unlock completed');
+        resolve();
+      } else if (event.data?.type === 'kms:unlock-error') {
+        window.removeEventListener('message', messageHandler);
+        iframe.style.display = 'none'; // Hide iframe
+        console.error('[Full Demo] Unlock failed:', event.data.error);
+        reject(new Error(event.data.error));
+      }
+    };
+
+    window.addEventListener('message', messageHandler);
+
+    // Send trigger message
+    iframe.contentWindow?.postMessage(
+      { type: 'kms:trigger-unlock' },
+      KMS_ORIGIN
+    );
+
+    // Timeout after 60s
+    setTimeout(() => {
+      window.removeEventListener('message', messageHandler);
+      iframe.style.display = 'none';
+      reject(new Error('Unlock timeout'));
+    }, 60000);
+  });
 }
 
 /**
@@ -753,9 +673,6 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
   try {
     console.log('[Full Demo] Creating VAPID lease...');
 
-    // Get credentials (prefer passkey)
-    const credentials = await getPreferredCredentials(status);
-
     // For demo, use simple subscription parameters
     const userId = 'demouser@ats.run';
     const subs = [
@@ -767,12 +684,12 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
     ];
     const ttlHours = 24; // 24 hour lease
 
+    // Call createLease - iframe will automatically show modal to collect credentials
     console.log('[Full Demo] Calling createLease with:', { userId, subs, ttlHours });
     const result = await kmsUser.createLease({
       userId,
       subs,
       ttlHours,
-      credentials,
     });
     console.log('[Full Demo] Lease created:', result);
 

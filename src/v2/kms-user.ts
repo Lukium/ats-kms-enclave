@@ -177,7 +177,17 @@ export class KMSUser {
       // Create iframe
       this.iframe = document.createElement('iframe');
       this.iframe.src = `${this.kmsOrigin}/kms.html?parentOrigin=${encodeURIComponent(window.location.origin)}`;
-      this.iframe.style.display = 'none'; // Hidden iframe
+
+      // Style as full-page overlay (hidden by default)
+      this.iframe.style.position = 'fixed';
+      this.iframe.style.top = '0';
+      this.iframe.style.left = '0';
+      this.iframe.style.width = '100%';
+      this.iframe.style.height = '100%';
+      this.iframe.style.border = 'none';
+      this.iframe.style.zIndex = '99999';
+      this.iframe.style.display = 'none'; // Hidden by default
+
       this.iframe.sandbox.add('allow-scripts', 'allow-same-origin');
       this.iframe.allow = 'publickey-credentials-get; publickey-credentials-create';
 
@@ -701,9 +711,23 @@ export class KMSUser {
     userId: string;
     subs: Array<{ url: string; aud: string; eid: string }>;
     ttlHours: number;
-    credentials: AuthCredentials;
+    credentials?: AuthCredentials; // Optional - iframe will show modal if not provided
   }): Promise<LeaseResult> {
-    return this.sendRequest<LeaseResult>('createLease', params);
+    // Show iframe for authentication if credentials not provided
+    if (!params.credentials) {
+      this.iframe.style.display = 'block';
+    }
+
+    try {
+      const result = await this.sendRequest<LeaseResult>('createLease', params);
+      // Hide iframe on success
+      this.iframe.style.display = 'none';
+      return result;
+    } catch (error) {
+      // Hide iframe on error
+      this.iframe.style.display = 'none';
+      throw error;
+    }
   }
 
   /**

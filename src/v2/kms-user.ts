@@ -642,11 +642,28 @@ export class KMSUser {
    *
    * Requires user authentication (UAK-signed operation).
    *
-   * @param credentials - Authentication credentials
+   * @param params - Parameters including userId and optional credentials
    * @returns VAPID key result with new kid and public key
    */
-  async regenerateVAPID(credentials: AuthCredentials): Promise<VAPIDKeyResult> {
-    return this.sendRequest<VAPIDKeyResult>('regenerateVAPID', { credentials });
+  async regenerateVAPID(params: {
+    userId: string;
+    credentials?: AuthCredentials;
+  }): Promise<VAPIDKeyResult> {
+    // Show iframe for authentication if credentials not provided
+    if (!params.credentials) {
+      this.iframe.style.display = 'block';
+    }
+
+    try {
+      const result = await this.sendRequest<VAPIDKeyResult>('regenerateVAPID', params);
+      // Hide iframe on success
+      this.iframe.style.display = 'none';
+      return result;
+    } catch (error) {
+      // Hide iframe on error
+      this.iframe.style.display = 'none';
+      throw error;
+    }
   }
 
   /**

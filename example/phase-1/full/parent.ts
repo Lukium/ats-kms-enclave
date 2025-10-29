@@ -293,6 +293,7 @@ async function displayVAPIDKeyInfo(): Promise<void> {
 
 /**
  * Regenerate VAPID keypair (invalidates all active leases)
+ * Uses iframe authentication - credentials collected in KMS iframe
  */
 async function regenerateVAPIDKey(): Promise<void> {
   const confirmed = confirm(
@@ -305,18 +306,12 @@ async function regenerateVAPIDKey(): Promise<void> {
 
   if (!confirmed) return;
 
-  const passphrase = prompt('Enter your passphrase to confirm:');
-  if (!passphrase) return;
-
   try {
     console.log('[Full Demo] Regenerating VAPID key...');
 
-    // Call regenerateVAPID method (requires authentication)
-    const result = await kmsUser.regenerateVAPID({
-      method: 'passphrase',
-      passphrase,
-      userId: 'demouser@ats.run',
-    });
+    // Call regenerateVAPID - iframe will automatically show modal to collect credentials
+    const userId = 'demouser@ats.run';
+    const result = await kmsUser.regenerateVAPID({ userId });
 
     console.log('[Full Demo] VAPID key regenerated:', result);
 

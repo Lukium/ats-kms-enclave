@@ -28,6 +28,7 @@ import type {
   LeaseRecord,
   LeaseVerificationResult,
 } from './types.js';
+import { formatError } from './error-utils.js';
 
 /**
  * Configuration for KMSUser
@@ -201,10 +202,10 @@ export class KMSUser {
 
       // Wait for ready signal from iframe
       await this.waitForReady();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[KMS User] Initialization failed:', err);
       this.cleanup();
-      throw new Error(`Failed to initialize KMS: ${err.message}`);
+      throw new Error(formatError('Failed to initialize KMS', err));
     }
   }
 
@@ -456,8 +457,8 @@ export class KMSUser {
       }
 
       return result;
-    } catch (err: any) {
-      throw new Error(`Passkey setup failed: ${err.message}`);
+    } catch (err: unknown) {
+      throw new Error(formatError('Passkey setup failed', err));
     }
   }
 
@@ -505,8 +506,8 @@ export class KMSUser {
         credentialId: credential.rawId,
         rpId: config.rpId,
       });
-    } catch (err: any) {
-      throw new Error(`Passkey gate setup failed: ${err.message}`);
+    } catch (err: unknown) {
+      throw new Error(formatError('Passkey gate setup failed', err));
     }
   }
 

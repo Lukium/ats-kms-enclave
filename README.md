@@ -36,25 +36,26 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-29 21:40:40 UTC*
+*Last updated: 2025-10-29 21:47:35 UTC*
 
 **Test Results:**
 - Test Files: 6 passed (6)
 - Tests: 227 passed (227)
-- Duration: 23.84s
+- Duration: 23.39s
 
 **Coverage Report:**
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 10530   │   82.82│    87.04 │   85.46│   82.82 │
+All files           │ 10628   │   82.59│    86.50 │   85.14│   82.59 │
  v2/audit.ts        │ 614     │   97.87│    86.66 │     100│   97.87 │ 13 lines
- v2/client.ts       │ 1217    │   36.88│    88.57 │   66.66│   36.88 │ 587 lines
- v2/crypto-utils.ts │ 412     │   96.35│    95.52 │   94.44│   96.35 │ 15 lines
- v2/kms-user.ts     │ 796     │   88.17│    73.07 │   71.42│   88.17 │ 94 lines
+ v2/client.ts       │ 1218    │   36.94│    88.57 │   66.66│   36.94 │ 587 lines
+ v2/crypto-utils.ts │ 412     │   96.35│    95.45 │   94.44│   96.35 │ 15 lines
+ v2/error-utils.ts  │ 95      │   69.14│    33.33 │   66.66│   69.14 │ 29 lines
+ v2/kms-user.ts     │ 797     │   88.19│    73.07 │   71.42│   88.19 │ 94 lines
  v2/storage.ts      │ 549     │     100│    89.39 │     100│     100 │ 
  v2/unlock.ts       │ 458     │   91.68│    82.85 │   93.33│   91.68 │ 38 lines
- v2/worker.ts       │ 1478    │   90.18│    87.73 │   84.00│   90.18 │ 145 lines
+ v2/worker.ts       │ 1479    │   90.18│    88.27 │   84.00│   90.18 │ 145 lines
 ```
 <!-- END AUTO-GENERATED -->
 

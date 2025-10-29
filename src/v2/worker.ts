@@ -74,6 +74,7 @@ import {
   jwkThumbprintP256,
   arrayBufferToBase64url,
 } from './crypto-utils';
+import { getErrorMessage } from './error-utils';
 
 // ============================================================================
 // Session Key Cache (Lease-Scoped)
@@ -271,8 +272,8 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
     }
 
     return { id, result };
-  } catch (err: any) {
-    return { id, error: err.message ?? String(err) };
+  } catch (err: unknown) {
+    return { id, error: getErrorMessage(err) };
   }
 }
 

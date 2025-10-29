@@ -18,6 +18,7 @@
  */
 
 import type { RPCRequest, RPCResponse, AuthCredentials } from './types.js';
+import { formatError, getErrorMessage } from './error-utils.js';
 
 /**
  * Configuration for KMSClient
@@ -91,9 +92,9 @@ export class KMSClient {
 
       // Signal ready to parent
       this.sendToParent({ type: 'kms:ready' });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[KMS Client] Initialization failed:', err);
-      throw new Error(`Failed to initialize KMS client: ${err.message}`);
+      throw new Error(formatError('Failed to initialize KMS client', err));
     }
   }
 
@@ -133,14 +134,14 @@ export class KMSClient {
     // Forward to Worker
     try {
       this.worker.postMessage(event.data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[KMS Client] Failed to forward message to Worker:', err);
 
       // Send error response to parent
       if (request?.id) {
         this.sendToParent({
           id: request.id,
-          error: `Failed to forward message: ${err.message}`,
+          error: formatError('Failed to forward message', err),
         });
       }
     }
@@ -156,7 +157,7 @@ export class KMSClient {
   private handleWorkerMessage(event: MessageEvent): void {
     try {
       this.sendToParent(event.data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[KMS Client] Failed to forward message to parent:', err);
     }
   }
@@ -193,7 +194,7 @@ export class KMSClient {
 
     try {
       window.parent.postMessage(data, this.parentOrigin);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[KMS Client] Failed to send message to parent:', err);
     }
   }
@@ -387,9 +388,9 @@ export class KMSClient {
       // Send to worker and setup response listener
       this.setupUnlockResponseListener(requestWithCredentials);
       this.worker?.postMessage(requestWithCredentials);
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.hideLoading();
-      this.showError(`WebAuthn failed: ${err.message}`);
+      this.showError(`WebAuthn failed: ${getErrorMessage(err)}`);
       console.error('[KMS Client] WebAuthn unlock failed:', err);
     }
   }
@@ -432,9 +433,9 @@ export class KMSClient {
       // Send to worker and setup response listener
       this.setupUnlockResponseListener(requestWithCredentials);
       this.worker?.postMessage(requestWithCredentials);
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.hideLoading();
-      this.showError(`Unlock failed: ${err.message}`);
+      this.showError(`Unlock failed: ${getErrorMessage(err)}`);
       console.error('[KMS Client] Passphrase unlock failed:', err);
     }
   }
@@ -697,8 +698,8 @@ export class KMSClient {
 
             cleanup();
             resolve(credentials);
-          } catch (err: any) {
-            this.showSetupError(`Passkey unlock failed: ${err.message}`);
+          } catch (err: unknown) {
+            this.showSetupError(`Passkey unlock failed: ${getErrorMessage(err)}`);
           }
         };
       }
@@ -949,9 +950,9 @@ export class KMSClient {
         }, '*'); // Parent will validate origin
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.hideSetupLoading();
-      this.showSetupError(`WebAuthn setup failed: ${err.message}`);
+      this.showSetupError(`WebAuthn setup failed: ${getErrorMessage(err)}`);
       console.error('[KMS Client] WebAuthn setup failed:', err);
     }
   }
@@ -1066,9 +1067,9 @@ export class KMSClient {
         }, '*'); // Parent will validate origin
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.hideSetupLoading();
-      this.showSetupError(`Setup failed: ${err.message}`);
+      this.showSetupError(`Setup failed: ${getErrorMessage(err)}`);
       console.error('[KMS Client] Passphrase setup failed:', err);
     }
   }

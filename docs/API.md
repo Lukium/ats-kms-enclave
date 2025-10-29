@@ -1,7 +1,7 @@
 # KMS V2 API Reference
 
 **Version:** 2.0.0
-**Last Updated:** 2025-10-26
+**Last Updated:** 2025-10-29
 
 This document provides complete API documentation for the KMS V2 implementation, based on the actual working code and integration tests.
 
@@ -107,6 +107,87 @@ If you need manual control (e.g., in unit tests), the auto-initialization only r
 
 ---
 
+## ⚠️ CRITICAL: Iframe-Based Authentication
+
+**All authentication happens inside the KMS iframe. Credentials NEVER leave the iframe.**
+
+### How It Works
+
+When you call operations that require authentication (e.g., `createLease`, `generateVAPID`), the KMS automatically:
+
+1. **Shows iframe overlay** - Full-screen modal appears over parent
+2. **Collects credentials** - User authenticates with passkey or passphrase
+3. **Executes operation** - Credentials sent to worker (never to parent)
+4. **Returns result** - Modal hides, result sent back to parent
+
+### Key Security Properties
+
+- **Credentials isolation**: Passkeys and passphrases never exposed to parent PWA
+- **Cross-origin protection**: Browser enforces iframe cannot access parent
+- **Correct RP binding**: WebAuthn credentials bound to `kms.ats.run` (iframe origin)
+- **Per-operation auth**: No persistent sessions, credentials derived fresh each time
+
+### Setup vs Unlock Context
+
+**Setup (First-Party):**
+- Opens in **new window** at `kms.ats.run`
+- Allows `credentials.create()` (Safari requires first-party context)
+- User registers passkey or sets passphrase
+- Window closes after setup completes
+
+**Unlock (Cross-Origin):**
+- Shows **iframe overlay** in parent PWA
+- Allows `credentials.get()` (supported in all modern browsers)
+- User authenticates to authorize operation
+- Modal hides after operation completes
+
+### Developer Guidelines
+
+**✅ DO:**
+- Always include `userId` in operations requiring authentication
+- Let the iframe handle all credential collection
+- Use `kmsUser.createLease({ userId, subs, ttlHours })` - iframe shows automatically
+
+**❌ DON'T:**
+- Call WebAuthn (`navigator.credentials`) in parent context
+- Try to access credentials from parent
+- Manually show/hide the iframe (KMS handles this)
+
+### Example: Creating a Lease
+
+```typescript
+// Parent PWA code - credentials handled automatically by iframe
+const lease = await kmsUser.createLease({
+  userId: 'user@example.com',  // ⚠️ REQUIRED
+  subs: [{ url: '...', aud: '...', eid: '...' }],
+  ttlHours: 24,
+  // No credentials parameter - iframe collects them
+});
+
+// Iframe automatically:
+// 1. Shows modal overlay
+// 2. User authenticates with passkey
+// 3. Credentials sent to worker
+// 4. Lease created
+// 5. Modal hides
+// 6. Result returned to parent
+```
+
+### Operations Requiring Authentication
+
+All operations that require `credentials` parameter MUST include `userId`:
+
+- `createLease(params)`
+- `generateVAPID(credentials)`
+- `signJWT(kid, payload, credentials)`
+- `regenerateVAPID(credentials)`
+- `addEnrollment(method, credentials, newCredentials)`
+- `removeEnrollment(enrollmentId, credentials)`
+
+**The `userId` is extracted from the operation parameters and included in the credentials automatically by the iframe.**
+
+---
+
 ## Key Concepts
 
 ### Per-Operation Authentication
@@ -156,11 +237,13 @@ When JWT[0] reaches 60% TTL, switch to JWT[1] (already valid).
 
 ### AuthCredentials Type
 
+**⚠️ IMPORTANT:** All credentials MUST include `userId` to identify which user's enrollment to use.
+
 ```typescript
 type AuthCredentials =
-  | { method: 'passphrase'; passphrase: string }
-  | { method: 'passkey-prf'; prfOutput: ArrayBuffer }
-  | { method: 'passkey-gate' };
+  | { method: 'passphrase'; passphrase: string; userId: string }
+  | { method: 'passkey-prf'; prfOutput: ArrayBuffer; userId: string }
+  | { method: 'passkey-gate'; userId: string };
 ```
 
 ### Enrollment Methods
@@ -170,6 +253,31 @@ type AuthCredentials =
 3. **Passkey Gate** - Fallback for passkeys without PRF support
 
 **Multi-enrollment supported**: Same Master Secret can be unlocked with multiple methods.
+
+### WebAuthn PRF Extension Behavior
+
+The WebAuthn PRF (Pseudo-Random Function) extension behaves differently during registration vs authentication:
+
+**`credentials.create()` (Registration):**
+```typescript
+// Response format:
+{ prf: { enabled: true/false } }
+// Indicates whether the passkey SUPPORTS PRF (capability check only)
+// Does NOT provide actual PRF output
+```
+
+**`credentials.get()` (Authentication):**
+```typescript
+// Response format:
+{ prf: { results: { first: ArrayBuffer } } }
+// Provides actual PRF output (32-byte deterministic value)
+```
+
+**KMS Handling:**
+- During setup: Check `prf.enabled`, call `get()` if true to obtain PRF output
+- During unlock: Always request PRF, check enrollment type to determine method
+- Browser inconsistencies: Some browsers return PRF data even when `enabled: false`
+- Solution: Match unlock method to setup method (check enrollments, not just PRF response)
 
 ---
 
@@ -223,7 +331,7 @@ console.log(result.vapidPublicKey); // "BFkj..."
 
 #### `setupPasskeyPRF(config)`
 
-Setup KMS with passkey PRF authentication. Orchestrates WebAuthn credential creation and generates VAPID keypair.
+Setup KMS with passkey PRF authentication. **Opens KMS in new window** where WebAuthn credential creation happens in first-party context (required by Safari for `credentials.create()`).
 
 **Parameters:**
 ```typescript
@@ -246,22 +354,26 @@ Setup KMS with passkey PRF authentication. Orchestrates WebAuthn credential crea
 
 **Example:**
 ```typescript
+// Opens new window at kms.ats.run for setup
 const result = await kmsUser.setupPasskeyPRF({
   name: 'user@example.com',
   rpId: 'example.com',
   userId: 'user-123',
 });
+// Window closes automatically after setup completes
 ```
 
 **Notes:**
+- **Opens in new window** (first-party context for `credentials.create()`)
 - Requires browser support for WebAuthn PRF extension
-- Stores appSalt in localStorage for unlock operations
+- Stores appSalt in KMS localStorage for unlock operations
+- WebAuthn credentials bound to `kms.ats.run` (correct RP)
 
 ---
 
 #### `setupPasskeyGate(config)`
 
-Setup KMS with passkey gate authentication (fallback for non-PRF passkeys).
+Setup KMS with passkey gate authentication (fallback for non-PRF passkeys). **Opens KMS in new window** where WebAuthn credential creation happens in first-party context.
 
 **Parameters:**
 ```typescript
@@ -281,6 +393,22 @@ Setup KMS with passkey gate authentication (fallback for non-PRF passkeys).
   vapidKid: string              // JWK thumbprint
 }
 ```
+
+**Example:**
+```typescript
+// Opens new window at kms.ats.run for setup
+const result = await kmsUser.setupPasskeyGate({
+  name: 'user@example.com',
+  rpId: 'example.com',
+  userId: 'user-123',
+});
+// Window closes automatically after setup completes
+```
+
+**Notes:**
+- **Opens in new window** (first-party context for `credentials.create()`)
+- Fallback for passkeys without PRF extension support
+- WebAuthn credentials bound to `kms.ats.run` (correct RP)
 
 ---
 
@@ -881,17 +1009,19 @@ try {
 
 Create VAPID lease for long-lived JWT issuance authorization. Derives SessionKEK from Master Secret and wraps VAPID key for credential-free JWT signing.
 
+**⚠️ AUTHENTICATION:** This operation requires authentication. The KMS iframe will automatically show a modal to collect credentials.
+
 **Parameters:**
 ```typescript
 {
-  userId: string,
+  userId: string,               // ⚠️ REQUIRED - User ID for authentication
   subs: Array<{
-    url: string,      // Push endpoint URL
-    aud: string,      // Audience (push service)
-    eid: string       // Endpoint ID
+    url: string,                // Push endpoint URL
+    aud: string,                // Audience (push service)
+    eid: string                 // Endpoint ID
   }>,
-  ttlHours: number,   // Lease TTL (max 24 hours)
-  credentials: AuthCredentials
+  ttlHours: number,             // Lease TTL (max 24 hours)
+  credentials?: AuthCredentials // OPTIONAL - Collected automatically by iframe
 }
 ```
 
@@ -909,10 +1039,11 @@ Create VAPID lease for long-lived JWT issuance authorization. Derives SessionKEK
 }
 ```
 
-**Example:**
+**Example (Iframe-Based Authentication):**
 ```typescript
+// Credentials handled automatically by iframe modal
 const lease = await kmsUser.createLease({
-  userId: 'user-123',
+  userId: 'user-123',  // ⚠️ REQUIRED
   subs: [
     {
       url: 'https://fcm.googleapis.com/fcm/send/abc123',
@@ -921,7 +1052,7 @@ const lease = await kmsUser.createLease({
     },
   ],
   ttlHours: 12,
-  credentials: { method: 'passphrase', passphrase: 'my-passphrase' },
+  // No credentials parameter - iframe shows modal automatically
 });
 console.log(lease.leaseId); // "lease-abc-def-..."
 console.log(lease.exp);     // 1698765432000
@@ -1437,13 +1568,15 @@ const kmsUser = new KMSUser({
 });
 await kmsUser.init();
 
-// 2. Setup (first time)
+// 2. Setup (first time) - Opens new window for passkey/passphrase setup
+// User will see setup modal in popup window at kms.ats.run
 const setup = await kmsUser.setupPassphrase('my-secure-passphrase');
 console.log('VAPID key created:', setup.vapidKid);
 
-// 3. Create lease (requires credentials)
+// 3. Create lease - Iframe modal collects credentials automatically
+// User will see authentication modal overlay in parent window
 const lease = await kmsUser.createLease({
-  userId: 'user-123',
+  userId: 'user-123',  // ⚠️ REQUIRED for authentication
   subs: [
     {
       url: 'https://fcm.googleapis.com/fcm/send/abc123',
@@ -1452,7 +1585,7 @@ const lease = await kmsUser.createLease({
     },
   ],
   ttlHours: 12,
-  credentials: { method: 'passphrase', passphrase: 'my-secure-passphrase' },
+  // No credentials parameter - iframe shows modal automatically
 });
 console.log('Lease created:', lease.leaseId);
 

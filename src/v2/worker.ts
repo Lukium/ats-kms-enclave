@@ -145,10 +145,20 @@ async function deriveSessionKEK(ms: Uint8Array<ArrayBuffer>, leaseSalt: Uint8Arr
  * Main worker message handler. Receives RPC requests from client,
  * processes them, and sends back responses.
  */
-self.addEventListener('message', async (event: MessageEvent) => {
-  const request = event.data as RPCRequest;
-  const response = await handleMessage(request);
-  self.postMessage(response);
+self.addEventListener('message', (event: MessageEvent) => {
+  void (async (): Promise<void> => {
+    const request = event.data as RPCRequest;
+    const response = await handleMessage(request);
+    self.postMessage(response);
+  })().catch((err: unknown) => {
+    console.error('[KMS Worker] Message handling failed:', err);
+    // Send error response back to client
+    const request = event.data as RPCRequest;
+    self.postMessage({
+      id: request?.id || 'unknown',
+      error: err instanceof Error ? err.message : 'Unknown error',
+    });
+  });
 });
 
 // ============================================================================
@@ -1431,7 +1441,7 @@ async function handleRemoveEnrollment(
  * Initialize KMS Worker on startup.
  * Generates KIAK (KMS Instance Audit Key) and logs initialization event.
  */
-(async (): Promise<void> => {
+void (async (): Promise<void> => {
   try {
     await initDB();
     await initAuditLogger();

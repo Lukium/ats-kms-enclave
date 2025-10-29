@@ -285,7 +285,10 @@ export class KMSClient {
     // Setup Enter key for passphrase
     passphraseInput.onkeydown = (e): void => {
       if (e.key === 'Enter') {
-        this.handlePassphraseUnlock(passphraseInput.value);
+        void this.handlePassphraseUnlock(passphraseInput.value).catch((err: unknown) => {
+          console.error('[KMS Client] Passphrase unlock failed:', err);
+          this.showError(err instanceof Error ? err.message : 'Unknown error');
+        });
       }
     };
 
@@ -769,7 +772,10 @@ export class KMSClient {
 
     // Setup Enter key for passphrase (in both fields)
     const handleEnter = (): void => {
-      this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value);
+      void this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value).catch((err: unknown) => {
+        console.error('[KMS Client] Passphrase setup failed:', err);
+        this.showSetupError(err instanceof Error ? err.message : 'Unknown error');
+      });
     };
 
     passphraseInput.onkeydown = (e): void => {

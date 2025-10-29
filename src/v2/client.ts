@@ -213,7 +213,7 @@ export class KMSClient {
         params: { userId },
       };
 
-      const handler = (event: MessageEvent) => {
+      const handler = (event: MessageEvent): void => {
         const response = event.data as RPCResponse;
         if (response.id === requestId) {
           this.worker?.removeEventListener('message', handler);
@@ -277,13 +277,13 @@ export class KMSClient {
     modal.style.display = 'flex';
 
     // Setup WebAuthn button handler
-    webauthnBtn.onclick = () => this.handleWebAuthnUnlock();
+    webauthnBtn.onclick = (): Promise<void> => this.handleWebAuthnUnlock();
 
     // Setup passphrase button handler
-    passphraseBtn.onclick = () => this.handlePassphraseUnlock(passphraseInput.value);
+    passphraseBtn.onclick = (): Promise<void> => this.handlePassphraseUnlock(passphraseInput.value);
 
     // Setup Enter key for passphrase
-    passphraseInput.onkeydown = (e) => {
+    passphraseInput.onkeydown = (e): void => {
       if (e.key === 'Enter') {
         this.handlePassphraseUnlock(passphraseInput.value);
       }
@@ -444,7 +444,7 @@ export class KMSClient {
    * @param operationRequest - The operation request sent to worker
    */
   private setupUnlockResponseListener(operationRequest: RPCRequest): void {
-    const handleOperationResponse = (event: MessageEvent) => {
+    const handleOperationResponse = (event: MessageEvent): void => {
       const response = event.data as RPCResponse;
 
       // Check if this is the response to our operation request
@@ -607,7 +607,7 @@ export class KMSClient {
 
     // Return promise that resolves when user successfully unlocks
     return new Promise<AuthCredentials>((resolve) => {
-      const cleanup = () => {
+      const cleanup = (): void => {
         // Remove temporary elements
         document.getElementById('multi-enrollment-unlock')?.remove();
         document.getElementById('temp-passphrase-unlock')?.remove();
@@ -623,7 +623,7 @@ export class KMSClient {
       const passphraseInput = document.getElementById('temp-passphrase-input') as HTMLInputElement;
 
       if (passphraseBtn && passphraseInput) {
-        const handlePassphraseUnlock = () => {
+        const handlePassphraseUnlock = (): void => {
           const passphrase = passphraseInput.value;
           if (!passphrase) {
             this.showSetupError('Please enter your passphrase');
@@ -635,7 +635,7 @@ export class KMSClient {
         };
 
         passphraseBtn.onclick = handlePassphraseUnlock;
-        passphraseInput.onkeydown = (e) => {
+        passphraseInput.onkeydown = (e): void => {
           if (e.key === 'Enter') handlePassphraseUnlock();
         };
       }
@@ -643,7 +643,7 @@ export class KMSClient {
       // Handle passkey unlock
       const passkeyBtn = document.getElementById('temp-passkey-btn');
       if (passkeyBtn) {
-        passkeyBtn.onclick = async () => {
+        passkeyBtn.onclick = async (): Promise<void> => {
           try {
             // Load appSalt for PRF
             const appSaltStr = localStorage.getItem('kms:appSalt');
@@ -719,12 +719,12 @@ export class KMSClient {
     }
 
     // Setup WebAuthn button handler
-    webauthnBtn.onclick = () => this.handleWebAuthnSetup();
+    webauthnBtn.onclick = (): Promise<void> => this.handleWebAuthnSetup();
 
     // Setup character count for passphrase
     const matchFeedback = document.getElementById('kms-passphrase-match-feedback');
 
-    const updateMatchFeedback = () => {
+    const updateMatchFeedback = (): void => {
       const passphrase = passphraseInput.value;
       const confirm = passphraseConfirmInput.value;
 
@@ -747,7 +747,7 @@ export class KMSClient {
       }
     };
 
-    passphraseInput.oninput = () => {
+    passphraseInput.oninput = (): void => {
       const length = passphraseInput.value.length;
       const minLength = 12;
       if (charCount) {
@@ -765,18 +765,18 @@ export class KMSClient {
     passphraseConfirmInput.oninput = updateMatchFeedback;
 
     // Setup passphrase button handler
-    passphraseBtn.onclick = () => this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value);
+    passphraseBtn.onclick = (): Promise<void> => this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value);
 
     // Setup Enter key for passphrase (in both fields)
-    const handleEnter = () => {
+    const handleEnter = (): void => {
       this.handlePassphraseSetup(passphraseInput.value, passphraseConfirmInput.value);
     };
 
-    passphraseInput.onkeydown = (e) => {
+    passphraseInput.onkeydown = (e): void => {
       if (e.key === 'Enter') handleEnter();
     };
 
-    passphraseConfirmInput.onkeydown = (e) => {
+    passphraseConfirmInput.onkeydown = (e): void => {
       if (e.key === 'Enter') handleEnter();
     };
   }
@@ -908,7 +908,7 @@ export class KMSClient {
 
       // Wait for response
       const response: any = await new Promise((resolve, reject) => {
-        const handler = (event: MessageEvent) => {
+        const handler = (event: MessageEvent): void => {
           const resp = event.data;
           if (resp.id === setupRequest.id) {
             this.worker?.removeEventListener('message', handler);
@@ -1028,7 +1028,7 @@ export class KMSClient {
 
       // Wait for response
       const response: any = await new Promise((resolve, reject) => {
-        const handler = (event: MessageEvent) => {
+        const handler = (event: MessageEvent): void => {
           const resp = event.data;
           if (resp.id === setupRequest.id) {
             this.worker?.removeEventListener('message', handler);
@@ -1180,7 +1180,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   const client = new KMSClient({ parentOrigin });
 
   // Initialize when DOM is ready
-  const initFn = () => {
+  const initFn = (): void => {
     client.init().catch((err) => {
       console.error('[KMS Client] Auto-initialization failed:', err);
     });

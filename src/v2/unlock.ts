@@ -31,9 +31,9 @@ import type {
 
 // Persistent config keys for enrolments. Keys are namespaced by userId
 // to support multiple users in the same browser.
-const getPassphraseConfigKey = (userId: string) => `enrollment:passphrase:v2:${userId}`;
-const getPasskeyPRFConfigKey = (userId: string) => `enrollment:passkey-prf:v2:${userId}`;
-const getPasskeyGateConfigKey = (userId: string) => `enrollment:passkey-gate:v2:${userId}`;
+const getPassphraseConfigKey = (userId: string): string => `enrollment:passphrase:v2:${userId}`;
+const getPasskeyPRFConfigKey = (userId: string): string => `enrollment:passkey-prf:v2:${userId}`;
+const getPasskeyGateConfigKey = (userId: string): string => `enrollment:passkey-gate:v2:${userId}`;
 
 /**
  * Generate a new random 32‑byte master secret. The MS should never

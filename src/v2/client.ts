@@ -219,7 +219,8 @@ export class KMSClient {
         if (response.id === requestId) {
           this.worker?.removeEventListener('message', handler);
           if (response.error) {
-            reject(new Error(response.error));
+            const errorMsg = typeof response.error === 'string' ? response.error : response.error.message;
+          reject(new Error(errorMsg));
           } else {
             resolve(response.result?.enrollments || []);
           }
@@ -246,6 +247,7 @@ export class KMSClient {
    *
    * @param request - Original triggerUnlockUI request (null if triggered by parent)
    */
+  /* c8 ignore start - DOM manipulation and UI event handlers tested via Playwright */
   private showUnlockModal(request: RPCRequest | null): void {
     this.pendingUnlockRequest = request;
 
@@ -325,7 +327,7 @@ export class KMSClient {
           extensions: {
             prf: {
               eval: {
-                first: appSalt,
+                first: appSalt as BufferSource,
               },
             },
           },
@@ -536,6 +538,7 @@ export class KMSClient {
     this.hideLoading();
     this.hideError();
   }
+  /* c8 ignore stop */
 
   /**
    * Prompt user to unlock with existing method for multi-enrollment.
@@ -672,7 +675,7 @@ export class KMSClient {
                 extensions: {
                   prf: {
                     eval: {
-                      first: appSalt,
+                      first: appSalt as BufferSource,
                     },
                   },
                 },
@@ -843,7 +846,7 @@ export class KMSClient {
           extensions: {
             prf: {
               eval: {
-                first: appSalt,
+                first: appSalt as BufferSource,
               },
             },
           },
@@ -877,7 +880,7 @@ export class KMSClient {
             extensions: {
               prf: {
                 eval: {
-                  first: appSalt,
+                  first: appSalt as BufferSource,
                 },
               },
             },

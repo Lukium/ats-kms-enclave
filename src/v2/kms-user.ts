@@ -651,16 +651,22 @@ export class KMSUser {
   }): Promise<VAPIDKeyResult> {
     // ALWAYS show iframe for authentication
     // Credentials are collected in iframe, never passed from parent
-    this.iframe.style.display = 'block';
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
 
     try {
       const result = await this.sendRequest<VAPIDKeyResult>('regenerateVAPID', params);
       // Hide iframe on success
-      this.iframe.style.display = 'none';
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
       return result;
     } catch (error) {
       // Hide iframe on error
-      this.iframe.style.display = 'none';
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
       throw error;
     }
   }
@@ -733,16 +739,22 @@ export class KMSUser {
   }): Promise<LeaseResult> {
     // ALWAYS show iframe for authentication
     // Credentials are collected in iframe, never passed from parent
-    this.iframe.style.display = 'block';
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
 
     try {
       const result = await this.sendRequest<LeaseResult>('createLease', params);
       // Hide iframe on success
-      this.iframe.style.display = 'none';
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
       return result;
     } catch (error) {
       // Hide iframe on error
-      this.iframe.style.display = 'none';
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
       throw error;
     }
   }

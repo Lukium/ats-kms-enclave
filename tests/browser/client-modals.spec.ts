@@ -61,7 +61,7 @@ test.describe('KMSClient Modal UI Flows', () => {
     await setupWindow.waitForLoadState('domcontentloaded');
 
     // Check that setup modal is visible in the popup
-    const setupModal = await setupWindow.locator('#setup-modal');
+    const setupModal = setupWindow.locator('#setup-modal');
     await expect(setupModal).toBeVisible();
 
     // Check that both auth options are shown
@@ -201,8 +201,6 @@ test.describe('KMSClient Modal UI Flows', () => {
     await iframe.locator('#kms-passphrase-btn').click();
 
     // Loading indicator should appear briefly
-    const loading = iframe.locator('#kms-modal-loading');
-
     // Note: This might be flaky due to fast operations, so we just check it doesn't error
     // The important part is that the operation completes successfully
 

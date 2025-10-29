@@ -663,12 +663,10 @@ describe('lease operations', () => {
     const iframe = env.getCurrentIframe();
     const postMessageSpy = vi.spyOn(iframe!.contentWindow!, 'postMessage');
 
-    const credentials = { method: 'passphrase' as const, passphrase: 'test-123', userId: 'test@example.com' };
     const requestPromise = kmsUser.createLease({
       userId: 'user-123',
       subs: [{ url: 'https://push.example.com/sub', aud: 'https://fcm.googleapis.com', eid: 'ep-1' }],
       ttlHours: 12,
-      credentials,
     });
 
     const [request] = postMessageSpy.mock.calls[0]! as [any, string];

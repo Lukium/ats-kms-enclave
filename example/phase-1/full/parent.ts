@@ -678,8 +678,10 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
           <div class="artifact-card">
             <div class="artifact-title">Quotas</div>
             <div class="artifact-data">
-              <div>Signs Remaining: ${result.quotas.signsRemaining}</div>
-              <div>Signs Used: ${result.quotas.signsUsed}</div>
+              <div>Tokens/Hour: ${result.quotas.tokensPerHour}</div>
+              <div>Sends/Minute: ${result.quotas.sendsPerMinute}</div>
+              <div>Burst Sends: ${result.quotas.burstSends}</div>
+              <div>Sends/Min/Endpoint: ${result.quotas.sendsPerMinutePerEid}</div>
             </div>
           </div>
           <button id="dismiss-lease-result-btn" class="operation-btn">✖ Dismiss</button>

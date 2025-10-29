@@ -17,7 +17,7 @@
  *   worker.ts (Dedicated Worker)
  */
 
-import type { RPCRequest, RPCResponse } from './types.js';
+import type { RPCRequest, RPCResponse, AuthCredentials } from './types.js';
 
 /**
  * Configuration for KMSClient
@@ -538,6 +538,176 @@ export class KMSClient {
   }
 
   /**
+   * Prompt user to unlock with existing method for multi-enrollment.
+   * Shows the unlock modal to collect credentials before adding new enrollment.
+   *
+   * @param enrollments - List of existing enrollment IDs
+   * @param userId - User ID
+   * @returns Collected credentials
+   */
+  private async promptUnlockForEnrollment(enrollments: string[], userId: string): Promise<AuthCredentials> {
+    console.log('[KMS Client] Prompting unlock for multi-enrollment with enrollments:', enrollments);
+
+    // Show the setup modal body temporarily with instructions
+    const setupModalBody = document.querySelector('#setup-modal .kms-modal-body') as HTMLElement;
+    if (setupModalBody) {
+      // Hide setup options, show unlock instructions
+      const setupOptions = setupModalBody.querySelectorAll('.kms-auth-option, .kms-divider');
+      setupOptions.forEach(el => ((el as HTMLElement).style.display = 'none'));
+
+      // Create unlock instructions
+      const unlockInstructions = document.createElement('div');
+      unlockInstructions.id = 'multi-enrollment-unlock';
+      unlockInstructions.style.cssText = 'margin-bottom: 1.5rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border: 1px solid rgba(102, 126, 234, 0.3); border-radius: 6px;';
+      unlockInstructions.innerHTML = `
+        <p style="margin: 0 0 0.5rem 0; color: #a5b4fc; font-size: 0.875rem; font-weight: 600;">
+          🔒 Multi-Enrollment Authentication Required
+        </p>
+        <p style="margin: 0; color: #888; font-size: 0.8rem;">
+          You already have an authentication method set up. Please authenticate with your existing method to add a new one.
+        </p>
+      `;
+      setupModalBody.insertBefore(unlockInstructions, setupModalBody.firstChild);
+
+      // Show appropriate unlock option based on existing enrollments
+      const hasPassphrase = enrollments.some(e => e.includes('passphrase'));
+      const hasPasskey = enrollments.some(e => e.includes('passkey'));
+
+      if (hasPassphrase) {
+        // Show passphrase input
+        const passphraseOption = document.createElement('div');
+        passphraseOption.className = 'kms-auth-option';
+        passphraseOption.id = 'temp-passphrase-unlock';
+        passphraseOption.innerHTML = `
+          <label for="temp-passphrase-input" class="kms-input-label">Passphrase</label>
+          <input
+            type="password"
+            id="temp-passphrase-input"
+            class="kms-input"
+            placeholder="Enter your passphrase"
+            autocomplete="off"
+          />
+          <button id="temp-passphrase-btn" class="kms-auth-btn kms-secondary">
+            <span class="kms-auth-icon">🔐</span>
+            <span class="kms-auth-label">Unlock with Passphrase</span>
+          </button>
+        `;
+        setupModalBody.appendChild(passphraseOption);
+      }
+
+      if (hasPasskey) {
+        // Show passkey button
+        const passkeyOption = document.createElement('div');
+        passkeyOption.className = 'kms-auth-option';
+        passkeyOption.id = 'temp-passkey-unlock';
+        passkeyOption.innerHTML = `
+          <button id="temp-passkey-btn" class="kms-auth-btn kms-primary">
+            <span class="kms-auth-icon">🔑</span>
+            <span class="kms-auth-label">Unlock with Passkey</span>
+          </button>
+        `;
+        setupModalBody.appendChild(passkeyOption);
+      }
+    }
+
+    // Return promise that resolves when user successfully unlocks
+    return new Promise<AuthCredentials>((resolve) => {
+      const cleanup = () => {
+        // Remove temporary elements
+        document.getElementById('multi-enrollment-unlock')?.remove();
+        document.getElementById('temp-passphrase-unlock')?.remove();
+        document.getElementById('temp-passkey-unlock')?.remove();
+
+        // Restore setup options
+        const setupOptions = setupModalBody?.querySelectorAll('.kms-auth-option, .kms-divider');
+        setupOptions?.forEach(el => ((el as HTMLElement).style.display = ''));
+      };
+
+      // Handle passphrase unlock
+      const passphraseBtn = document.getElementById('temp-passphrase-btn');
+      const passphraseInput = document.getElementById('temp-passphrase-input') as HTMLInputElement;
+
+      if (passphraseBtn && passphraseInput) {
+        const handlePassphraseUnlock = () => {
+          const passphrase = passphraseInput.value;
+          if (!passphrase) {
+            this.showSetupError('Please enter your passphrase');
+            return;
+          }
+
+          cleanup();
+          resolve({ method: 'passphrase', passphrase, userId });
+        };
+
+        passphraseBtn.onclick = handlePassphraseUnlock;
+        passphraseInput.onkeydown = (e) => {
+          if (e.key === 'Enter') handlePassphraseUnlock();
+        };
+      }
+
+      // Handle passkey unlock
+      const passkeyBtn = document.getElementById('temp-passkey-btn');
+      if (passkeyBtn) {
+        passkeyBtn.onclick = async () => {
+          try {
+            // Load appSalt for PRF
+            const appSaltStr = localStorage.getItem('kms:appSalt');
+            let appSalt: Uint8Array;
+
+            if (appSaltStr) {
+              appSalt = new Uint8Array(appSaltStr.split(',').map(n => parseInt(n, 10)));
+            } else {
+              appSalt = crypto.getRandomValues(new Uint8Array(32));
+            }
+
+            // Call WebAuthn
+            const credential = await navigator.credentials.get({
+              publicKey: {
+                challenge: new Uint8Array(32),
+                timeout: 60000,
+                userVerification: 'required',
+                extensions: {
+                  prf: {
+                    eval: {
+                      first: appSalt,
+                    },
+                  },
+                },
+              },
+            }) as PublicKeyCredential;
+
+            if (!credential) {
+              throw new Error('No credential returned');
+            }
+
+            // Check if PRF succeeded
+            const prfExt = (credential as any).getClientExtensionResults().prf;
+            const prfOutput = prfExt?.results?.first;
+
+            // Determine method based on enrollment type
+            const hasPRF = enrollments.some(e => e.includes('prf'));
+            const hasGate = enrollments.some(e => e.includes('gate'));
+
+            let credentials: AuthCredentials;
+            if (hasPRF && prfOutput) {
+              credentials = { method: 'passkey-prf', prfOutput, userId };
+            } else if (hasGate) {
+              credentials = { method: 'passkey-gate', userId };
+            } else {
+              throw new Error('Unable to determine passkey method');
+            }
+
+            cleanup();
+            resolve(credentials);
+          } catch (err: any) {
+            this.showSetupError(`Passkey unlock failed: ${err.message}`);
+          }
+        };
+      }
+    });
+  }
+
+  /**
    * Setup modal handling (for standalone setup window)
    * This runs in first-party context, enabling credentials.create()
    */
@@ -567,6 +737,7 @@ export class KMSClient {
 
   /**
    * Handle WebAuthn setup (credentials.create in first-party context)
+   * Supports both initial setup and multi-enrollment (adding second+ method)
    */
   private async handleWebAuthnSetup(): Promise<void> {
     this.showSetupLoading();
@@ -575,6 +746,23 @@ export class KMSClient {
     try {
       const userId = 'demouser@ats.run';
       const rpId = window.location.hostname; // kms.ats.run or localhost
+
+      // Check if user already has enrollments (multi-enrollment scenario)
+      const enrollments = await this.getEnrollments(userId);
+      console.log('[KMS Client] Checking existing enrollments:', enrollments);
+
+      // If enrollments exist, we need to collect existing credentials first
+      let existingCredentials: AuthCredentials | null = null;
+      if (enrollments.length > 0) {
+        console.log('[KMS Client] Multi-enrollment: User has existing enrollments, need to authenticate first');
+        this.hideSetupLoading();
+
+        // Prompt user to unlock with existing method
+        existingCredentials = await this.promptUnlockForEnrollment(enrollments, userId);
+
+        this.showSetupLoading();
+        console.log('[KMS Client] Multi-enrollment: User authenticated, proceeding with new enrollment');
+      }
 
       // Generate app salt for PRF
       const appSalt = crypto.getRandomValues(new Uint8Array(32));
@@ -651,17 +839,38 @@ export class KMSClient {
         });
       }
 
-      // Send setup request to worker
-      const setupRequest: RPCRequest = {
-        id: `setup-${Date.now()}`,
-        method: (prfEnabled && prfOutput) ? 'setupPasskeyPRF' : 'setupPasskeyGate',
-        params: {
-          userId,
-          credentialId: credential.rawId,
-          ...(prfOutput && { prfOutput }),
-          rpId,
-        },
-      };
+      // Determine method and params based on whether this is initial or multi-enrollment
+      let setupRequest: RPCRequest;
+
+      if (existingCredentials) {
+        // Multi-enrollment: Add new enrollment to existing MS
+        setupRequest = {
+          id: `add-enrollment-${Date.now()}`,
+          method: 'addEnrollment',
+          params: {
+            userId,
+            method: (prfEnabled && prfOutput) ? 'passkey-prf' : 'passkey-gate',
+            credentials: existingCredentials,
+            newCredentials: {
+              credentialId: credential.rawId,
+              ...(prfOutput && { prfOutput }),
+              rpId,
+            },
+          },
+        };
+      } else {
+        // Initial setup: Create new MS
+        setupRequest = {
+          id: `setup-${Date.now()}`,
+          method: (prfEnabled && prfOutput) ? 'setupPasskeyPRF' : 'setupPasskeyGate',
+          params: {
+            userId,
+            credentialId: credential.rawId,
+            ...(prfOutput && { prfOutput }),
+            rpId,
+          },
+        };
+      }
 
       this.worker?.postMessage(setupRequest);
 
@@ -712,6 +921,7 @@ export class KMSClient {
 
   /**
    * Handle passphrase setup
+   * Supports both initial setup and multi-enrollment (adding second+ method)
    */
   private async handlePassphraseSetup(passphrase: string): Promise<void> {
     if (!passphrase || passphrase.trim().length === 0) {
@@ -730,15 +940,51 @@ export class KMSClient {
     try {
       const userId = 'demouser@ats.run';
 
-      // Send setup request to worker
-      const setupRequest: RPCRequest = {
-        id: `setup-${Date.now()}`,
-        method: 'setupPassphrase',
-        params: {
-          userId,
-          passphrase,
-        },
-      };
+      // Check if user already has enrollments (multi-enrollment scenario)
+      const enrollments = await this.getEnrollments(userId);
+      console.log('[KMS Client] Checking existing enrollments:', enrollments);
+
+      // If enrollments exist, we need to collect existing credentials first
+      let existingCredentials: AuthCredentials | null = null;
+      if (enrollments.length > 0) {
+        console.log('[KMS Client] Multi-enrollment: User has existing enrollments, need to authenticate first');
+        this.hideSetupLoading();
+
+        // Prompt user to unlock with existing method
+        existingCredentials = await this.promptUnlockForEnrollment(enrollments, userId);
+
+        this.showSetupLoading();
+        console.log('[KMS Client] Multi-enrollment: User authenticated, proceeding with new enrollment');
+      }
+
+      // Determine method and params based on whether this is initial or multi-enrollment
+      let setupRequest: RPCRequest;
+
+      if (existingCredentials) {
+        // Multi-enrollment: Add new enrollment to existing MS
+        setupRequest = {
+          id: `add-enrollment-${Date.now()}`,
+          method: 'addEnrollment',
+          params: {
+            userId,
+            method: 'passphrase',
+            credentials: existingCredentials,
+            newCredentials: {
+              passphrase,
+            },
+          },
+        };
+      } else {
+        // Initial setup: Create new MS
+        setupRequest = {
+          id: `setup-${Date.now()}`,
+          method: 'setupPassphrase',
+          params: {
+            userId,
+            passphrase,
+          },
+        };
+      }
 
       this.worker?.postMessage(setupRequest);
 

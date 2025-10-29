@@ -390,71 +390,40 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
   }
 
   // Add event listeners
-  if (hasAnyMethod) {
-    // Add enrollment mode
-    if (canAddPassphrase) {
-      document.getElementById('add-passphrase-btn')?.addEventListener('click', () => addEnrollmentPassphrase(status));
-    }
-    if (canAddWebAuthn) {
-      document.getElementById('add-webauthn-btn')?.addEventListener('click', () => addEnrollmentWebAuthn(status));
-    }
-  } else {
-    // Initial setup mode
-    if (canAddPassphrase) {
-      document.getElementById('setup-passphrase-btn')?.addEventListener('click', setupPassphrase);
-    }
-    if (canAddWebAuthn) {
-      document.getElementById('setup-webauthn-btn')?.addEventListener('click', setupWebAuthn);
-    }
+  // Both initial setup and add enrollment use the same flow now
+  // The KMS client.ts handles multi-enrollment detection automatically
+  if (canAddPassphrase) {
+    const btnId = hasAnyMethod ? 'add-passphrase-btn' : 'setup-passphrase-btn';
+    document.getElementById(btnId)?.addEventListener('click', setupPassphrase);
+  }
+  if (canAddWebAuthn) {
+    const btnId = hasAnyMethod ? 'add-webauthn-btn' : 'setup-webauthn-btn';
+    document.getElementById(btnId)?.addEventListener('click', setupWebAuthn);
   }
 }
 
 /**
  * Setup passphrase authentication
  */
+/**
+ * Setup Passphrase authentication - opens KMS in new window (first-party context)
+ */
 async function setupPassphrase(): Promise<void> {
-  const passphrase = prompt('Enter a passphrase (min 8 characters):');
-  if (!passphrase) return;
+  console.log('[Full Demo] Opening KMS setup window...');
 
-  if (passphrase.length < 8) {
-    alert('Passphrase must be at least 8 characters');
+  // Open KMS in new window for passphrase setup
+  const setupWindow = window.open(
+    KMS_ORIGIN + '/kms.html?parentOrigin=' + encodeURIComponent(window.location.origin),
+    'kms-setup',
+    'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
+  );
+
+  if (!setupWindow) {
+    alert('Failed to open setup window. Please allow popups for this site.');
     return;
   }
 
-  try {
-    console.log('[Full Demo] Setting up passphrase...');
-    const result = await kmsUser.setupPassphrase('demouser@ats.run', passphrase);
-    console.log('[Full Demo] Passphrase setup complete:', result);
-
-    // Show success and reload audit log
-    setupOperationEl.innerHTML = `
-      <div class="success-message">
-        <h4>✅ Passphrase Setup Complete!</h4>
-        <div class="artifact-card">
-          <div class="artifact-title">Enrollment ID</div>
-          <div class="artifact-data"><code>${result.enrollmentId}</code></div>
-        </div>
-        <div class="artifact-card">
-          <div class="artifact-title">VAPID Key ID</div>
-          <div class="artifact-data"><code>${result.vapidKid}</code></div>
-        </div>
-        <div class="artifact-card">
-          <div class="artifact-title">VAPID Public Key</div>
-          <div class="artifact-data"><code>${result.vapidPublicKey}</code></div>
-        </div>
-      </div>
-    `;
-
-    await loadAuditLog();
-
-    // Reload setup UI to reflect new enrollment
-    const status = await kmsUser.isSetup('demouser@ats.run');
-    renderSetupUI(status);
-    renderLeaseUI(status);
-  } catch (error) {
-    console.error('[Full Demo] Passphrase setup failed:', error);
-    alert(`Setup failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  console.log('[Full Demo] Setup window opened, waiting for completion message...');
 }
 
 /**

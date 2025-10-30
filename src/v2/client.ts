@@ -19,6 +19,7 @@
 
 import type { RPCRequest, RPCResponse, AuthCredentials } from './types.js';
 import { formatError, getErrorMessage } from './error-utils.js';
+import { getPRFResults } from './webauthn-types.js';
 
 /**
  * Configuration for KMSClient
@@ -342,7 +343,7 @@ export class KMSClient {
       }
 
       // Check if PRF succeeded
-      const prfExt = (credential as any).getClientExtensionResults().prf;
+      const prfExt = getPRFResults(credential);
       const prfOutput = prfExt?.results?.first;
 
       // WebAuthn succeeded - now execute the pending operation with credentials
@@ -680,7 +681,7 @@ export class KMSClient {
             }
 
             // Check if PRF succeeded
-            const prfExt = (credential as any).getClientExtensionResults().prf;
+            const prfExt = getPRFResults(credential);
             const prfOutput = prfExt?.results?.first;
 
             // Determine method based on enrollment type
@@ -853,7 +854,7 @@ export class KMSClient {
       // Check if PRF extension succeeded
       // NOTE: credentials.create() returns { enabled: true/false }
       //       credentials.get() returns { results: { first: ArrayBuffer } }
-      const prfExt = (credential as any).getClientExtensionResults().prf;
+      const prfExt = getPRFResults(credential);
       const prfEnabled = prfExt?.enabled === true;
 
       // If PRF is enabled, we need to call credentials.get() to obtain the actual PRF output
@@ -874,7 +875,7 @@ export class KMSClient {
           },
         }) as PublicKeyCredential;
 
-        const getPrfExt = (assertion as any).getClientExtensionResults().prf;
+        const getPrfExt = getPRFResults(assertion);
         prfOutput = getPrfExt?.results?.first;
       }
 

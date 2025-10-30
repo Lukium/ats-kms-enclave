@@ -29,6 +29,7 @@ import type {
   LeaseVerificationResult,
 } from './types.js';
 import { formatError } from './error-utils.js';
+import { getPRFResults } from './webauthn-types.js';
 
 /**
  * Configuration for KMSUser
@@ -435,7 +436,7 @@ export class KMSUser {
       }) as PublicKeyCredential;
 
       // Extract PRF output
-      const prfExt = (credential as any).getClientExtensionResults().prf;
+      const prfExt = getPRFResults(credential);
       const prfOutput = prfExt?.results?.first;
 
       if (!prfOutput) {

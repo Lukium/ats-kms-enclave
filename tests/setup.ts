@@ -13,6 +13,13 @@ globalThis.IDBKeyRange = IDBKeyRange;
 
 // Mock self for Worker context (needed for module imports with Worker code)
 // Worker modules reference 'self' at module level, so we must provide it before imports
-if (!globalThis.self) {
-  (globalThis as any).self = globalThis;
-}
+// Use a Proxy to ensure 'self' remains defined even after test teardown
+(globalThis as any).self = new Proxy(globalThis, {
+  get(target, prop) {
+    // Always return globalThis for self, even if tests try to unset it
+    if (prop === 'self') {
+      return target;
+    }
+    return Reflect.get(target, prop);
+  },
+});

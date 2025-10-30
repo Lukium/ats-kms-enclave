@@ -7,7 +7,7 @@
  * - Data conversion utilities
  */
 
-import type { StoredPushSubscription } from '../../src/v2/types.js';
+import type { StoredPushSubscription } from './src/types.js';
 
 /**
  * Register the service worker for push notifications

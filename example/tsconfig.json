@@ -7,5 +7,5 @@
     },
     "types": ["vite/client"]
   },
-  "include": ["phase-0/**/*", "vite.config.ts"]
+  "include": ["phase-0/**/*", "phase-1/**/*", "vite.config*.ts"]
 }

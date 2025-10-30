@@ -5,8 +5,8 @@
  * Embeds KMS iframe from http://localhost:5174 (cross-origin isolated)
  */
 
-import { KMSUser, type StatusResult } from '@/kms-user';
-import type { AuditEntryV2 } from '@/types';
+import { KMSUser, type StatusResult } from './src/kms-user';
+import type { AuditEntryV2 } from './src/types';
 import {
   registerServiceWorker,
   subscribeToPush,

@@ -23,7 +23,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, '../src/v2'),
+      '@': path.resolve(__dirname, './phase-1/src'),
     },
   },
   server: {

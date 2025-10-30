@@ -836,3 +836,113 @@ describe('deleteExpiredLeases', () => {
     expect(await getLease('valid')).not.toBeNull();
   });
 });
+
+describe('wrapKey edge cases for branch coverage', () => {
+  let wrappingKey: CryptoKey;
+
+  beforeEach(async () => {
+    wrappingKey = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  });
+
+  it('should handle wrapping an AES secret key (non-private key)', async () => {
+    // Branch: key.type !== 'private' → use 'raw' format instead of 'pkcs8'
+    const secretKey = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      true, // extractable
+      ['encrypt', 'decrypt']
+    );
+
+    await wrapKey(
+      secretKey,
+      wrappingKey,
+      'secret-key-1',
+      { name: 'AES-GCM', length: 256 } as AlgorithmIdentifier,
+      ['encrypt', 'decrypt'],
+      { alg: 'AES-GCM', purpose: 'test-secret' }
+    );
+
+    const unwrapped = await unwrapKey(
+      'secret-key-1',
+      wrappingKey,
+      { name: 'AES-GCM', length: 256 } as AlgorithmIdentifier,
+      ['encrypt', 'decrypt']
+    );
+
+    expect(unwrapped).toBeDefined();
+    expect(unwrapped.type).toBe('secret');
+    expect(unwrapped.algorithm.name).toBe('AES-GCM');
+  });
+
+  it('should handle unwrapping with algorithm as object (not string)', async () => {
+    // Branch: Algorithm object format detection in unwrapKey
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
+      true,
+      ['sign', 'verify']
+    );
+
+    await wrapKey(
+      (keyPair as CryptoKeyPair).privateKey,
+      wrappingKey,
+      'ecdsa-key-1',
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
+      ['sign'],
+      { alg: 'ES256', purpose: 'test' }
+    );
+
+    // Unwrap with algorithm as object (not string)
+    const unwrapped = await unwrapKey(
+      'ecdsa-key-1',
+      wrappingKey,
+      { name: 'ECDSA', namedCurve: 'P-256' } as AlgorithmIdentifier,
+      ['sign']
+    );
+
+    expect(unwrapped).toBeDefined();
+    expect(unwrapped.type).toBe('private');
+  });
+
+  it('should handle unwrapping RSA key with object algorithm', async () => {
+    // Branch: RSA algorithm handling in unwrapKey
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: 'RSA-PSS',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-256',
+      },
+      true,
+      ['sign', 'verify']
+    );
+
+    await wrapKey(
+      keyPair.privateKey,
+      wrappingKey,
+      'rsa-key-1',
+      {
+        name: 'RSA-PSS',
+        hash: 'SHA-256',
+      } as AlgorithmIdentifier,
+      ['sign'],
+      { alg: 'PS256', purpose: 'test-rsa' }
+    );
+
+    const unwrapped = await unwrapKey(
+      'rsa-key-1',
+      wrappingKey,
+      {
+        name: 'RSA-PSS',
+        hash: 'SHA-256',
+      } as AlgorithmIdentifier,
+      ['sign']
+    );
+
+    expect(unwrapped).toBeDefined();
+    expect(unwrapped.type).toBe('private');
+    expect(unwrapped.algorithm.name).toBe('RSA-PSS');
+  });
+});

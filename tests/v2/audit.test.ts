@@ -23,9 +23,11 @@ import {
   exportAuditKey,
   resetAuditLogger,
   ensureKIAK,
+  generateLAK,
+  loadLAK,
 } from '@/v2/audit';
 import { initDB, closeDB, getAllAuditEntries, getWrappedKey } from '@/v2/storage';
-import type { AuditOperation } from '@/v2/types';
+import type { AuditOperation, AuditDelegationCert } from '@/v2/types';
 import { handleMessage } from '@/v2/worker';
 
 // Helper function to create worker requests
@@ -435,5 +437,52 @@ describe('audit integration', () => {
 
     expect(result.valid).toBe(true);
     expect(result.verified).toBe(3);
+  });
+});
+
+describe('audit error paths for branch coverage', () => {
+  it('should error when generating LAK without UAK initialized', async () => {
+    // Branch: !activeSigner check in generateLAK (line 176)
+    await expect(
+      generateLAK('lease-1', Date.now() + 3600000)
+    ).rejects.toThrow('UAK must be active to generate LAK');
+  });
+
+  it('should error when loading non-existent LAK', async () => {
+    // Branch: !lakRecord check in loadLAK (line 276)
+    const dummyCert: AuditDelegationCert = {
+      type: 'audit-delegation',
+      version: 1,
+      signerKind: 'LAK',
+      leaseId: 'non-existent-lease',
+      delegatePub: 'dGVzdC1wdWJsaWMta2V5LWR1bW15LWRhdGE',
+      scope: ['vapid.issue'],
+      notBefore: Date.now(),
+      notAfter: Date.now() + 3600000,
+      codeHash: 'dummy-code-hash',
+      manifestHash: 'dummy-manifest-hash',
+      kmsVersion: 'v2.0.0',
+      sig: 'ZHVtbXktc2lnbmF0dXJlLWRhdGEtZm9yLXRlc3Q',
+    };
+    await expect(
+      loadLAK('non-existent-lease', dummyCert)
+    ).rejects.toThrow('LAK not found for lease');
+  });
+
+  it('should error when getting audit public key before initialization', async () => {
+    // Branch: UAK not initialized in getAuditPublicKey (line 581)
+    await expect(getAuditPublicKey()).rejects.toThrow('UAK not initialized');
+  });
+
+  it('should error when exporting audit key before initialization', async () => {
+    // Branch: UAK not initialized in exportAuditKey (line 597)
+    const dummyCredentials = {
+      method: 'passphrase' as const,
+      userId: 'test-user',
+      passphrase: 'test-pass',
+    };
+    await expect(
+      exportAuditKey(dummyCredentials)
+    ).rejects.toThrow('UAK not initialized');
   });
 });

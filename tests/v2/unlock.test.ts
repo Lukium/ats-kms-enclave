@@ -113,7 +113,8 @@ describe('unlock.ts error paths', () => {
       const result = await withUnlock(credentials, async (mkek, ms) => {
         // Verify we got valid MKEK and MS
         expect(mkek).toBeDefined();
-        expect(mkek).toBeInstanceOf(CryptoKey);
+        expect(mkek.type).toBe('secret'); // CryptoKey has a 'type' property
+        expect(mkek.algorithm).toBeDefined(); // CryptoKey has an 'algorithm' property
         expect(ms).toBeInstanceOf(Uint8Array);
         expect(ms.byteLength).toBe(32);
         return 'success';

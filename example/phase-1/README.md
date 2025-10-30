@@ -1,698 +1,752 @@
-# Phase 1 Full Demo: Complete KMS Lifecycle
+# Phase 1 Demo: Complete VAPID & Push Notification System
 
-This demo provides a comprehensive, interactive demonstration of the entire KMS V2 lifecycle, including enrollment, authentication, key operations, lease management, and audit logging.
+**Interactive demonstration of the KMS V2 with complete VAPID integration for Web Push notifications**
+
+This demo showcases the entire lifecycle from initial setup through JWT signing, with cross-origin isolation, lease-based authorization, and tamper-evident audit logging.
+
+## Quick Start
+
+```bash
+# Terminal 1: Start KMS enclave server
+pnpm demo:phase-1:kms
+# → http://localhost:5174
+
+# Terminal 2: Start parent PWA server
+pnpm demo:phase-1:parent
+# → http://localhost:5173
+
+# Open http://localhost:5173 in your browser
+```
 
 ## Overview
 
-Unlike the iframe-isolation demo (which focuses on cross-origin communication), this demo provides a **user-facing interface** that demonstrates:
+This is a **production-quality demonstration** of a browser-based Key Management System with:
 
-1. **Initial Setup**: Passphrase and WebAuthn enrollment
-2. **Persistent Storage**: Refresh the page and continue where you left off
-3. **User Authentication**: Unlock with passphrase or WebAuthn
-4. **Cryptographic Operations**: Sign data, issue JWTs, generate keys
-5. **Lease Management**: Issue leases for background JWT generation
-6. **Background Operations**: PWA requests JWTs using leases (no user auth required)
-7. **Persistent Audit Trail**: Complete audit log from first KIAK initialization, survives page refreshes
-8. **Full Lifecycle**: KIAK Init → Setup → Unlock → Operate → Lock → Reset Demo
+- **Cross-origin isolation** enforced by two separate dev servers
+- **VAPID key management** for Web Push notifications
+- **Lease-based authorization** for background JWT signing without user authentication
+- **Tamper-evident audit log** with cryptographic chain verification
+- **WebAuthn integration** with Passkey support (PRF and Gate modes)
+- **Push notification** subscription and testing with relay validation
+- **Rate-limited quotas** for token issuance and sending
 
 ## Architecture
 
+### Two-Server Cross-Origin Setup
+
+The demo runs on **two separate Vite dev servers** to enforce browser-level security isolation:
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Parent PWA (UI)                        │
-│  ┌───────────────────────┐  ┌──────────────────────────┐   │
-│  │  LEFT PANE            │  │  RIGHT PANE              │   │
-│  │  - Operations         │  │  - Full Audit Log        │   │
-│  │  - Setup buttons      │  │  - All entries (KIAK→)   │   │
-│  │  - Unlock controls    │  │  - Persists on refresh   │   │
-│  │  - Crypto operations  │  │  - Chain verification    │   │
-│  │  - Lease management   │  │  - Expandable entries    │   │
-│  │  - Reset Demo button  │  │  - Export capability     │   │
-│  └───────────────────────┘  └──────────────────────────┘   │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ postMessage (cross-origin)
-                       │
-┌──────────────────────▼──────────────────────────────────────┐
-│              KMS Enclave (cross-origin iframe)              │
-│  Origin: http://localhost:5175 (separate Vite server)      │
-│  - Handles all cryptographic operations                     │
-│  - Manages non-extractable keys                            │
-│  - Issues and validates leases                             │
-│  - Maintains tamper-evident audit log in IndexedDB         │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│               Parent PWA (localhost:5173)                       │
+│  ┌─────────────────────┐  ┌──────────────────────────────────┐  │
+│  │  LEFT PANE          │  │  RIGHT PANE                      │  │
+│  │  - Setup            │  │  - VAPID Public Key              │  │
+│  │  - Push Subscribe   │  │  - Active Leases (with status)   │  │
+│  │  - Lease Operations │  │  - Complete Audit Log            │  │
+│  │  - Test Push        │  │    (persists across refreshes)   │  │
+│  │  - VAPID Regenerate │  │  - Chain verification            │  │
+│  │  - Reset Demo       │  │  - Expandable entries            │  │
+│  └─────────────────────┘  └──────────────────────────────────┘  │
+└────────────────────────┬────────────────────────────────────────┘
+                         │ postMessage (cross-origin)
+                         │
+┌────────────────────────▼────────────────────────────────────────┐
+│           KMS Enclave Iframe (localhost:5174)                   │
+│  - Authentication modals (passphrase/WebAuthn)                  │
+│  - Non-extractable ECDSA P-256 keys                             │
+│  - IndexedDB storage (inaccessible to parent)                   │
+│  - Dedicated Web Worker for crypto operations                   │
+│  - Tamper-evident audit log (KIAK/UAK/LAK signers)              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Communication Flow
+
+```
+Parent PWA (localhost:5173)
+  ↓ postMessage (cross-origin, origin-validated)
+KMS Client (iframe @ localhost:5174)
+  ↓ postMessage (to Worker)
+KMS Worker (Dedicated Worker)
+  ↓ WebCrypto API + IndexedDB
 ```
 
 ## Key Features
 
-### Split-Pane Layout
+### 🔐 Authentication Methods
 
-**LEFT PANE (Operations)**:
-- All user interactions (setup, unlock, operations, leases)
-- Status indicators and control buttons
-- Latest operation results
-- Reset Demo button (bottom)
+1. **Passphrase**
+   - PBKDF2 (100,000 iterations) with salt
+   - Key Check Value (KCV) verification
+   - MKEK derived from passphrase
 
-**RIGHT PANE (Audit Log)**:
-- **Complete audit history** starting from KIAK initialization
-- **Persists across page refreshes** (loaded from IndexedDB on startup)
-- Real-time updates as operations occur
-- Expandable entries showing full cryptographic artifacts
-- Chain verification status
-- Export functionality (JSON/CSV)
+2. **WebAuthn (PRF Extension)**
+   - Deterministic key derivation from PRF output
+   - No random Master Secret stored
+   - MKEK = PRF output (32 bytes)
 
-### KIAK Initialization as First Entry
+3. **WebAuthn (Gate Mode)**
+   - Passkey as authentication gate
+   - Random Master Secret generated
+   - Wrapped with MKEK derived from PRF
 
-**CRITICAL**: The very first audit log entry is **KIAK initialization** (seqNum: 1):
+**Setup Flow**: Opens KMS in new window (first-party context required for WebAuthn)
 
-```json
-{
-  "seqNum": 1,
-  "op": "init",
-  "kid": "audit-instance",
-  "requestId": "system-init",
-  "timestamp": 1729894200000,
-  "previousHash": "",
-  "chainHash": "iR8mN2...kL9p",
-  "signerId": "audit-instance-keyid",
-  "sig": "base64url-signature",
-  "details": {
-    "kmsVersion": "v2.0.0",
-    "note": "KMS worker initialized, KIAK generated"
-  }
-}
+### 🔑 VAPID Key Management
+
+- **Automatic generation** during setup (ECDSA P-256)
+- **Non-extractable private key** (browser-enforced)
+- **Public key export** in raw format (65 bytes, uncompressed) for push subscriptions
+- **Regeneration** capability with automatic lease invalidation
+- **Key ID (kid)** for version tracking
+
+### 📲 Push Notification System
+
+**Subscription:**
+- Service worker registration
+- Browser push subscription with VAPID public key
+- Subscription stored in IndexedDB with VAPID key association
+- Endpoint validation before JWT signing
+
+**Test Flow:**
+1. Get active lease for current VAPID key
+2. Issue JWT with lease (no unlock required)
+3. **Validate JWT** (simulates relay server):
+   - Format validation (header.payload.signature)
+   - Algorithm check (ES256)
+   - Claims validation (exp, aud, sub)
+   - Signature verification with VAPID public key
+4. Send mock push to service worker
+5. Service worker displays notification
+
+### 🎫 Lease System
+
+Time-limited authorization tokens that enable background JWT signing without user authentication.
+
+**Lease Types:**
+- **Auto-extendable** - Can extend without re-authentication
+- **Non-extendable** - Requires authentication to extend
+
+**Lease Architecture:**
+```
+Master Secret (MS)
+  ↓ HKDF + Lease Salt (random, per-lease)
+SessionKEK (unique per lease)
+  ↓ wrapKey
+VAPID Private Key (wrapped for this lease)
+  ↓ stored in lease
 ```
 
-This entry is created **automatically** when the KMS worker first runs `ensureKIAK()` and finds no existing audit log. It establishes the audit chain foundation.
+**Rate Limiting Quotas:**
+- Tokens per hour
+- Sends per minute (sustained)
+- Burst sends (spike allowance)
+- Sends per minute per endpoint
 
-### Reset Demo Button
+**Lease Operations:**
+- Create extendable/non-extendable lease
+- Extend single lease or batch extend all
+- Extend with authentication (for non-extendable)
+- Verify lease validity (kid match, expiration check)
+- Clear invalid/stale leases
 
-**Location**: Bottom of left pane, styled prominently (red)
+**JWT Signing from Lease:**
+- Issue 1-10 JWTs per request
+- No unlock required (uses SessionKEK to unwrap VAPID key)
+- Automatic endpoint validation
+- JWT structure:
+  - **aud**: Push service origin (e.g., `https://fcm.googleapis.com`)
+  - **sub**: Push endpoint URL
+  - **exp**: Expiration (2 minutes from issue)
+  - **jti**: Unique identifier
 
-**Label**: `[Reset Demo]`
+### 📜 Audit Logging
 
-**Behavior**:
-1. **Click** → Shows confirmation modal
-2. **Confirmation** → Resets ALL demo data:
-   - Calls `resetKMS()` on KMS enclave (clears all IndexedDB stores)
-   - Reloads the page
-   - Fresh state: No config, empty audit log
-   - Next setup will create new KIAK (new seqNum #1)
+**Tamper-Evident Chain:**
+- **First entry**: KIAK initialization (seqNum #1, created automatically)
+- **Every operation** logged with:
+  - Sequence number (monotonic)
+  - Operation type
+  - Signer (KIAK, UAK, or LAK)
+  - Previous hash (links to prior entry)
+  - Chain hash (hash of current entry)
+  - Ed25519 signature
+  - Timestamp and metadata
 
-**Confirmation Modal**:
+**Signer Types:**
+- **KIAK** (KMS Instance Audit Key) - System operations (init, reset)
+- **UAK** (User Audit Key) - User-authenticated operations (setup, unlock, generateVAPID, createLease)
+- **LAK** (Lease Audit Key) - Lease-based operations (signJWT, extendLease without auth)
+
+**Logged Operations:**
 ```
-⚠️  RESET DEMO
-
-This will DELETE all demo data:
-- All enrollment methods (passphrase, WebAuthn)
-- All application keys (VAPID, etc.)
-- All active leases and stashed JWTs
-- Complete audit log (starting fresh with new KIAK)
-
-This allows you to re-demonstrate the full lifecycle from scratch.
-
-[Cancel]  [Reset Demo]
-```
-
-**Key Difference from Production "Reset KMS"**:
-- Reset Demo is **demo-friendly** (quick confirmation, expected action)
-- Production Reset KMS requires typing "RESET" (destructive safeguard)
-
-### Audit Log Persistence
-
-**On Page Load**:
-1. Parent PWA requests full audit log: `getAuditLog()`
-2. KMS returns all entries from IndexedDB (seqNum 1 → N)
-3. Right pane populates with complete history
-4. Chain verification runs automatically
-
-**On Each Operation**:
-1. Operation completes in KMS
-2. KMS returns operation result + new audit entry
-3. Right pane **appends** new entry to bottom
-4. Entry scrolls into view (smooth animation)
-5. Chain verification updates
-
-**After Reset Demo**:
-1. All data cleared
-2. Page reloads
-3. Fresh state: Audit log empty
-4. First operation (setup) triggers KIAK init → seqNum #1
-
-## Demo Features
-
-### 1. Initial Load (First Time or After Reset)
-
-**Scenario**: User visits for the first time or after clicking Reset Demo.
-
-**LEFT PANE**:
-- **Status Badge**: "Not Configured" (gray/red)
-- **Available Actions**:
-  - `[Setup with Passphrase]` button
-  - `[Setup with WebAuthn (PRF)]` button (if browser supports)
-  - `[Setup with WebAuthn (Gate)]` button (if browser supports)
-
-**RIGHT PANE**:
-- **Audit Log**: Empty
-- Message: "No audit entries yet. Set up KMS to begin."
-
-**User Flow**:
-1. Click "Setup with Passphrase"
-2. Modal prompts for passphrase (min 12 characters)
-3. KMS runs setup:
-   - First call to `ensureKIAK()` → generates KIAK → creates audit entry #1 (init)
-   - Then processes setup → creates audit entry #2 (setup)
-4. Success message: "KMS configured successfully"
-5. Status changes to "Locked" (yellow)
-
-**RIGHT PANE After Setup**:
-```
-Audit Log (2 entries)  [Export JSON]
-
-#1 ✓ init           audit-instance   -      KIAK initialized
-#2 ✓ setup          -                250ms  Passphrase enrolled
+init, setup, unlock, lock, reset
+generateVAPID, regenerateVAPID
+signJWT, issueLease, extendLease, revokeLease
+setPushSubscription, removePushSubscription
 ```
 
-Clicking on entry #1 expands to show full JSON:
-```json
-{
-  "seqNum": 1,
-  "op": "init",
-  "kid": "audit-instance",
-  "requestId": "system-init",
-  "timestamp": 1729894200000,
-  "previousHash": "",
-  "chainHash": "iR8mN2kL9p_sT4vB8cX1zY5wA6q...",
-  "signerId": "7J3mP9qR2sT8vX4bC1zY5wA6nE...",
-  "sig": "MEUCIQCxyz...signature",
-  "details": {
-    "kmsVersion": "v2.0.0",
-    "timestamp": "2025-10-25T21:30:00.000Z",
-    "note": "KMS worker initialized, KIAK generated"
-  }
-}
+**Persistence:**
+- Survives page refreshes (loaded from IndexedDB)
+- Complete history from KIAK init onwards
+- Chain verification on load
+
+## UI Layout
+
+### Left Pane: Operations
+
+**1. Setup Authentication**
+- Shows enrolled methods: Passphrase ✓, WebAuthn ✓
+- Buttons to add additional methods
+- Opens new window on localhost:5174 (first-party for WebAuthn)
+
+**2. Push Notification Operations**
+- Subscribe/Unsubscribe to push
+- Status display: ✅ Subscribed (endpoint ID, creation time)
+
+**3. VAPID Lease Operations**
+- Create extendable/non-extendable lease
+- Extend all leases (with/without authentication)
+- Verify all leases (kid match, expiration check)
+- Clear invalid leases
+- Issue JWTs from lease (configurable count 1-10)
+
+**4. Test Push Notification**
+- End-to-end test: get lease → issue JWT → validate → send push
+- Validates JWT like a relay server would
+- Service worker displays notification
+
+**5. VAPID Key Management**
+- Regenerate VAPID key button
+- **Warning**: Invalidates all existing leases (kid mismatch)
+
+**6. Reset Demo** (bottom, red button)
+- Clears all KMS IndexedDB stores
+- Reloads page for fresh state
+- Next setup creates new KIAK (new audit chain)
+
+### Right Pane: VAPID Key & Audit Log
+
+**VAPID Key Section:**
+- **Key ID (kid)**: Version identifier
+- **Public Key**: Base64url-encoded (65 bytes, uncompressed EC point)
+- **Active Leases**: List with validation status
+  - ✅ Valid / ❌ Invalid indicator
+  - Kid match check (detects stale leases after regeneration)
+  - Expiration time
+  - User ID
+
+**Audit Log Section:**
+- **Complete history** from KIAD init (seqNum #1)
+- **Reverse chronological** order (newest first)
+- **Color-coded by signer**:
+  - 🟠 KIAK (orange) - System
+  - 🔵 UAK (blue) - User authenticated
+  - 🟢 LAK (green) - Lease based
+- **Displays**: seqNum, signer, timestamp, operation, user, requestId, kid, chainHash, signature
+- **Expandable entries**: Click to see full JSON
+- **Persists across refreshes**: Loaded from IndexedDB on startup
+
+## Key Workflows
+
+### 1. First-Time Setup
+
+```
+1. User clicks "Setup with Passphrase" or "Setup with WebAuthn"
+2. New window opens on localhost:5174 (first-party context)
+3. User enters passphrase or performs WebAuthn ceremony
+4. KMS generates:
+   - Master Secret (MS) - random or PRF-derived
+   - MKEK - from passphrase/PRF
+   - VAPID keypair - ECDSA P-256, non-extractable
+5. Audit log entries created:
+   - #1: KIAK init (if first time)
+   - #2: setup (UAK-signed)
+   - #3: generateVAPID (UAK-signed)
+6. Window sends completion message to parent
+7. Parent displays:
+   - Enrolled methods (✓)
+   - VAPID public key
+   - Empty lease list
 ```
 
-### 2. Persistence (Refresh Page)
+### 2. Subscribe to Push Notifications
 
-**Scenario**: User refreshes the page after setup and operations.
-
-**Expected Behavior**:
-- LEFT PANE:
-  - Status Badge: "Locked" (yellow) ← detected from IndexedDB
-  - Enrollment methods displayed: "Passphrase ✓"
-  - Unlock button enabled
-
-- RIGHT PANE:
-  - **Audit log auto-populates with ALL entries from IndexedDB**
-  - Example: 15 entries if user performed 14 operations + initial KIAK
-  - Chain verification runs automatically: "✓ Chain valid (15 entries)"
-
-**Under the Hood**:
-1. Parent PWA loads
-2. Sends `getAuditLog()` request to KMS
-3. KMS queries IndexedDB: `getAllAuditEntries()`
-4. Returns array: `[entry1, entry2, ..., entry15]`
-5. Right pane renders all entries
-6. `verifyAuditChain()` checks integrity
-
-### 3. Unlock (Authentication)
-
-**Scenario**: User unlocks KMS to perform operations.
-
-**LEFT PANE**:
-- `[Unlock with Passphrase]` button → prompts for passphrase
-- `[Unlock with WebAuthn]` button → triggers WebAuthn ceremony
-
-**User Flow (Passphrase)**:
-1. Click "Unlock with Passphrase"
-2. Modal prompts for passphrase
-3. KMS derives MKEK from passphrase
-4. Success: Status → "Unlocked" (green)
-5. Operation buttons become enabled
-
-**RIGHT PANE After Unlock**:
 ```
-Audit Log (3 entries)
-
-#1 ✓ init           audit-instance   -      KIAK initialized
-#2 ✓ setup          -                250ms  Passphrase enrolled
-#3 ✓ unlock         -                180ms  Passphrase unlock
+1. User clicks "Subscribe to Push"
+2. Browser permission prompt (if not granted)
+3. Service worker registered
+4. Browser creates push subscription with:
+   - VAPID public key (from KMS)
+   - Endpoint URL (from push service)
+5. Subscription stored in KMS IndexedDB
+6. Status updates: ✅ Subscribed
+   - Endpoint ID displayed
+   - Creation timestamp shown
 ```
 
-Entry #3 expanded:
-```json
-{
-  "seqNum": 3,
-  "op": "unlock",
-  "kid": "",
-  "requestId": "req-abc123",
-  "timestamp": 1729894500000,
-  "unlockTime": 180,
-  "previousHash": "previous-entry-2-hash",
-  "chainHash": "new-hash-for-entry-3",
-  "signerId": "audit-instance-keyid",
-  "sig": "signature",
-  "details": {
-    "method": "passphrase"
-  }
-}
+### 3. Create Lease & Issue JWTs
+
+```
+1. User clicks "Create Extendable Lease" (or Non-extendable)
+2. KMS opens modal for authentication:
+   - Passphrase input, OR
+   - WebAuthn passkey prompt
+3. Lease created with:
+   - TTL: 30 days (720 hours)
+   - SessionKEK: HKDF(MS, lease_salt)
+   - VAPID private key wrapped with SessionKEK
+   - Rate limit quotas:
+     - 100 tokens/hour
+     - 10 sends/minute (sustained)
+     - 50 burst sends
+     - 5 sends/minute/endpoint
+4. Lease displayed in right pane with validation status
+5. User selects JWT count (1-10) and clicks "Issue JWTs"
+6. KMS issues JWTs WITHOUT unlock:
+   - Unwraps VAPID private key with SessionKEK
+   - Signs JWT with ES256
+   - Returns JWTs to parent
+7. JWTs displayed with exp, jti
+8. Audit log shows LAK-signed entries (lease-based, no unlock)
 ```
 
-### 4. Cryptographic Operations
+### 4. Send Test Push Notification
 
-**Scenario**: User performs various crypto operations while unlocked.
-
-#### 4.1 Sign Data
-
-**LEFT PANE**: `[Sign Message]` button
-
-**User Flow**:
-1. Click "Sign Message"
-2. Modal prompts for message to sign
-3. KMS generates ECDSA P-256 signature
-4. Result displayed below button:
-   ```
-   ✓ Signed successfully
-   Message: "Hello, World!"
-   Signature: MEUCIQCxyz...
-   Kid: key-abc123
-   Duration: 15ms
-   ```
-
-**RIGHT PANE**: New entry appended:
 ```
-#4 ✓ sign           key-abc123       15ms   ECDSA P-256
+1. User clicks "Send Test Push Notification"
+2. KMS gets active lease for current VAPID key
+3. Issues JWT with lease (no unlock)
+4. Parent validates JWT:
+   - Format: 3 parts (header.payload.signature)
+   - Algorithm: ES256
+   - Claims: exp (not expired), aud (matches), sub (matches endpoint)
+   - Signature: Verifies with VAPID public key
+5. If valid:
+   - Sends mock push to service worker
+   - Service worker displays notification
+   - Alert confirms success
+6. If invalid:
+   - Alert shows validation error
 ```
 
-#### 4.2 Issue VAPID JWT
+### 5. Extend Leases
 
-**LEFT PANE**: `[Issue VAPID JWT]` button
-
-**User Flow**:
-1. Click "Issue VAPID JWT"
-2. KMS generates/retrieves VAPID keypair
-3. Issues JWT
-4. Result displayed:
-   ```
-   ✓ VAPID JWT issued
-   JWT: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...
-   Expires: 2025-10-25T22:37:00Z (1 hour)
-   Kid: vapid-key-123
-   ```
-
-**RIGHT PANE**:
+**Without Authentication (auto-extendable only):**
 ```
-#5 ✓ sign           vapid-key-123    20ms   VAPID JWT
+1. User clicks "Extend All Leases"
+2. KMS extends auto-extendable leases by 30 days
+3. Non-extendable leases skipped
+4. Status updated in lease list
+5. Audit log: LAK-signed entries (no unlock)
 ```
 
-#### 4.3 Generate Application Key
-
-**LEFT PANE**: `[Generate App Key]` button
-
-**User Flow**:
-1. Click "Generate App Key"
-2. Modal prompts for key type (VAPID, Signal, Custom)
-3. KMS generates keypair and wraps private key
-4. Result displayed:
-   ```
-   ✓ Key generated
-   Kid: vapid-new-456
-   Public Key: BG8x7y...
-   Algorithm: ECDSA P-256
-   Purpose: vapid
-   ```
-
-**RIGHT PANE**:
+**With Authentication (all leases):**
 ```
-#6 ✓ generateKey    vapid-new-456    45ms   VAPID key
+1. User clicks "Extend All Leases with Auth"
+2. KMS opens modal for authentication
+3. User unlocks with passphrase/WebAuthn
+4. All leases extended by 30 days (including non-extendable)
+5. Status updated in lease list
+6. Audit log: UAK-signed entries (user authenticated)
 ```
 
-### 5. Lease Management
+### 6. Regenerate VAPID Key
 
-**Scenario**: Parent PWA needs to issue JWTs in the background without user authentication.
-
-#### 5.1 Issue Lease
-
-**LEFT PANE**: `[Issue Lease]` button (in Lease section)
-
-**User Flow**:
-1. Click "Issue Lease"
-2. Modal prompts for:
-   - Purpose: VAPID (default)
-   - Duration: 24 hours
-   - Max JWTs: 100
-3. KMS issues lease with 5 stashed JWTs
-4. Result displayed:
-   ```
-   ✓ Lease issued
-   Lease ID: lease-abc123
-   Expires: 2025-10-26T21:40:00Z (24h)
-   Stashed JWTs: 5
-   LAK Public Key: 7J3mP9qR...
-
-   [Use Lease] [Revoke Lease]
-   ```
-
-**RIGHT PANE**:
 ```
-#7 ✓ issueLease     vapid-key-123    150ms  24h, 5 JWTs stashed
+1. User clicks "Regenerate VAPID Key"
+2. Confirmation warning: "This will invalidate all existing leases"
+3. KMS opens modal for authentication
+4. User unlocks
+5. Old VAPID key deleted
+6. New VAPID keypair generated (ECDSA P-256)
+7. All leases invalidated (kid mismatch)
+8. New public key displayed
+9. Lease list shows all as ❌ Invalid (stale kid)
+10. Audit log: regenerateVAPID operation (UAK-signed)
 ```
 
-Entry expanded shows LAK public key and lease details.
+### 7. Verify Leases
 
-#### 5.2 Use Lease (Background JWT Request)
-
-**LEFT PANE**: Click `[Use Lease]` button next to lease
-
-**Key Point**: KMS is **LOCKED** (user locked it after issuing lease)
-
-**User Flow**:
-1. Click "Lock KMS" (status → "Locked")
-2. Click "Use Lease" on lease-abc123
-3. KMS validates lease, pops stashed JWT
-4. Result displayed:
-   ```
-   ✓ JWT issued (using lease)
-   JWT: eyJ...
-   Stashed remaining: 4/5
-   Signed by: LAK (no unlock required)
-   ```
-
-**RIGHT PANE**:
 ```
-#8 ✓ lock           -                2ms    KMS locked
-#9 ✓ sign           vapid-key-123    8ms    Background JWT (lease-abc123)
+1. User clicks "Verify All Leases"
+2. KMS checks each lease:
+   - Kid matches current VAPID key?
+   - Expiration > now?
+   - SessionKEK can unwrap VAPID key?
+3. Status updated in lease list:
+   - ✅ Valid (green)
+   - ❌ Invalid (red, with reason)
+4. Summary alert shows valid/invalid counts
 ```
 
-**Key Observation**:
-- Entry #9 `signerId` shows `lease-abc123-lak` (LAK keyid), not KIAK
-- This proves JWT was signed by LAK, not user auth
+### 8. Clear Invalid Leases
 
-#### 5.3 Revoke Lease
-
-**LEFT PANE**: Click `[Revoke Lease]` button
-
-**User Flow**:
-1. Click "Revoke Lease"
-2. Confirmation: "Revoke lease? 4 stashed JWTs will be deleted."
-3. Confirm
-4. Result: Lease removed from list
-
-**RIGHT PANE**:
 ```
-#10 ✓ revokeLease   -                5ms    lease-abc123 deleted
+1. User clicks "Clear Invalid Leases"
+2. KMS removes all invalid leases:
+   - Stale kid (after VAPID regeneration)
+   - Expired TTL
+3. Lease list updates (invalid leases removed)
+4. Alert confirms removal count
 ```
 
-### 6. Reset Demo
+### 9. Reset Demo
 
-**LEFT PANE**: Click `[Reset Demo]` button (bottom, red)
-
-**User Flow**:
-1. Click "Reset Demo"
-2. Confirmation modal appears
-3. Click "Reset Demo" to confirm
-4. KMS calls `resetKMS()` → clears all IndexedDB stores
-5. **Page reloads automatically**
+```
+1. User clicks "Reset Demo" (red button, bottom left)
+2. Confirmation prompt: "This will delete all KMS data"
+3. User confirms
+4. KMS clears all IndexedDB stores:
+   - config
+   - keys
+   - audit
+   - leases
+   - vapid
+   - pushSubscriptions
+5. Page reloads (hard refresh recommended)
 6. Fresh state:
-   - Status: "Not Configured"
-   - LEFT PANE: Setup buttons enabled
-   - RIGHT PANE: Audit log empty
-
-**After Reset - Next Setup**:
-1. User clicks "Setup with Passphrase"
-2. **NEW KIAK is generated** (different keys than before)
-3. Audit log starts fresh:
-   ```
-   #1 ✓ init         audit-instance   -      KIAK initialized (NEW)
-   #2 ✓ setup        -                250ms  Passphrase enrolled
-   ```
-
-## UI Layout (Split Pane)
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│  KMS V2 Full Demo                                      Status: 🟢 Unlocked  │
-├────────────────────────────────────┬───────────────────────────────────────┤
-│  LEFT PANE (Operations)            │  RIGHT PANE (Audit Log)              │
-├────────────────────────────────────┼───────────────────────────────────────┤
-│                                    │                                       │
-│  ┌──────────────────────────────┐ │  Audit Log (9 entries)  [Export ▼]   │
-│  │  Setup / Enrollment          │ │  ┌─────────────────────────────────┐ │
-│  ├──────────────────────────────┤ │  │ #1 ✓ init    audit-inst   -     │ │
-│  │ Enrolled: ✓ Passphrase       │ │  │ #2 ✓ setup   -            250ms │ │
-│  │                              │ │  │ #3 ✓ unlock  -            180ms │ │
-│  │ [Add WebAuthn]               │ │  │ #4 ✓ sign    key-abc123   15ms  │ │
-│  └──────────────────────────────┘ │  │ #5 ✓ sign    vapid-key    20ms  │ │
-│                                    │  │ #6 ✓ genKey  vapid-new    45ms  │ │
-│  ┌──────────────────────────────┐ │  │ #7 ✓ issueLe vapid-key    150ms │ │
-│  │  Authentication              │ │  │ #8 ✓ lock    -            2ms   │ │
-│  ├──────────────────────────────┤ │  │ #9 ✓ sign    vapid-key    8ms   │ │
-│  │ [Unlock Passphrase] [Lock]   │ │  │     (LAK: lease-abc123)         │ │
-│  └──────────────────────────────┘ │  └─────────────────────────────────┘ │
-│                                    │                                       │
-│  ┌──────────────────────────────┐ │  Chain Status: ✓ Valid (9 entries)   │
-│  │  Operations                  │ │                                       │
-│  ├──────────────────────────────┤ │  Clicking entry #4 expands it:        │
-│  │ [Sign] [Issue JWT] [Gen Key] │ │  ┌─────────────────────────────────┐ │
-│  └──────────────────────────────┘ │  │ #4 ✓ sign    key-abc123   15ms  │ │
-│                                    │  │ ▼ Details:                      │ │
-│  ┌──────────────────────────────┐ │  │   {                             │ │
-│  │  Leases                      │ │  │     "seqNum": 4,                │ │
-│  ├──────────────────────────────┤ │  │     "op": "sign",               │ │
-│  │ Active: 1                    │ │  │     "kid": "key-abc123",        │ │
-│  │                              │ │  │     "requestId": "req-ghi789",  │ │
-│  │ 📋 lease-abc123 (23h 45m)    │ │  │     "duration": 15,             │ │
-│  │    Stashed: 4/5              │ │  │     "timestamp": 1729894680000, │ │
-│  │    [Use] [Revoke]            │ │  │     "previousHash": "...",      │ │
-│  │                              │ │  │     "chainHash": "...",         │ │
-│  │ [Issue New Lease]            │ │  │     "signerId": "...",          │ │
-│  └──────────────────────────────┘ │  │     "sig": "MEUCIQCxyz...",     │ │
-│                                    │  │     "details": {                │ │
-│  ┌──────────────────────────────┐ │  │       "algorithm": "ECDSA"      │ │
-│  │  Latest Result               │ │  │     }                           │ │
-│  ├──────────────────────────────┤ │  │   }                             │ │
-│  │ ✓ JWT issued (lease)         │ │  │ [Copy JSON] [Verify Sig]        │ │
-│  │ JWT: eyJ...                  │ │  └─────────────────────────────────┘ │
-│  │ Stashed: 4/5                 │ │                                       │
-│  │ Signed by: LAK               │ │                                       │
-│  └──────────────────────────────┘ │                                       │
-│                                    │                                       │
-│  [Reset Demo] (red)                │                                       │
-│                                    │                                       │
-└────────────────────────────────────┴───────────────────────────────────────┘
+   - No enrolled methods
+   - Empty audit log
+   - No VAPID key
+   - No leases
+7. Next setup creates new KIAK (new audit chain starts at seqNum #1)
 ```
 
-## Technical Implementation
+## Technical Implementation Highlights
 
-### File Structure
+### Cross-Origin Isolation
 
-```
-example/phase-1/full/
-├── README.md                 # This file
-├── package.json              # Dependencies and scripts
-├── vite.config.ts           # Vite config for parent app
-├── index.html               # Parent PWA entry point
-├── parent.ts                # Parent PWA logic
-├── parent.css               # Styling (split-pane layout)
-├── components/              # UI components
-│   ├── LeftPane.ts         # Operations container
-│   ├── RightPane.ts        # Audit log viewer
-│   ├── SetupPanel.ts       # Setup/enrollment UI
-│   ├── AuthPanel.ts        # Unlock UI
-│   ├── OperationsPanel.ts  # Crypto operations UI
-│   ├── LeasePanel.ts       # Lease management UI
-│   ├── AuditLogEntry.ts    # Single log entry (expandable)
-│   └── ResetDemoButton.ts  # Reset demo confirmation
-└── types.ts                 # TypeScript types
-```
+- **Parent**: `http://localhost:5173` (Vite dev server)
+- **KMS**: `http://localhost:5174` (separate Vite dev server)
+- **CSP headers**:
+  - KMS: `frame-ancestors http://localhost:5173` (only allow parent)
+  - Parent: `frame-src http://localhost:5174` (only allow KMS iframe)
+- **postMessage** with origin validation on both sides
+- **Browser enforces**: Parent cannot access KMS IndexedDB
 
-### State Management
+### Non-Extractable Keys
 
-The parent app maintains:
-```typescript
-interface AppState {
-  kmsStatus: 'not-configured' | 'locked' | 'unlocked';
-  enrollmentMethods: EnrollmentMethod[];
-  activeLeases: LeaseInfo[];
-  latestOperation: OperationResult | null;
-  auditLog: AuditEntryV2[];        // Full history from seqNum 1
-  auditChainValid: boolean;
-  auditChainErrors: string[];
-}
+```javascript
+// Private key created with extractable: false
+const keyPair = await crypto.subtle.generateKey(
+  { name: 'ECDSA', namedCurve: 'P-256' },
+  false,  // ← Browser enforces: cannot export
+  ['sign']
+);
+
+// Stored in IndexedDB as CryptoKey object
+await idb.put('keys', keyPair.privateKey, 'vapid-private');
+
+// Used via handle only (no raw export possible)
+const signature = await crypto.subtle.sign(
+  { name: 'ECDSA', hash: 'SHA-256' },
+  privateKey,  // ← Handle, not raw bytes
+  data
+);
 ```
 
-### Audit Log Loading (on page load)
+**Browser enforcement**: Even if KMS code is compromised, private keys cannot be extracted from IndexedDB. They can only be used for their designated operations (signing).
 
-```typescript
-async function loadAuditLog(): Promise<void> {
-  // Request full audit log from KMS
-  const response = await kmsClient.sendRequest('getAuditLog', {});
+### Session Key Architecture
 
-  // Response: { entries: AuditEntryV2[] }
-  const entries = response.entries;
+```
+Master Secret (MS) - 32 bytes random
+  ↓ stored wrapped with MKEK
+  ↓ MKEK = PBKDF2(passphrase) or WebAuthn PRF
 
-  // Populate right pane
-  renderAuditLog(entries);
+Per-Lease Key Derivation:
+  MS + lease_salt (random per lease)
+    ↓ HKDF-SHA-256
+  SessionKEK (32 bytes, unique per lease)
+    ↓ AES-GCM wrapKey
+  VAPID Private Key (wrapped for this lease)
+    ↓ stored in lease object
 
-  // Verify chain
-  const verification = await kmsClient.sendRequest('verifyAuditChain', {});
-  updateChainStatus(verification);
-}
+JWT Signing:
+  SessionKEK unwrapKey VAPID Private Key
+    ↓ ECDSA sign
+  JWT Signature
 ```
 
-### Reset Demo Flow
+**Security properties**:
+- Each lease has unique SessionKEK (derived from random salt)
+- SessionKEK never leaves Worker memory
+- VAPID key can be used without unwrapping MS (SessionKEK is sufficient)
+- Worker restart clears all SessionKEKs (but leases persist in IndexedDB)
 
-```typescript
-async function resetDemo(): Promise<void> {
-  // Show confirmation
-  const confirmed = await showResetConfirmation();
-  if (!confirmed) return;
+### Service Worker Integration
 
-  // Call KMS reset (clears IndexedDB)
-  await kmsClient.sendRequest('resetKMS', {});
+```javascript
+// service-worker.js
+self.addEventListener('push', (event) => {
+  const data = event.data ? event.data.json() : {};
 
-  // Reload page (fresh state)
-  window.location.reload();
-}
-```
+  // Display notification
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Test Push', {
+      body: data.body || 'This is a test notification',
+      icon: '/icon.png',
+      badge: '/badge.png',
+      data: data
+    })
+  );
+});
 
-### KIAK Initialization Detection
-
-In KMS worker (`src/v2/worker.ts`), on module load:
-
-```typescript
-// Auto-initialize KIAK on first load
-(async () => {
-  try {
-    await initDB();
-
-    // Check if this is first run (no audit entries)
-    const existingEntries = await getAllAuditEntries();
-
-    if (existingEntries.length === 0) {
-      // First run - initialize KIAK and log it
-      await ensureKIAK();
-
-      // Log KIAK initialization as first audit entry
-      await logOperation({
-        op: 'init',
-        kid: 'audit-instance',
-        requestId: 'system-init',
-        details: {
-          kmsVersion: 'v2.0.0',
-          timestamp: new Date().toISOString(),
-          note: 'KMS worker initialized, KIAK generated',
-        },
-      });
-    } else {
-      // Subsequent loads - just ensure KIAK exists
-      await ensureKIAK();
-    }
-  } catch (err) {
-    console.error('[KMS Worker] Initialization failed:', err);
+// Handle mock push from parent (for testing)
+self.addEventListener('message', (event) => {
+  if (event.data.type === 'MOCK_PUSH') {
+    const { title, body } = event.data.payload;
+    self.registration.showNotification(title, { body });
   }
-})();
+});
 ```
 
-## User Testing Scenarios
+### WebAuthn First-Party Context
 
-### Scenario 1: Fresh Demo Start
-1. Open demo (clean slate or after reset)
-2. **RIGHT PANE**: Empty audit log
-3. Click "Setup with Passphrase"
-4. Enter passphrase: `my-super-secure-passphrase-123`
-5. **RIGHT PANE**: Shows 2 entries:
-   - #1 init (KIAK)
-   - #2 setup (passphrase)
-6. Verify chain status: "✓ Valid (2 entries)"
+WebAuthn requires user gesture in first-party context. The demo handles this by:
 
-### Scenario 2: Persistence
-1. Refresh page
-2. **RIGHT PANE**: Auto-populates with 2 entries from IndexedDB
-3. Status shows "Locked"
-4. Chain verification runs: "✓ Valid (2 entries)"
+1. **Setup/Unlock**: Opens new window on `localhost:5174`
+2. **New window UI**:
+   - Passphrase input field (for passphrase method)
+   - "Use Passkey" button (for WebAuthn method)
+3. **User action**: Triggers WebAuthn ceremony in first-party context
+4. **Completion**: Window sends postMessage to parent, then closes
 
-### Scenario 3: Full Workflow
-1. (Starting from 2 entries: init, setup)
-2. Unlock → RIGHT PANE: #3 unlock
-3. Sign message → RIGHT PANE: #4 sign
-4. Issue VAPID JWT → RIGHT PANE: #5 sign
-5. Issue lease → RIGHT PANE: #6 issueLease
-6. Lock → RIGHT PANE: #7 lock
-7. Use lease → RIGHT PANE: #8 sign (LAK)
-8. Refresh page → RIGHT PANE: Shows all 8 entries
-9. Expand entry #8 → Verify signerId shows LAK
+This is **required** for WebAuthn API to work. Iframes (even cross-origin) may not have permission for certain WebAuthn operations.
 
-### Scenario 4: Reset Demo
-1. Click "Reset Demo"
-2. Confirm
-3. Page reloads
-4. **RIGHT PANE**: Empty
-5. Setup again
-6. **RIGHT PANE**: NEW #1 init (different KIAK)
+## Security Properties
 
-## Security Considerations
+### What This Protects Against
 
-1. **Cross-Origin Isolation**: KMS runs on separate origin (`localhost:5175`)
-2. **Non-Extractable Keys**: All private keys stored with `extractable: false`
-3. **Lease Validation**: LAK signatures verified before issuing JWTs
-4. **Audit Integrity**: Chain hashes verified on every operation and page load
-5. **Persistent Audit Trail**: Complete history survives resets, proves operations occurred
-6. **User Confirmation**: Destructive actions (reset demo) require confirmation
+✅ **Malicious parent PWA updates**
+- Parent cannot access KMS IndexedDB (cross-origin isolation)
+- Parent cannot extract private keys (non-extractable)
+- Parent cannot forge audit log (Ed25519 signatures)
 
-## Development Commands
+✅ **Compromised CDN or network**
+- Leases are time-limited (30 days default)
+- Rate limiting prevents abuse
+- Audit log records all operations
 
+✅ **Session hijacking**
+- Each lease has unique SessionKEK
+- SessionKEKs cleared on worker restart
+- Leases can be revoked
+
+### What This Does NOT Protect Against
+
+❌ **Malicious browser extensions**
+- Extensions run in same process, can access all data
+
+❌ **Compromised OS**
+- OS can read all memory and storage
+
+❌ **Physical device access**
+- Cold boot attacks, memory dumps, etc.
+
+❌ **Browser implementation bugs**
+- Sandbox escapes, crypto bugs, etc.
+
+### Trust Assumptions
+
+**Must trust**:
+- Browser vendor (Chrome, Firefox, Safari)
+- Operating system
+- Hardware (CPU, secure enclave if used)
+- User's device security (screen lock, malware protection)
+
+**Do NOT need to trust** (verifiable):
+- CDN (integrity checked by browser SRI)
+- Network operators (HTTPS + SRI)
+- ATS developers (code is open source, auditable)
+- Build service (reproducible builds enable verification)
+
+## File Structure
+
+```
+example/phase-1/
+├── index.html              # Parent PWA entry point
+├── kms.html                # KMS iframe with authentication modals
+├── parent.ts               # Parent PWA logic (1,520 lines)
+├── kms.ts                  # KMS iframe bootstrap (40 lines)
+├── push-utils.ts           # Push notification utilities (258 lines)
+├── service-worker.js       # Service worker for push events (108 lines)
+├── styles.css              # UI styling (993 lines)
+│
+├── src/                    # Frozen Phase 1 KMS implementation
+│   ├── worker.ts           # Main worker orchestrator (1,846 lines)
+│   ├── client.ts           # RPC client (iframe ↔ worker) (1,237 lines)
+│   ├── kms-user.ts         # High-level API for parent PWA (1,890 lines)
+│   ├── unlock.ts           # Authentication logic (458 lines)
+│   ├── audit.ts            # Audit logging with KIAK/LAK (614 lines)
+│   ├── storage.ts          # IndexedDB operations (649 lines)
+│   ├── crypto-utils.ts     # Crypto primitives (415 lines)
+│   ├── types.ts            # TypeScript type definitions (50 lines)
+│   ├── rpc-validation.ts   # RPC request validation (631 lines)
+│   ├── error-utils.ts      # Error formatting (95 lines)
+│   ├── storage-types.ts    # Storage type definitions (50 lines)
+│   └── webauthn-types.ts   # WebAuthn type definitions (105 lines)
+│
+├── dist-parent/            # Build output for parent PWA
+├── dist-kms/               # Build output for KMS iframe
+│
+└── README.md               # This file
+```
+
+**Total**: ~8,600 lines of production-quality TypeScript implementing a complete KMS with VAPID integration.
+
+## Why This Demo is Special
+
+### Production-Quality Code
+
+This is not a toy demo. It implements:
+
+- **Complete VAPID workflow** from setup to push delivery
+- **Industrial-strength crypto** (PBKDF2, ECDSA P-256, HKDF, AES-GCM, Ed25519)
+- **Tamper-evident audit log** with chain verification
+- **Lease-based authorization** for background operations
+- **Rate limiting** to prevent abuse
+- **Cross-origin isolation** with browser-enforced boundaries
+- **WebAuthn integration** with PRF and Gate modes
+- **Push notification** subscription and testing
+- **JWT validation** simulating relay server behavior
+
+### Frozen Snapshot
+
+The `src/` directory is a **frozen snapshot** of the KMS V2 implementation as of Phase 1 completion. This means:
+
+- Demo will **not break** when Phase 2 development begins
+- Serves as **historical reference** for Phase 1 capabilities
+- Can be **independently tested** without worrying about main codebase changes
+- **Self-contained** - all dependencies included
+
+### Demonstration Value
+
+This demo shows:
+
+- How **cross-origin isolation** provides security without server-side trust
+- How **non-extractable keys** prevent exfiltration even with compromised code
+- How **lease-based authorization** enables background operations without user auth
+- How **audit logging** provides tamper-evident history
+- How **WebAuthn** integrates with browser-based key management
+- How **VAPID** enables Web Push without Firebase or third-party services
+- How **JWT validation** can be done client-side for testing
+
+Perfect for demos, testing, understanding the architecture, and as a reference implementation for production deployment.
+
+## Troubleshooting
+
+### Demo doesn't start
+
+**Problem**: Servers won't start or ports are in use
+
+**Solution**:
 ```bash
-# Install dependencies
-pnpm install
+# Kill existing processes on demo ports
+lsof -ti:5173 | xargs kill -9
+lsof -ti:5174 | xargs kill -9
 
-# Start parent PWA (localhost:5173)
-pnpm dev:full:parent
-
-# Start KMS enclave (localhost:5175)
-pnpm dev:full:kms
-
-# Run both in parallel
-pnpm dev:full
-
-# Build for production
-pnpm build:full
+# Restart
+pnpm demo:phase-1:parent &
+pnpm demo:phase-1:kms &
 ```
 
-## Success Criteria
+### WebAuthn not working
 
-This demo successfully demonstrates the KMS V2 lifecycle when:
+**Problem**: Passkey prompts don't appear
 
-1. ✅ KIAK initialization appears as first audit entry (seqNum #1)
-2. ✅ Audit log persists across page refreshes (loads from IndexedDB)
-3. ✅ Split-pane layout: operations left, full audit log right
-4. ✅ User can set up KMS with passphrase
-5. ✅ User can set up KMS with WebAuthn (PRF or Gate)
-6. ✅ User can unlock with correct credentials
-7. ✅ User can perform cryptographic operations while unlocked
-8. ✅ User can issue leases for background operations
-9. ✅ PWA can use leases to get JWTs without user auth (while locked)
-10. ✅ All operations appear in audit log with correct signatures
-11. ✅ Audit chain verification succeeds for all entries
-12. ✅ User can expand log entries to see full JSON
-13. ✅ User can reset demo and start fresh (new KIAK)
+**Causes**:
+- Browser doesn't support WebAuthn
+- Browser doesn't support PRF extension (use Gate mode instead)
+- Not running on localhost (WebAuthn requires secure context)
+- Pop-up blocked (check browser settings)
 
-## Comparison with iframe-isolation Demo
+**Solution**:
+- Use Chrome 120+ or Firefox 120+
+- Enable pop-ups for localhost:5173
+- Try Gate mode if PRF mode fails
 
-| Feature | iframe-isolation Demo | full Demo |
-|---------|----------------------|-----------|
-| **Purpose** | Test cross-origin postMessage | Demonstrate full KMS lifecycle |
-| **UI** | Minimal (console output) | Rich split-pane with full audit log |
-| **User Input** | Hardcoded test data | User enters passphrases, selects options |
-| **Persistence** | No (ephemeral) | Yes (survives refresh) |
-| **Audit Log** | Console only | Persistent right pane from KIAK init |
-| **Lease Demo** | No | Yes (full workflow) |
-| **Reset** | No | Yes (Reset Demo button) |
-| **Target Audience** | Developers | End users, stakeholders, demos |
+### Leases become invalid after refresh
 
-## Questions?
+**Problem**: All leases show ❌ Invalid after page refresh
 
-For implementation details, see:
-- KMS V2 Architecture: `/docs/architecture/crypto/V2/`
-- API Reference: `/src/v2/worker.ts` (handleMessage)
-- iframe-isolation Demo: `/example/phase-1/iframe-isolation/`
+**Cause**: Worker restart clears SessionKEKs from memory
+
+**This is EXPECTED**. SessionKEKs are intentionally not persisted. To use leases after refresh:
+
+1. Click "Extend All Leases with Auth"
+2. Unlock with passphrase/WebAuthn
+3. Leases re-derived, SessionKEKs restored
+
+OR:
+
+1. Create new lease after refresh
+2. Old leases still in IndexedDB but not usable (no SessionKEK)
+
+### Push notifications not showing
+
+**Problem**: Test push doesn't display notification
+
+**Checks**:
+1. Browser notification permission granted?
+2. Service worker registered? (check DevTools → Application → Service Workers)
+3. Push subscription active? (check status in UI)
+4. JWT validation passed? (check console for validation errors)
+
+**Solution**:
+- Grant notification permission when prompted
+- Refresh page to re-register service worker
+- Re-subscribe to push if subscription lost
+
+### Audit log disappeared
+
+**Problem**: Audit log is empty after page refresh
+
+**Cause**: IndexedDB was cleared (Reset Demo clicked)
+
+**This is PERMANENT**. Reset Demo clears ALL IndexedDB data including audit log.
+
+To recover:
+- You can't. Audit log is gone.
+- Start fresh: Run setup again (creates new KIAK at seqNum #1)
+
+### VAPID key changed unexpectedly
+
+**Problem**: VAPID public key different after refresh, all leases invalid
+
+**Cause**: Demo was reset or VAPID regenerated
+
+**Check audit log**:
+- Look for "regenerateVAPID" operation
+- Or "init" operation with new timestamp (demo was reset)
+
+**Solution**:
+- If intentional: Create new leases with new key
+- If unintentional: You may have clicked "Regenerate VAPID Key" by mistake
+
+## Next Steps
+
+After exploring this demo, you can:
+
+1. **Review the source code** in `src/` to understand implementation
+2. **Run the tests** in `/tests/v2/` (from project root: `pnpm test`)
+3. **Read the architecture docs** in `/docs/architecture/crypto/`
+4. **Try Phase 0 demo** for simpler VAPID-only demo (from project root: `pnpm demo:phase-0`)
+5. **Build for production** (see main project README for build instructions)
+
+## Support
+
+For issues or questions:
+
+- Check the **audit log** for error details
+- Check **browser console** for error messages
+- Review **architecture docs** at `/docs/architecture/crypto/`
+- Open issue at https://github.com/Lukium/ats-kms-enclave/issues
+
+---
+
+**Built with security and verifiability in mind** 🔐
+
+This demo represents Phase 1 of the AllTheServices Key Management System, demonstrating browser-based cryptographic operations with cross-origin isolation, non-extractable keys, and tamper-evident audit logging.

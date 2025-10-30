@@ -36,19 +36,19 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-30 22:59:21 UTC*
+*Last updated: 2025-10-30 23:08:26 UTC*
 
 **Test Results:**
 - Test Files: 9 passed (9)
 - Tests: 401 passed (401)
-- Duration: 28.10s
+- Duration: 28.55s
 
 **Coverage Report:**
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 13285   │   85.37│    83.23 │   85.58│   85.37 │
- v2/audit.ts        │ 614     │   99.18│    96.22 │     100│   99.18 │ 5 lines
+All files           │ 13285   │   85.37│    83.19 │   85.58│   85.37 │
+ v2/audit.ts        │ 614     │   99.18│    96.07 │     100│   99.18 │ 5 lines
  v2/client.ts       │ 1237    │   36.77│    74.41 │   66.66│   36.77 │ 600 lines
  v2/crypto-utils.ts │ 415     │   95.65│    95.45 │   94.44│   95.65 │ 18 lines
  v2/error-utils.ts  │ 95      │     100│      100 │     100│     100 │ 

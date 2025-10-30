@@ -97,6 +97,25 @@ export type EnrollmentConfigV2 =
   | PasskeyGateConfigV2;
 
 /* ------------------------------------------------------------------
+ * Push Notification Subscription
+ *
+ * Stores the push subscription data returned by PushManager.subscribe().
+ * This is stored with the VAPID key record, as subscriptions are tied
+ * to the VAPID key lifecycle (regenerating VAPID key invalidates subs).
+ */
+
+export interface StoredPushSubscription {
+  endpoint: string; // Push service endpoint URL (FCM/APNs/Mozilla/WNS)
+  expirationTime: number | null; // When subscription expires (null = no expiry)
+  keys: {
+    p256dh: string; // Client public key (base64url)
+    auth: string; // Authentication secret (base64url)
+  };
+  eid: string; // Endpoint ID - user-defined label
+  createdAt: number; // Unix timestamp
+}
+
+/* ------------------------------------------------------------------
  * Wrapped keys and metadata
  *
  * Application keys (e.g. VAPID signing keys) are wrapped under the
@@ -118,6 +137,7 @@ export interface WrappedKey {
   purpose: string;
   createdAt: number;
   lastUsedAt?: number;
+  subscription?: StoredPushSubscription; // Optional push subscription for VAPID keys
 }
 
 export interface KeyMetadata {
@@ -274,7 +294,10 @@ export type RPCMethod =
   | 'verifyAuditChain'
   | 'getAuditPublicKey'
   | 'isSetup'
-  | 'resetKMS';
+  | 'resetKMS'
+  | 'setPushSubscription'
+  | 'removePushSubscription'
+  | 'getPushSubscription';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)
@@ -286,11 +309,8 @@ export type RPCMethod =
 export interface LeaseRecord {
   leaseId: string;
   userId: string;
-  subs: Array<{
-    url: string;
-    aud: string;
-    eid: string;
-  }>;
+  // Note: Push subscription data is stored with VAPID key, not in lease
+  // Worker reads subscription from VAPID key when creating lease/issuing JWTs
   ttlHours: number;
   createdAt: number;
   exp: number;

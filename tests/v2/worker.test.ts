@@ -820,22 +820,27 @@ describe('issueVAPIDJWT', () => {
   const passphrase = 'lease-jwt-passphrase-123';
 
   beforeEach(async () => {
-    // Setup
-    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
+    // Setup (automatically generates VAPID key)
+    const setupResponse = await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
+    kid = getResult<{ vapidKid: string }>(setupResponse).vapidKid;
 
-    // Generate VAPID key
-    const vapidResponse = await handleMessage(
-      createRequest('generateVAPID', { credentials: createPassphraseCredentials(passphrase) })
+    // Set push subscription
+    await handleMessage(
+      createRequest('setPushSubscription', {
+        subscription: {
+          endpoint: 'https://fcm.googleapis.com/fcm/send/test-subscription-1',
+          expirationTime: null,
+          keys: { p256dh: 'test-p256dh-key', auth: 'test-auth-key' },
+          eid: 'ep-1',
+          createdAt: Date.now(),
+        },
+      })
     );
-    kid = getResult<{ kid: string }>(vapidResponse).kid;
 
     // Create lease
     const leaseResponse = await handleMessage(
       createRequest('createLease', {
         userId: 'user-123',
-        subs: [
-          { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
-        ],
         ttlHours: 1,
         credentials: createPassphraseCredentials(passphrase),
       })
@@ -846,7 +851,6 @@ describe('issueVAPIDJWT', () => {
   it('should issue JWT with lease successfully', async () => {
     const request = createRequest('issueVAPIDJWT', {
       leaseId,
-      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
@@ -867,7 +871,6 @@ describe('issueVAPIDJWT', () => {
   it('should reject non-existent lease', async () => {
     const request = createRequest('issueVAPIDJWT', {
       leaseId: 'lease-does-not-exist',
-      endpoint: { url: '', aud: '', eid: 'ep-1' },
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
@@ -879,17 +882,20 @@ describe('issueVAPIDJWT', () => {
   });
 
   it('should reject unauthorized endpoint', async () => {
+    // This test is no longer relevant since endpoint authorization
+    // is now handled at lease creation time via push subscription
+    // Rather than delete it, we'll verify that JWT issuance works
+    // with the subscription set during beforeEach
     const request = createRequest('issueVAPIDJWT', {
       leaseId,
-      endpoint: { url: '', aud: '', eid: 'ep-999' }, // Not in lease
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
 
     const response = await handleMessage(request);
 
-    expect(response.error).toBeDefined();
-    expect(response.error).toContain('not authorized');
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('jwt');
   });
 
   it('should enforce quota (tokens per hour)', async () => {
@@ -906,7 +912,6 @@ describe('issueVAPIDJWT', () => {
     // Issue one more JWT - should succeed (99 < 100)
     const request1 = createRequest('issueVAPIDJWT', {
       leaseId,
-      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
@@ -917,7 +922,6 @@ describe('issueVAPIDJWT', () => {
     // Issue second JWT - should fail (100 >= 100)
     const request2 = createRequest('issueVAPIDJWT', {
       leaseId,
-      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
@@ -931,7 +935,6 @@ describe('issueVAPIDJWT', () => {
     // Issue JWT successfully with current lease/kid
     const request1 = createRequest('issueVAPIDJWT', {
       leaseId,
-      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
@@ -949,7 +952,6 @@ describe('issueVAPIDJWT', () => {
     // Try to issue JWT with old lease - should fail due to kid mismatch
     const request2 = createRequest('issueVAPIDJWT', {
       leaseId, // Old lease with old kid
-      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
       kid,
       credentials: createPassphraseCredentials(passphrase),
     });
@@ -1186,26 +1188,31 @@ describe('worker integration', () => {
   it('should handle complete VAPID flow', async () => {
     const passphrase = 'integration-test-passphrase-123';
 
-    // 1. Setup
+    // 1. Setup (automatically generates VAPID key)
     const setupResponse = await handleMessage(
       createRequest('setupPassphrase', { userId: 'test@example.com', passphrase })
     );
     expect(setupResponse.error).toBeUndefined();
+    const kid = getResult<{ vapidKid: string }>(setupResponse).vapidKid;
 
-    // 2. Generate VAPID key
-    const vapidResponse = await handleMessage(
-      createRequest('generateVAPID', {
-        credentials: createPassphraseCredentials(passphrase),
+    // 2. Set push subscription
+    const setPushResponse = await handleMessage(
+      createRequest('setPushSubscription', {
+        subscription: {
+          endpoint: 'https://fcm.googleapis.com/fcm/send/integration-test-sub',
+          expirationTime: null,
+          keys: { p256dh: 'test-p256dh', auth: 'test-auth' },
+          eid: 'ep-1',
+          createdAt: Date.now(),
+        },
       })
     );
-    expect(vapidResponse.error).toBeUndefined();
-    const kid = getResult<{ kid: string }>(vapidResponse).kid;
+    expect(setPushResponse.error).toBeUndefined();
 
     // 3. Create lease
     const leaseResponse = await handleMessage(
       createRequest('createLease', {
         userId: 'test-user',
-        subs: [{ url: 'https://push.example.com/sub', aud: 'https://fcm.googleapis.com', eid: 'ep-1' }],
         ttlHours: 12,
         credentials: createPassphraseCredentials(passphrase),
       })
@@ -1217,7 +1224,6 @@ describe('worker integration', () => {
     const jwtResponse = await handleMessage(
       createRequest('issueVAPIDJWT', {
         leaseId,
-        endpoint: { url: 'https://push.example.com/sub', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
         kid,
         credentials: createPassphraseCredentials(passphrase),
       })

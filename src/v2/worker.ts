@@ -29,6 +29,7 @@ import type {
   AuditEntryV2,
   LeaseVerificationResult,
   VerificationResult,
+  StoredPushSubscription,
 } from './types';
 import {
   setupPassphrase,
@@ -69,6 +70,9 @@ import {
   getUserLeases,
   storeLease,
   getLease,
+  setPushSubscription,
+  removePushSubscription,
+  getPushSubscription,
 } from './storage';
 import {
   rawP256ToJwk,
@@ -268,6 +272,18 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'removeEnrollment':
         result = await handleRemoveEnrollment(validators.validateRemoveEnrollment(params), id);
+        break;
+
+      case 'setPushSubscription':
+        result = await handleSetPushSubscription(validators.validateSetPushSubscription(params));
+        break;
+
+      case 'removePushSubscription':
+        result = await handleRemovePushSubscription();
+        break;
+
+      case 'getPushSubscription':
+        result = await handleGetPushSubscription();
         break;
 
       default:
@@ -891,13 +907,12 @@ async function handleSignJWT(
 async function handleCreateLease(
   params: {
     userId: string;
-    subs: Array<{ url: string; aud: string; eid: string }>;
     ttlHours: number;
     credentials: AuthCredentials;
   },
   requestId: string
 ): Promise<{ leaseId: string; exp: number; quotas: QuotaState }> {
-  const { userId, subs, ttlHours, credentials } = params;
+  const { userId, ttlHours, credentials } = params;
 
   // Validate TTL (max 24 hours)
   if (ttlHours <= 0 || ttlHours > 24) {
@@ -989,10 +1004,10 @@ async function handleCreateLease(
   };
 
   // Create lease record with SessionKEK-wrapped key and LAK delegation cert
+  // Note: Push subscription data is stored with VAPID key, not in lease
   const lease: LeaseRecord = {
     leaseId,
     userId,
-    subs,
     ttlHours,
     createdAt: now,
     exp,
@@ -1025,7 +1040,6 @@ async function handleCreateLease(
       leaseId,
       userId,
       ttlHours,
-      subsCount: subs.length,
     },
   });
 
@@ -1040,14 +1054,13 @@ async function handleCreateLease(
 async function handleIssueVAPIDJWT(
   params: {
     leaseId: string;
-    endpoint: { url: string; aud: string; eid: string };
     kid?: string; // Optional - auto-detect if not provided
     jti?: string; // Optional - for batch issuance
     exp?: number; // Optional - for staggered expirations
   },
   requestId: string
 ): Promise<{ jwt: string; jti: string; exp: number; auditEntry: AuditEntryV2 }> {
-  const { leaseId, endpoint } = params;
+  const { leaseId } = params;
   let { kid } = params;
 
   // Auto-detect VAPID key if kid not provided (per V2 spec)
@@ -1106,10 +1119,10 @@ async function handleIssueVAPIDJWT(
   // This loads the LAK private key and sets it as the active audit signer
   await loadLAK(leaseId, lease.lakDelegationCert);
 
-  // Check endpoint is in lease
-  const endpointMatch = lease.subs.find((s) => s.eid === endpoint.eid);
-  if (!endpointMatch) {
-    throw new Error('Endpoint not authorized for this lease');
+  // Get push subscription from VAPID key (single source of truth)
+  const subscription = await getPushSubscription();
+  if (!subscription) {
+    throw new Error('No push subscription found. Call setPushSubscription() first.');
   }
 
   // Check quota (simplified: tokens per hour)
@@ -1134,13 +1147,17 @@ async function handleIssueVAPIDJWT(
   const jti = params.jti ?? crypto.randomUUID();
   const exp = params.exp ?? (Math.floor(Date.now() / 1000) + 900); // 15 min from now if not provided
 
+  // Extract aud from subscription endpoint (e.g., https://fcm.googleapis.com)
+  const endpointUrl = new URL(subscription.endpoint);
+  const aud = `${endpointUrl.protocol}//${endpointUrl.host}`;
+
   const payload: VAPIDPayload = {
-    aud: endpoint.aud,
+    aud,
     sub: 'mailto:kms@example.com', // Should come from config
     exp,
     jti,
     uid: lease.userId,
-    eid: endpoint.eid,
+    eid: subscription.eid,
   };
 
   // Get SessionKEK (from cache or load from DB)
@@ -1201,8 +1218,8 @@ async function handleIssueVAPIDJWT(
     details: {
       action: 'issue-lease-jwt',
       jti,
-      aud: endpoint.aud,
-      eid: endpoint.eid,
+      aud,
+      eid: subscription.eid,
     },
   });
 
@@ -1229,13 +1246,12 @@ async function handleIssueVAPIDJWT(
 async function handleIssueVAPIDJWTs(
   params: {
     leaseId: string;
-    endpoint: { url: string; aud: string; eid: string };
     count: number;
     kid?: string;
   },
   requestId: string
 ): Promise<Array<{ jwt: string; jti: string; exp: number; auditEntry: AuditEntryV2 }>> {
-  const { leaseId, endpoint, count, kid } = params;
+  const { leaseId, count, kid } = params;
 
   // Validate count
   if (!Number.isInteger(count) || count < 1 || count > 10) {
@@ -1261,7 +1277,6 @@ async function handleIssueVAPIDJWTs(
     const result = await handleIssueVAPIDJWT(
       {
         leaseId,
-        endpoint,
         ...(kid !== undefined && { kid }),
         jti,
         exp,
@@ -1465,6 +1480,49 @@ async function handleGetVAPIDKid(): Promise<{ kid: string }> {
   }
 
   return { kid: firstKey.kid };
+}
+
+// ============================================================================
+// Push Subscription Operations
+// ============================================================================
+
+/**
+ * Set push subscription for the current VAPID key.
+ *
+ * Stores the subscription data with the VAPID key record. This allows
+ * leases and JWTs to automatically include the subscription info without
+ * requiring it to be passed on every call.
+ *
+ * @param params - Validated subscription data
+ * @returns Success confirmation
+ */
+async function handleSetPushSubscription(params: {
+  subscription: StoredPushSubscription;
+}): Promise<{ success: true }> {
+  await setPushSubscription(params.subscription);
+  return { success: true };
+}
+
+/**
+ * Remove push subscription from the current VAPID key.
+ *
+ * @returns Success confirmation
+ */
+async function handleRemovePushSubscription(): Promise<{ success: true }> {
+  await removePushSubscription();
+  return { success: true };
+}
+
+/**
+ * Get push subscription from the current VAPID key.
+ *
+ * @returns Subscription data or null if not set
+ */
+async function handleGetPushSubscription(): Promise<{
+  subscription: StoredPushSubscription | null;
+}> {
+  const subscription = await getPushSubscription();
+  return { subscription };
 }
 
 // ============================================================================

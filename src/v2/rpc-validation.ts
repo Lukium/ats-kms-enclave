@@ -8,7 +8,7 @@
  * to typed handler functions.
  */
 
-import type { AuthCredentials, VAPIDPayload } from './types.js';
+import type { AuthCredentials, VAPIDPayload, StoredPushSubscription } from './types.js';
 
 /**
  * Custom error for RPC parameter validation failures.
@@ -178,28 +178,6 @@ function validateVAPIDPayload(method: string, payload: unknown): VAPIDPayload {
 /**
  * Validate array of subscription objects
  */
-function validateSubscriptions(
-  method: string,
-  subs: unknown
-): Array<{ url: string; aud: string; eid: string }> {
-  if (!Array.isArray(subs)) {
-    throw new RPCValidationError(method, 'subs', 'Array', subs);
-  }
-
-  return subs.map((sub, index) => {
-    if (typeof sub !== 'object' || sub === null) {
-      throw new RPCValidationError(method, `subs[${index}]`, 'object', sub);
-    }
-
-    const s = sub as Record<string, unknown>;
-    return {
-      url: validateString(method, `subs[${index}].url`, s.url),
-      aud: validateString(method, `subs[${index}].aud`, s.aud),
-      eid: validateString(method, `subs[${index}].eid`, s.eid),
-    };
-  });
-}
-
 // ============================================================================
 // RPC Method Validators
 // ============================================================================
@@ -317,14 +295,12 @@ export function validateSignJWT(params: unknown): {
 
 export function validateCreateLease(params: unknown): {
   userId: string;
-  subs: Array<{ url: string; aud: string; eid: string }>;
   ttlHours: number;
   credentials: AuthCredentials;
 } {
   const p = validateParamsObject('createLease', params);
   return {
     userId: validateString('createLease', 'userId', p.userId),
-    subs: validateSubscriptions('createLease', p.subs),
     ttlHours: validateNumber('createLease', 'ttlHours', p.ttlHours),
     credentials: validateAuthCredentials('createLease', p.credentials),
   };
@@ -332,18 +308,11 @@ export function validateCreateLease(params: unknown): {
 
 export function validateIssueVAPIDJWT(params: unknown): {
   leaseId: string;
-  endpoint: { url: string; aud: string; eid: string };
   kid?: string;
   jti?: string;
   exp?: number;
 } {
   const p = validateParamsObject('issueVAPIDJWT', params);
-
-  // Validate endpoint object
-  if (typeof p.endpoint !== 'object' || p.endpoint === null) {
-    throw new RPCValidationError('issueVAPIDJWT', 'endpoint', 'object', p.endpoint);
-  }
-  const endpoint = p.endpoint as Record<string, unknown>;
 
   const kid = validateOptionalString('issueVAPIDJWT', 'kid', p.kid);
   const jti = validateOptionalString('issueVAPIDJWT', 'jti', p.jti);
@@ -351,11 +320,6 @@ export function validateIssueVAPIDJWT(params: unknown): {
 
   return {
     leaseId: validateString('issueVAPIDJWT', 'leaseId', p.leaseId),
-    endpoint: {
-      url: validateString('issueVAPIDJWT', 'endpoint.url', endpoint.url),
-      aud: validateString('issueVAPIDJWT', 'endpoint.aud', endpoint.aud),
-      eid: validateString('issueVAPIDJWT', 'endpoint.eid', endpoint.eid),
-    },
     ...(kid !== undefined && { kid }),
     ...(jti !== undefined && { jti }),
     ...(exp !== undefined && { exp }),
@@ -364,27 +328,15 @@ export function validateIssueVAPIDJWT(params: unknown): {
 
 export function validateIssueVAPIDJWTs(params: unknown): {
   leaseId: string;
-  endpoint: { url: string; aud: string; eid: string };
   count: number;
   kid?: string;
 } {
   const p = validateParamsObject('issueVAPIDJWTs', params);
 
-  // Validate endpoint object
-  if (typeof p.endpoint !== 'object' || p.endpoint === null) {
-    throw new RPCValidationError('issueVAPIDJWTs', 'endpoint', 'object', p.endpoint);
-  }
-  const endpoint = p.endpoint as Record<string, unknown>;
-
   const kid = validateOptionalString('issueVAPIDJWTs', 'kid', p.kid);
 
   return {
     leaseId: validateString('issueVAPIDJWTs', 'leaseId', p.leaseId),
-    endpoint: {
-      url: validateString('issueVAPIDJWTs', 'endpoint.url', endpoint.url),
-      aud: validateString('issueVAPIDJWTs', 'endpoint.aud', endpoint.aud),
-      eid: validateString('issueVAPIDJWTs', 'endpoint.eid', endpoint.eid),
-    },
     count: validateNumber('issueVAPIDJWTs', 'count', p.count),
     ...(kid !== undefined && { kid }),
   };
@@ -465,4 +417,124 @@ export function validateRemoveEnrollment(params: unknown): {
     enrollmentId: validateString('removeEnrollment', 'enrollmentId', p.enrollmentId),
     credentials: validateAuthCredentials('removeEnrollment', p.credentials),
   };
+}
+
+// ============================================================================
+// Push Notification Subscription Validation
+// ============================================================================
+
+/**
+ * Known push service domains (whitelist)
+ */
+const KNOWN_PUSH_SERVICES = [
+  'fcm.googleapis.com', // Google Firebase Cloud Messaging
+  'web.push.apple.com', // Apple Push Notification Service
+  'updates.push.services.mozilla.com', // Mozilla Push Service
+  'notify.windows.com', // Windows Push Notification Service
+];
+
+/**
+ * Validate push subscription object with security whitelist.
+ *
+ * Validates:
+ * - endpoint is HTTPS
+ * - endpoint is from a known push service (FCM, APNs, Mozilla, WNS)
+ * - keys.p256dh and keys.auth are present and non-empty strings
+ * - eid is a non-empty string
+ * - createdAt is a valid timestamp
+ * - expirationTime is number or null
+ */
+function validatePushSubscription(method: string, value: unknown): StoredPushSubscription {
+  if (typeof value !== 'object' || value === null) {
+    throw new RPCValidationError(method, 'subscription', 'object', value);
+  }
+
+  const sub = value as Record<string, unknown>;
+
+  // Validate endpoint
+  const endpoint = validateString(method, 'subscription.endpoint', sub.endpoint);
+
+  // Require HTTPS
+  if (!endpoint.startsWith('https://')) {
+    throw new Error(`${method}: subscription.endpoint must use HTTPS`);
+  }
+
+  // Whitelist known push services
+  let endpointUrl: URL;
+  try {
+    endpointUrl = new URL(endpoint);
+  } catch {
+    throw new Error(`${method}: subscription.endpoint is not a valid URL`);
+  }
+
+  const isKnownService = KNOWN_PUSH_SERVICES.some(
+    (service) => endpointUrl.hostname === service || endpointUrl.hostname.endsWith(`.${service}`)
+  );
+
+  if (!isKnownService) {
+    throw new Error(
+      `${method}: subscription.endpoint must be from a known push service (FCM, APNs, Mozilla Push, WNS). Got: ${endpointUrl.hostname}`
+    );
+  }
+
+  // Validate expirationTime (number or null)
+  const expirationTime = sub.expirationTime;
+  if (expirationTime !== null && typeof expirationTime !== 'number') {
+    throw new RPCValidationError(method, 'subscription.expirationTime', 'number or null', expirationTime);
+  }
+
+  // Validate keys object
+  if (typeof sub.keys !== 'object' || sub.keys === null) {
+    throw new RPCValidationError(method, 'subscription.keys', 'object', sub.keys);
+  }
+
+  const keys = sub.keys as Record<string, unknown>;
+  const p256dh = validateString(method, 'subscription.keys.p256dh', keys.p256dh);
+  const auth = validateString(method, 'subscription.keys.auth', keys.auth);
+
+  if (p256dh.length === 0) {
+    throw new Error(`${method}: subscription.keys.p256dh must be non-empty`);
+  }
+  if (auth.length === 0) {
+    throw new Error(`${method}: subscription.keys.auth must be non-empty`);
+  }
+
+  // Validate eid
+  const eid = validateString(method, 'subscription.eid', sub.eid);
+  if (eid.length === 0) {
+    throw new Error(`${method}: subscription.eid must be non-empty`);
+  }
+
+  // Validate createdAt
+  const createdAt = sub.createdAt;
+  if (typeof createdAt !== 'number') {
+    throw new RPCValidationError(method, 'subscription.createdAt', 'number', createdAt);
+  }
+
+  return {
+    endpoint,
+    expirationTime,
+    keys: { p256dh, auth },
+    eid,
+    createdAt,
+  };
+}
+
+export function validateSetPushSubscription(params: unknown): {
+  subscription: StoredPushSubscription;
+} {
+  const p = validateParamsObject('setPushSubscription', params);
+  return {
+    subscription: validatePushSubscription('setPushSubscription', p.subscription),
+  };
+}
+
+export function validateRemovePushSubscription(_params: unknown): Record<string, never> {
+  // No params required
+  return {};
+}
+
+export function validateGetPushSubscription(_params: unknown): Record<string, never> {
+  // No params required
+  return {};
 }

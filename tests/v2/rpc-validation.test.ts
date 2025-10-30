@@ -671,10 +671,6 @@ describe('validateCreateLease', () => {
     it('should validate complete params', () => {
       const result = validateCreateLease({
         userId: 'user123',
-        subs: [
-          { url: 'https://push1.com', aud: 'https://push1.com', eid: 'endpoint1' },
-          { url: 'https://push2.com', aud: 'https://push2.com', eid: 'endpoint2' },
-        ],
         ttlHours: 24,
         credentials: {
           method: 'passphrase',
@@ -682,106 +678,15 @@ describe('validateCreateLease', () => {
           passphrase: 'secret',
         },
       });
-      expect(result.subs).toHaveLength(2);
       expect(result.ttlHours).toBe(24);
-    });
-
-    it('should validate with empty subs array', () => {
-      const result = validateCreateLease({
-        userId: 'user123',
-        subs: [],
-        ttlHours: 24,
-        credentials: {
-          method: 'passphrase',
-          userId: 'user123',
-          passphrase: 'secret',
-        },
-      });
-      expect(result.subs).toHaveLength(0);
     });
   });
 
   describe('invalid inputs', () => {
-    it('should reject non-array subs', () => {
-      expect(() =>
-        validateCreateLease({
-          userId: 'user123',
-          subs: 'not an array',
-          ttlHours: 24,
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'secret',
-          },
-        })
-      ).toThrow(RPCValidationError);
-    });
-
-    it('should reject subs with non-object element', () => {
-      expect(() =>
-        validateCreateLease({
-          userId: 'user123',
-          subs: ['not an object'],
-          ttlHours: 24,
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'secret',
-          },
-        })
-      ).toThrow(RPCValidationError);
-    });
-
-    it('should reject subs with null element', () => {
-      expect(() =>
-        validateCreateLease({
-          userId: 'user123',
-          subs: [null],
-          ttlHours: 24,
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'secret',
-          },
-        })
-      ).toThrow(RPCValidationError);
-    });
-
-    it('should reject subs element missing url', () => {
-      expect(() =>
-        validateCreateLease({
-          userId: 'user123',
-          subs: [{ aud: 'https://push.com', eid: 'endpoint1' }],
-          ttlHours: 24,
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'secret',
-          },
-        })
-      ).toThrow(RPCValidationError);
-    });
-
-    it('should reject subs element with non-string url', () => {
-      expect(() =>
-        validateCreateLease({
-          userId: 'user123',
-          subs: [{ url: 123, aud: 'https://push.com', eid: 'endpoint1' }],
-          ttlHours: 24,
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'secret',
-          },
-        })
-      ).toThrow(RPCValidationError);
-    });
-
     it('should reject non-number ttlHours', () => {
       expect(() =>
         validateCreateLease({
           userId: 'user123',
-          subs: [],
           ttlHours: 'not a number',
           credentials: {
             method: 'passphrase',
@@ -799,24 +704,13 @@ describe('validateIssueVAPIDJWT', () => {
     it('should validate minimal params', () => {
       const result = validateIssueVAPIDJWT({
         leaseId: 'lease123',
-        endpoint: {
-          url: 'https://push.com',
-          aud: 'https://push.com',
-          eid: 'endpoint1',
-        },
       });
       expect(result.leaseId).toBe('lease123');
-      expect(result.endpoint.url).toBe('https://push.com');
     });
 
     it('should validate with optional kid', () => {
       const result = validateIssueVAPIDJWT({
         leaseId: 'lease123',
-        endpoint: {
-          url: 'https://push.com',
-          aud: 'https://push.com',
-          eid: 'endpoint1',
-        },
         kid: 'key-id',
       });
       expect(result.kid).toBe('key-id');
@@ -825,11 +719,6 @@ describe('validateIssueVAPIDJWT', () => {
     it('should validate with optional jti', () => {
       const result = validateIssueVAPIDJWT({
         leaseId: 'lease123',
-        endpoint: {
-          url: 'https://push.com',
-          aud: 'https://push.com',
-          eid: 'endpoint1',
-        },
         jti: 'jwt-id',
       });
       expect(result.jti).toBe('jwt-id');
@@ -838,11 +727,6 @@ describe('validateIssueVAPIDJWT', () => {
     it('should validate with optional exp', () => {
       const result = validateIssueVAPIDJWT({
         leaseId: 'lease123',
-        endpoint: {
-          url: 'https://push.com',
-          aud: 'https://push.com',
-          eid: 'endpoint1',
-        },
         exp: 1234567890,
       });
       expect(result.exp).toBe(1234567890);
@@ -850,45 +734,10 @@ describe('validateIssueVAPIDJWT', () => {
   });
 
   describe('invalid inputs', () => {
-    it('should reject null endpoint', () => {
-      expect(() =>
-        validateIssueVAPIDJWT({
-          leaseId: 'lease123',
-          endpoint: null,
-        })
-      ).toThrow(RPCValidationError);
-    });
-
-    it('should reject non-object endpoint', () => {
-      expect(() =>
-        validateIssueVAPIDJWT({
-          leaseId: 'lease123',
-          endpoint: 'not an object',
-        })
-      ).toThrow(RPCValidationError);
-    });
-
-    it('should reject endpoint missing url', () => {
-      expect(() =>
-        validateIssueVAPIDJWT({
-          leaseId: 'lease123',
-          endpoint: {
-            aud: 'https://push.com',
-            eid: 'endpoint1',
-          },
-        })
-      ).toThrow(RPCValidationError);
-    });
-
     it('should reject non-string kid', () => {
       expect(() =>
         validateIssueVAPIDJWT({
           leaseId: 'lease123',
-          endpoint: {
-            url: 'https://push.com',
-            aud: 'https://push.com',
-            eid: 'endpoint1',
-          },
           kid: 123,
         })
       ).toThrow(RPCValidationError);
@@ -898,11 +747,6 @@ describe('validateIssueVAPIDJWT', () => {
       expect(() =>
         validateIssueVAPIDJWT({
           leaseId: 'lease123',
-          endpoint: {
-            url: 'https://push.com',
-            aud: 'https://push.com',
-            eid: 'endpoint1',
-          },
           exp: 'not a number',
         })
       ).toThrow(RPCValidationError);
@@ -915,11 +759,6 @@ describe('validateIssueVAPIDJWTs', () => {
     it('should validate minimal params', () => {
       const result = validateIssueVAPIDJWTs({
         leaseId: 'lease123',
-        endpoint: {
-          url: 'https://push.com',
-          aud: 'https://push.com',
-          eid: 'endpoint1',
-        },
         count: 5,
       });
       expect(result.count).toBe(5);
@@ -928,11 +767,6 @@ describe('validateIssueVAPIDJWTs', () => {
     it('should validate with optional kid', () => {
       const result = validateIssueVAPIDJWTs({
         leaseId: 'lease123',
-        endpoint: {
-          url: 'https://push.com',
-          aud: 'https://push.com',
-          eid: 'endpoint1',
-        },
         count: 5,
         kid: 'key-id',
       });
@@ -941,25 +775,10 @@ describe('validateIssueVAPIDJWTs', () => {
   });
 
   describe('invalid inputs', () => {
-    it('should reject null endpoint', () => {
-      expect(() =>
-        validateIssueVAPIDJWTs({
-          leaseId: 'lease123',
-          endpoint: null,
-          count: 5,
-        })
-      ).toThrow(RPCValidationError);
-    });
-
     it('should reject non-number count', () => {
       expect(() =>
         validateIssueVAPIDJWTs({
           leaseId: 'lease123',
-          endpoint: {
-            url: 'https://push.com',
-            aud: 'https://push.com',
-            eid: 'endpoint1',
-          },
           count: 'not a number',
         })
       ).toThrow(RPCValidationError);

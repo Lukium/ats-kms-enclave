@@ -356,24 +356,24 @@ function validatePushSubscription(
 
 ```typescript
 /**
- * Add a push subscription to the VAPID key
+ * Set/replace the push subscription for the VAPID key (singular)
  * Requires authentication (triggers modal if locked)
  */
-async addPushSubscription(
+async setPushSubscription(
   subscription: StoredPushSubscription
-): Promise<void>;
+): Promise<{ success: boolean }>;
 
 /**
- * Remove a push subscription by endpoint
+ * Remove the push subscription from the VAPID key
  * Requires authentication (triggers modal if locked)
  */
-async removePushSubscription(endpoint: string): Promise<void>;
+async removePushSubscription(): Promise<{ success: boolean }>;
 
 /**
- * Get all push subscriptions
+ * Get the push subscription from the VAPID key
  * Requires authentication (triggers modal if locked)
  */
-async getPushSubscriptions(): Promise<StoredPushSubscription[]>;
+async getPushSubscription(): Promise<{ subscription: StoredPushSubscription | null }>;
 ```
 
 **Usage pattern**:
@@ -396,8 +396,8 @@ const subscription: StoredPushSubscription = {
   createdAt: Date.now(),
 };
 
-// Store in KMS
-await kmsUser.addPushSubscription(subscription);
+// Store in KMS (replaces any existing subscription)
+await kmsUser.setPushSubscription(subscription);
 ```
 
 ---
@@ -561,22 +561,14 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
     const eid = 'demo-device'; // Or prompt user for device name
     const storedSub = convertPushSubscriptionToStored(rawSub, eid);
 
-    // Store subscription in KMS
-    await kmsUser.addPushSubscription(storedSub);
+    // Store subscription in KMS (separate from lease - stored with VAPID key)
+    await kmsUser.setPushSubscription(storedSub);
 
-    // Create lease with subscription reference
+    // Create lease (NO subs parameter - worker reads subscription from VAPID key)
     const userId = 'demouser@ats.run';
-    const pushServiceUrl = new URL(rawSub.endpoint);
-    const subs = [
-      {
-        endpoint: rawSub.endpoint,
-        aud: pushServiceUrl.origin,
-        eid: eid,
-      },
-    ];
     const ttlHours = 24;
 
-    const result = await kmsUser.createLease({ userId, subs, ttlHours });
+    const result = await kmsUser.createLease({ userId, ttlHours });
     console.log('[Full Demo] Lease created:', result);
 
     // Display success

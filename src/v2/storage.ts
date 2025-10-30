@@ -12,7 +12,7 @@
  * initializes the database on first use with lazy loading via getDB().
  */
 
-import type { WrappedKey, KeyMetadata, AuditEntryV2, LeaseRecord } from './types';
+import type { WrappedKey, KeyMetadata, AuditEntryV2, LeaseRecord, StoredPushSubscription } from './types';
 import { buildKeyWrapAAD } from './crypto-utils';
 
 // ============================================================================
@@ -545,4 +545,104 @@ export async function deleteExpiredLeases(): Promise<number> {
       reject(new Error('Failed to delete expired leases'));
     };
   });
+}
+
+// ============================================================================
+// Push Subscription Storage Operations
+// ============================================================================
+
+/**
+ * Set push subscription for the current VAPID key.
+ *
+ * This updates the subscription field of the VAPID key record. There can only
+ * be one VAPID key (enforced by getVAPIDKid logic), and only one subscription
+ * per VAPID key.
+ *
+ * @param subscription - Push subscription data from PushManager.subscribe()
+ * @throws Error if no VAPID key found or multiple VAPID keys exist
+ */
+export async function setPushSubscription(subscription: StoredPushSubscription): Promise<void> {
+  // Get all keys and find the VAPID key
+  const allKeys = await getAllWrappedKeys();
+  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+
+  if (vapidKeys.length === 0) {
+    throw new Error('No VAPID key found. Generate a VAPID key first.');
+  }
+
+  if (vapidKeys.length > 1) {
+    throw new Error('Multiple VAPID keys found. Cannot determine which to update.');
+  }
+
+  const vapidKey = vapidKeys[0];
+  if (!vapidKey) {
+    throw new Error('No VAPID key found after filtering');
+  }
+
+  // Update the VAPID key record with the subscription
+  const updatedKey: WrappedKey = {
+    ...vapidKey,
+    subscription,
+  };
+
+  // Write back to database
+  await put('keys', updatedKey);
+}
+
+/**
+ * Remove push subscription from the current VAPID key.
+ *
+ * @throws Error if no VAPID key found or multiple VAPID keys exist
+ */
+export async function removePushSubscription(): Promise<void> {
+  // Get all keys and find the VAPID key
+  const allKeys = await getAllWrappedKeys();
+  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+
+  if (vapidKeys.length === 0) {
+    throw new Error('No VAPID key found');
+  }
+
+  if (vapidKeys.length > 1) {
+    throw new Error('Multiple VAPID keys found. Cannot determine which to update.');
+  }
+
+  const vapidKey = vapidKeys[0];
+  if (!vapidKey) {
+    throw new Error('No VAPID key found after filtering');
+  }
+
+  // Remove the subscription field (don't set to undefined, delete it)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { subscription: _, ...updatedKey } = vapidKey;
+
+  // Write back to database
+  await put('keys', updatedKey);
+}
+
+/**
+ * Get push subscription from the current VAPID key.
+ *
+ * @returns Push subscription or null if not set
+ * @throws Error if no VAPID key found or multiple VAPID keys exist
+ */
+export async function getPushSubscription(): Promise<StoredPushSubscription | null> {
+  // Get all keys and find the VAPID key
+  const allKeys = await getAllWrappedKeys();
+  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+
+  if (vapidKeys.length === 0) {
+    throw new Error('No VAPID key found');
+  }
+
+  if (vapidKeys.length > 1) {
+    throw new Error('Multiple VAPID keys found. Cannot determine which to read.');
+  }
+
+  const vapidKey = vapidKeys[0];
+  if (!vapidKey) {
+    throw new Error('No VAPID key found after filtering');
+  }
+
+  return vapidKey.subscription ?? null;
 }

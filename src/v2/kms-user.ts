@@ -28,6 +28,7 @@ import type {
   AuditEntryV2,
   LeaseRecord,
   LeaseVerificationResult,
+  StoredPushSubscription,
 } from './types.js';
 import { formatError } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
@@ -818,5 +819,43 @@ export class KMSUser {
       enrollmentId,
       credentials,
     });
+  }
+
+  // ============================================================================
+  // Push Subscription Methods
+  // ============================================================================
+
+  /**
+   * Set push subscription for the current VAPID key.
+   *
+   * This stores the push subscription data with the VAPID key record, allowing
+   * leases and JWTs to automatically use the subscription without passing it
+   * on every call.
+   *
+   * @param subscription - Push subscription data from PushManager.subscribe()
+   * @returns Success result
+   */
+  async setPushSubscription(subscription: StoredPushSubscription): Promise<{ success: boolean }> {
+    return this.sendRequest<{ success: boolean }>('setPushSubscription', {
+      subscription,
+    });
+  }
+
+  /**
+   * Remove push subscription from the current VAPID key.
+   *
+   * @returns Success result
+   */
+  async removePushSubscription(): Promise<{ success: boolean }> {
+    return this.sendRequest<{ success: boolean }>('removePushSubscription', {});
+  }
+
+  /**
+   * Get push subscription from the current VAPID key.
+   *
+   * @returns Push subscription or null if not set
+   */
+  async getPushSubscription(): Promise<{ subscription: StoredPushSubscription | null }> {
+    return this.sendRequest<{ subscription: StoredPushSubscription | null }>('getPushSubscription', {});
   }
 }

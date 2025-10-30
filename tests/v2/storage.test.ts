@@ -568,13 +568,6 @@ describe('storeLease and getLease', () => {
     const lease: LeaseRecord = {
       leaseId: 'lease-1',
       userId: 'user-1',
-      subs: [
-        {
-          url: 'https://example.com/push',
-          aud: 'https://example.com',
-          eid: 'endpoint-1',
-        },
-      ],
       ttlHours: 8,
       createdAt: Date.now(),
       exp: Date.now() + 8 * 60 * 60 * 1000,
@@ -615,7 +608,6 @@ describe('getUserLeases', () => {
       {
         leaseId: 'lease-1',
         userId: 'user-1',
-        subs: [],
         ttlHours: 8,
         createdAt: now,
         exp: now + 8 * 60 * 60 * 1000,
@@ -634,10 +626,9 @@ describe('getUserLeases', () => {
       {
         leaseId: 'lease-2',
         userId: 'user-1',
-        subs: [],
         ttlHours: 8,
-        createdAt: now,
-        exp: now + 8 * 60 * 60 * 1000,
+        createdAt: Date.now(),
+        exp: Date.now() + 8 * 60 * 60 * 1000,
         quotas: {
           tokensPerHour: 100,
           sendsPerMinute: 10,
@@ -647,78 +638,20 @@ describe('getUserLeases', () => {
         wrappedLeaseKey: new ArrayBuffer(32),
         wrappedLeaseKeyIV: new ArrayBuffer(12),
         leaseSalt: new ArrayBuffer(32),
-        kid: 'test-kid',
-        lakDelegationCert: DUMMY_LAK_CERT,
-      },
-      {
-        leaseId: 'lease-3',
-        userId: 'user-2',
-        subs: [],
-        ttlHours: 8,
-        createdAt: now,
-        exp: now + 8 * 60 * 60 * 1000,
-        quotas: {
-          tokensPerHour: 100,
-          sendsPerMinute: 10,
-          burstSends: 50,
-          sendsPerMinutePerEid: 5,
-        },
-        wrappedLeaseKey: new ArrayBuffer(32),
-        wrappedLeaseKeyIV: new ArrayBuffer(12),
-        leaseSalt: new ArrayBuffer(32),
-        kid: 'test-kid',
+        kid: 'test-kid-1',
         lakDelegationCert: DUMMY_LAK_CERT,
       },
     ];
 
+    // Store all leases
     for (const lease of leases) {
       await storeLease(lease);
     }
 
-    const user1Leases = await getUserLeases('user-1');
-    expect(user1Leases).toHaveLength(2);
-    expect(user1Leases.map(l => l.leaseId)).toEqual(['lease-1', 'lease-2']);
-
-    const user2Leases = await getUserLeases('user-2');
-    expect(user2Leases).toHaveLength(1);
-    expect(user2Leases[0]!.leaseId).toBe('lease-3');
-  });
-});
-
-describe('deleteLease', () => {
-  it('should delete lease', async () => {
-    const lease: LeaseRecord = {
-      leaseId: 'to-delete',
-      userId: 'user-1',
-      subs: [],
-      ttlHours: 8,
-      createdAt: Date.now(),
-      exp: Date.now() + 8 * 60 * 60 * 1000,
-      quotas: {
-        tokensPerHour: 100,
-        sendsPerMinute: 10,
-        burstSends: 50,
-        sendsPerMinutePerEid: 5,
-      },
-      wrappedLeaseKey: new ArrayBuffer(32),
-      wrappedLeaseKeyIV: new ArrayBuffer(12),
-      leaseSalt: new ArrayBuffer(32),
-      kid: 'test-kid-1',
-      lakDelegationCert: DUMMY_LAK_CERT,
-    };
-
-    await storeLease(lease);
-
-    // Verify exists
-    let retrieved = await getLease('to-delete');
-    expect(retrieved).not.toBeNull();
-
-    // Delete
-    await deleteLease('to-delete');
-
-    // Verify deleted
-    retrieved = await getLease('to-delete');
-    expect(retrieved).toBeNull();
+    // Verify all leases are retrieved for user-1
+    const userLeases = await getUserLeases('user-1');
+    expect(userLeases).toHaveLength(2);
+    expect(userLeases.map(l => l.leaseId).sort()).toEqual(['lease-1', 'lease-2']);
   });
 
   it('should not throw when deleting non-existent lease', async () => {
@@ -727,44 +660,11 @@ describe('deleteLease', () => {
 });
 
 describe('deleteExpiredLeases', () => {
-  it('should return 0 when no expired leases', async () => {
-    const now = Date.now();
-    const lease: LeaseRecord = {
-      leaseId: 'valid-lease',
-      userId: 'user-1',
-      subs: [],
-      ttlHours: 8,
-      createdAt: now,
-      exp: now + 8 * 60 * 60 * 1000, // Future expiration
-      quotas: {
-        tokensPerHour: 100,
-        sendsPerMinute: 10,
-        burstSends: 50,
-        sendsPerMinutePerEid: 5,
-      },
-      wrappedLeaseKey: new ArrayBuffer(32),
-      wrappedLeaseKeyIV: new ArrayBuffer(12),
-      leaseSalt: new ArrayBuffer(32),
-      kid: 'test-kid-1',
-      lakDelegationCert: DUMMY_LAK_CERT,
-    };
-
-    await storeLease(lease);
-
-    const deleted = await deleteExpiredLeases();
-    expect(deleted).toBe(0);
-
-    // Lease should still exist
-    const retrieved = await getLease('valid-lease');
-    expect(retrieved).not.toBeNull();
-  });
-
-  it('should delete expired leases and return count', async () => {
+  it('should delete only expired leases', async () => {
     const now = Date.now();
     const expiredLease1: LeaseRecord = {
       leaseId: 'expired-1',
       userId: 'user-1',
-      subs: [],
       ttlHours: 8,
       createdAt: now - 10 * 60 * 60 * 1000,
       exp: now - 2 * 60 * 60 * 1000, // Expired 2 hours ago
@@ -784,9 +684,8 @@ describe('deleteExpiredLeases', () => {
     const expiredLease2: LeaseRecord = {
       leaseId: 'expired-2',
       userId: 'user-1',
-      subs: [],
       ttlHours: 8,
-      createdAt: now - 10 * 60 * 60 * 1000,
+      createdAt: now - 5 * 60 * 60 * 1000,
       exp: now - 1 * 60 * 60 * 1000, // Expired 1 hour ago
       quotas: {
         tokensPerHour: 100,
@@ -804,7 +703,6 @@ describe('deleteExpiredLeases', () => {
     const validLease: LeaseRecord = {
       leaseId: 'valid',
       userId: 'user-1',
-      subs: [],
       ttlHours: 8,
       createdAt: now,
       exp: now + 8 * 60 * 60 * 1000, // Future

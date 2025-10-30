@@ -7,6 +7,14 @@
 
 import { KMSUser, type StatusResult } from '@/kms-user';
 import type { AuditEntryV2 } from '@/types';
+import {
+  registerServiceWorker,
+  subscribeToPush,
+  unsubscribeFromPush,
+  convertPushSubscriptionToStored,
+  isPushSupported,
+  base64UrlToUint8Array,
+} from './push-utils.js';
 
 console.log('[Full Demo] Parent PWA initializing...');
 
@@ -101,6 +109,18 @@ async function initKMS(): Promise<StatusResult> {
 
     // Setup postMessage listener for setup completion callbacks
     window.addEventListener('message', handleSetupComplete);
+
+    // Register service worker for push notifications (Phase B)
+    if (isPushSupported()) {
+      try {
+        await registerServiceWorker();
+        console.log('[Full Demo] Service worker registered for push notifications');
+      } catch (error) {
+        console.warn('[Full Demo] Service worker registration failed (push notifications will not work):', error);
+      }
+    } else {
+      console.warn('[Full Demo] Push notifications not supported in this browser');
+    }
 
     // Wait a moment for KIAK initialization to complete
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -226,10 +246,18 @@ async function displayVAPIDKeyInfo(): Promise<void> {
     const { leases } = await kmsUser.getUserLeases('demouser@ats.run');
     console.log('[Full Demo] User leases fetched:', leases);
 
-    // Filter for active (non-expired) leases
+    // Check all leases (both active and expired) for display
     const now = Date.now();
-    const activeLeases = leases.filter((lease) => lease.exp > now);
-    const expiredLeases = leases.filter((lease) => lease.exp <= now);
+    const allLeases = leases.map((lease) => {
+      const isExpired = lease.exp <= now;
+      const kidMatches = lease.kid === vapidInfo.kid;
+      const isValid = !isExpired && kidMatches;
+      return { ...lease, isExpired, kidMatches, isValid };
+    });
+
+    // Separate active and expired
+    const activeLeases = allLeases.filter((lease) => !lease.isExpired);
+    const expiredCount = allLeases.filter((lease) => lease.isExpired).length;
 
     // Use the dedicated vapid-info-section container
     const vapidInfoEl = document.getElementById('vapid-info-section');
@@ -238,31 +266,43 @@ async function displayVAPIDKeyInfo(): Promise<void> {
       return;
     }
 
-    // Build leases HTML
+    // Build leases HTML with validation fields
     let leasesHTML = '';
     if (activeLeases.length > 0) {
       leasesHTML = activeLeases
-        .map(
-          (lease) => `
-        <div class="artifact-card">
+        .map((lease) => {
+          // Style based on validity
+          const validStyle = lease.isValid
+            ? 'color: #28a745; font-weight: bold;'
+            : 'color: #dc3545; font-weight: bold;';
+          const kidMatchStyle = lease.kidMatches
+            ? 'color: #28a745;'
+            : 'color: #dc3545;';
+
+          return `
+        <div class="artifact-card" style="${lease.isValid ? '' : 'border-left: 3px solid #dc3545;'}">
           <div class="artifact-title">Lease ID</div>
           <div class="artifact-data"><code>${lease.leaseId}</code></div>
+          <div class="artifact-title">Valid</div>
+          <div class="artifact-data" style="${validStyle}">${lease.isValid ? '✅ Yes' : '❌ No'}</div>
+          <div class="artifact-title">Key ID Matches</div>
+          <div class="artifact-data" style="${kidMatchStyle}">${lease.kidMatches ? '✅ Yes' : '❌ No (stale)'}</div>
           <div class="artifact-title">VAPID Key ID</div>
-          <div class="artifact-data"><code>${lease.kid}</code></div>
+          <div class="artifact-data"><code style="font-size: 0.75rem;">${lease.kid}</code></div>
           <div class="artifact-title">Expires</div>
           <div class="artifact-data">${new Date(lease.exp).toLocaleString()}</div>
-          <div class="artifact-title">Subscriptions</div>
-          <div class="artifact-data">${lease.subs.length} endpoint(s)</div>
+          <div class="artifact-title">User ID</div>
+          <div class="artifact-data">${lease.userId}</div>
         </div>
-      `
-        )
+      `;
+        })
         .join('');
     } else {
       leasesHTML = '<div class="info-message">No active leases. Create a lease below to enable JWT signing.</div>';
     }
 
-    if (expiredLeases.length > 0) {
-      leasesHTML += `<div class="info-message" style="color: #888; font-size: 0.8rem;">${expiredLeases.length} expired lease(s) not shown</div>`;
+    if (expiredCount > 0) {
+      leasesHTML += `<div class="info-message" style="color: #888; font-size: 0.8rem;">${expiredCount} expired lease(s) not shown</div>`;
     }
 
     vapidInfoEl.innerHTML = `
@@ -290,7 +330,16 @@ async function displayVAPIDKeyInfo(): Promise<void> {
     document.getElementById('regenerate-vapid-btn')?.addEventListener('click', regenerateVAPIDKey);
   } catch (error) {
     console.error('[Full Demo] Failed to fetch VAPID key or leases:', error);
-    // Don't show error UI - it's okay if this fails (e.g., no VAPID key yet)
+
+    // Show a placeholder message in the artifacts section
+    const vapidInfoEl = document.getElementById('vapid-info-section');
+    if (vapidInfoEl) {
+      vapidInfoEl.innerHTML = `
+        <div class="info-message" style="color: #888;">
+          No VAPID key found. Set up authentication and the VAPID key will be generated automatically.
+        </div>
+      `;
+    }
   }
 }
 
@@ -455,63 +504,209 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
   }
 
   const html = `
-    <div id="lease-verification-results"></div>
-    <p>Generate a time-limited VAPID authorization lease for push subscriptions.</p>
-    <button id="create-lease-btn" class="operation-btn">🎫 Create Lease</button>
-    <button id="verify-leases-btn" class="operation-btn">🔍 Verify All Leases</button>
-    <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
-      <label for="jwt-count-input" style="font-size: 0.9rem;">JWTs to issue:</label>
-      <input
-        type="number"
-        id="jwt-count-input"
-        min="1"
-        max="10"
-        value="1"
-        style="width: 80px; padding: 0.5rem; border: 1px solid #333; background: #1a1a1a; color: #fff; border-radius: 4px;"
-      />
-      <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
+    <div class="operation-section">
+      <h3>📬 Push Notification Operations</h3>
+      <p>Manage push subscriptions and test notifications.</p>
+
+      <h4 style="margin-top: 1.5rem; font-size: 1rem; color: #888;">Step 1: Subscribe to Push</h4>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+        <button id="subscribe-push-btn" class="operation-btn" style="background-color: #007bff;">
+          🔔 Subscribe to Push
+        </button>
+        <button id="unsubscribe-push-btn" class="operation-btn" style="background-color: #6c757d;">
+          🔕 Unsubscribe from Push
+        </button>
+      </div>
+      <div id="push-subscription-status" class="info-message" style="margin-top: 0.5rem;"></div>
+
+      <h4 style="margin-top: 1.5rem; font-size: 1rem; color: #888;">Step 2: Send Test Notification</h4>
+      <button id="send-test-push-btn" class="operation-btn" style="background-color: #28a745; margin-top: 0.5rem;">
+        📬 Send Test Push Notification
+      </button>
+      <div class="info-message" style="color: #28a745; margin-top: 0.5rem;">
+        💡 Validates JWT and sends a test notification to your browser
+      </div>
     </div>
+
+
+    <div class="operation-section">
+      <h3>🎫 VAPID Lease Operations</h3>
+      <p>Generate time-limited VAPID authorization leases.</p>
+
+      <div id="lease-verification-results"></div>
+
+      <button id="create-lease-btn" class="operation-btn" style="margin-top: 0.5rem;">🎫 Create Lease</button>
+      <button id="verify-leases-btn" class="operation-btn" style="margin-top: 0.5rem;">🔍 Verify All Leases</button>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <label for="jwt-count-input" style="font-size: 0.9rem;">JWTs to issue:</label>
+        <input
+          type="number"
+          id="jwt-count-input"
+          min="1"
+          max="10"
+          value="1"
+          style="width: 80px; padding: 0.5rem; border: 1px solid #333; background: #1a1a1a; color: #fff; border-radius: 4px;"
+        />
+        <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
+      </div>
+    </div>
+
     <hr style="margin: 1.5rem 0; border: none; border-top: 2px solid #e2e8f0;">
-    <button id="regenerate-vapid-btn" class="operation-btn" style="background-color: #dc3545;">
-      🔄 Regenerate VAPID Key
-    </button>
-    <div class="info-message" style="color: #dc3545; margin-top: 0.5rem;">
-      ⚠️ Warning: Regenerating will invalidate all active leases!
+
+    <div class="operation-section">
+      <h3>⚙️ VAPID Key Management</h3>
+      <button id="regenerate-vapid-btn" class="operation-btn" style="background-color: #dc3545; margin-top: 0.5rem;">
+        🔄 Regenerate VAPID Key
+      </button>
+      <div class="info-message" style="color: #dc3545; margin-top: 0.5rem;">
+        ⚠️ Warning: Regenerating will invalidate all active leases!
+      </div>
     </div>
   `;
 
   leaseOperationEl.innerHTML = html;
 
+  // Update push subscription status
+  updatePushSubscriptionStatus();
+
   // Add event listeners
+  document.getElementById('subscribe-push-btn')?.addEventListener('click', subscribeToPushNotifications);
+  document.getElementById('unsubscribe-push-btn')?.addEventListener('click', unsubscribeFromPushNotifications);
   document.getElementById('create-lease-btn')?.addEventListener('click', () => createLease(status));
   document.getElementById('verify-leases-btn')?.addEventListener('click', () => verifyAllLeases());
   document.getElementById('issue-jwts-btn')?.addEventListener('click', () => issueJWTsFromLease());
+  document.getElementById('send-test-push-btn')?.addEventListener('click', sendTestPush);
   document.getElementById('regenerate-vapid-btn')?.addEventListener('click', regenerateVAPIDKey);
 }
 
 /**
- * Create a VAPID lease
+ * Update the push subscription status display
+ */
+async function updatePushSubscriptionStatus(): Promise<void> {
+  const statusEl = document.getElementById('push-subscription-status');
+  if (!statusEl) return;
+
+  try {
+    const { subscription } = await kmsUser.getPushSubscription();
+    if (subscription) {
+      statusEl.innerHTML = `
+        <div style="color: #28a745;">
+          ✅ Subscribed to push notifications
+          <br><strong>Endpoint ID:</strong> ${subscription.eid}
+          <br><strong>Created:</strong> ${new Date(subscription.createdAt).toLocaleString()}
+        </div>
+      `;
+    } else {
+      statusEl.innerHTML = '<div style="color: #888;">Not subscribed to push notifications</div>';
+    }
+  } catch (error) {
+    console.error('[Full Demo] Failed to get push subscription status:', error);
+    statusEl.innerHTML = '<div style="color: #888;">Unable to check subscription status</div>';
+  }
+}
+
+/**
+ * Subscribe to push notifications (Phase B)
+ */
+async function subscribeToPushNotifications(): Promise<void> {
+  try {
+    console.log('[Full Demo] Subscribing to push notifications...');
+
+    // Get VAPID public key
+    const vapidInfo = await kmsUser.getVAPIDPublicKey('demouser@ats.run');
+    if (!vapidInfo) {
+      throw new Error('No VAPID key exists. Please set up passphrase first.');
+    }
+
+    // Check if service worker is ready
+    if (!('serviceWorker' in navigator)) {
+      throw new Error('Service workers are not supported in this browser');
+    }
+
+    // Get service worker registration
+    const registration = await navigator.serviceWorker.ready;
+
+    // Create real push subscription via browser API
+    console.log('[Full Demo] Creating push subscription...');
+    const rawSub = await subscribeToPush(
+      registration,
+      base64UrlToUint8Array(vapidInfo.publicKey)
+    );
+    console.log('[Full Demo] Push subscription created:', rawSub.endpoint);
+
+    // Convert to stored format
+    const eid = 'demo-device'; // Could prompt user for device name
+    const storedSub = convertPushSubscriptionToStored(rawSub, eid);
+
+    // Store subscription in KMS (stored with VAPID key)
+    console.log('[Full Demo] Storing push subscription in KMS...');
+    console.log('[Full Demo] Subscription data:', storedSub);
+    const result = await kmsUser.setPushSubscription(storedSub);
+    console.log('[Full Demo] setPushSubscription result:', result);
+    console.log('[Full Demo] ✅ Push subscription stored with VAPID key');
+
+    // Update status display
+    await updatePushSubscriptionStatus();
+    await loadAuditLog();
+
+    alert('✅ Push subscription created successfully!\n\nYou can now create a lease and send test push notifications.');
+  } catch (error) {
+    console.error('[Full Demo] Push subscription failed:', error);
+    alert(`❌ Push subscription failed:\n\n${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Unsubscribe from push notifications (Phase B)
+ */
+async function unsubscribeFromPushNotifications(): Promise<void> {
+  try {
+    console.log('[Full Demo] Unsubscribing from push notifications...');
+
+    // Get service worker registration
+    const registration = await navigator.serviceWorker.ready;
+
+    // Unsubscribe from browser push
+    await unsubscribeFromPush(registration);
+
+    // Remove subscription from KMS
+    console.log('[Full Demo] Removing push subscription from KMS...');
+    await kmsUser.removePushSubscription();
+    console.log('[Full Demo] ✅ Push subscription removed from KMS');
+
+    // Update status display
+    await updatePushSubscriptionStatus();
+    await loadAuditLog();
+
+    alert('✅ Push subscription removed successfully!');
+  } catch (error) {
+    console.error('[Full Demo] Push unsubscribe failed:', error);
+    alert(`❌ Push unsubscribe failed:\n\n${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Create a VAPID lease (Phase B: requires existing push subscription)
  */
 async function createLease(status: { isSetup: boolean; methods: string[] }): Promise<void> {
   try {
     console.log('[Full Demo] Creating VAPID lease...');
 
-    // For demo, use simple subscription parameters
+    // Check if push subscription exists (required for lease creation in Phase 1)
+    const { subscription } = await kmsUser.getPushSubscription();
+    if (!subscription) {
+      alert('No push subscription found. Please subscribe to push notifications first.');
+      return;
+    }
+
+    // Create lease (NO subs parameter - worker reads subscription from VAPID key)
     const userId = 'demouser@ats.run';
-    const subs = [
-      {
-        url: 'https://demo-push-endpoint.example.com/subscription-1',
-        aud: 'https://demo-push-endpoint.example.com',
-        eid: 'sub-001',
-      },
-    ];
     const ttlHours = 24; // 24 hour lease
 
-    // Call createLease - iframe will automatically show modal to collect credentials
-    console.log('[Full Demo] Calling createLease with:', { userId, subs, ttlHours });
+    console.log('[Full Demo] Calling createLease with:', { userId, ttlHours });
     const result = await kmsUser.createLease({
       userId,
-      subs,
       ttlHours,
     });
     console.log('[Full Demo] Lease created:', result);
@@ -585,32 +780,40 @@ async function issueJWTsFromLease(): Promise<void> {
     const userId = 'demouser@ats.run';
     const { leases } = await kmsUser.getUserLeases(userId);
 
-    // Filter for active (non-expired) leases
+    // Get current VAPID key to filter leases by matching kid
+    const vapidInfo = await kmsUser.getVAPIDPublicKey(userId);
+    if (!vapidInfo) {
+      alert('No VAPID key found. Please set up passphrase first.');
+      return;
+    }
+
+    // Filter for active (non-expired) leases with matching kid
     const now = Date.now();
-    const activeLeases = leases.filter((lease) => lease.exp > now);
+    const activeLeases = leases.filter(
+      (lease) => lease.exp > now && lease.kid === vapidInfo.kid
+    );
 
     if (activeLeases.length === 0) {
-      alert('No active leases found. Please create a lease first.');
+      alert('No active leases found for current VAPID key. Please create a new lease.');
       return;
     }
 
     // Use the first active lease (in production, we'd let user select)
     const lease = activeLeases[0];
-    console.log(`[Full Demo] Using lease: ${lease.leaseId}`);
+    console.log(`[Full Demo] Using lease: ${lease.leaseId} (kid: ${lease.kid})`);
 
-    // Get the first subscription endpoint from the lease
-    if (lease.subs.length === 0) {
-      alert('Selected lease has no subscriptions');
+    // Get push subscription for endpoint info display
+    const { subscription } = await kmsUser.getPushSubscription();
+    if (!subscription) {
+      alert('No push subscription found. Please subscribe to push notifications first.');
       return;
     }
-    const endpoint = lease.subs[0];
 
-    // Issue JWTs
-    console.log(`[Full Demo] Issuing ${count} JWT(s) for endpoint ${endpoint.eid}...`);
+    // Issue JWTs (NO endpoint parameter - worker reads subscription from VAPID key)
+    console.log(`[Full Demo] Issuing ${count} JWT(s)...`);
     const startTime = performance.now();
     const jwts = await kmsUser.issueVAPIDJWTs({
       leaseId: lease.leaseId,
-      endpoint,
       count,
     });
     const duration = performance.now() - startTime;
@@ -644,11 +847,11 @@ async function issueJWTsFromLease(): Promise<void> {
         </div>
         <div class="artifact-card">
           <div class="artifact-title">Endpoint ID</div>
-          <div class="artifact-data"><code>${endpoint.eid}</code></div>
+          <div class="artifact-data"><code>${subscription.eid}</code></div>
         </div>
         <div class="artifact-card">
-          <div class="artifact-title">Audience</div>
-          <div class="artifact-data"><code>${endpoint.aud}</code></div>
+          <div class="artifact-title">Push Endpoint</div>
+          <div class="artifact-data" style="word-break: break-all;"><code style="font-size: 0.75rem;">${subscription.endpoint}</code></div>
         </div>
         <div class="artifact-card">
           <div class="artifact-title">Generation Time</div>
@@ -669,6 +872,202 @@ async function issueJWTsFromLease(): Promise<void> {
   } catch (error) {
     console.error('[Full Demo] JWT issuance failed:', error);
     alert(`JWT issuance failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Validate a VAPID JWT (Phase C: simulates relay server validation)
+ *
+ * Validates:
+ * - JWT format (3 parts: header.payload.signature)
+ * - Algorithm (must be ES256)
+ * - Claims (exp, aud, sub)
+ * - Signature (ECDSA-P256 verification against VAPID public key)
+ */
+async function validateVAPIDJWT(
+  jwt: string,
+  expectedAudience: string
+): Promise<{
+  valid: boolean;
+  reason?: string;
+  claims?: Record<string, unknown>;
+}> {
+  try {
+    // Split JWT into parts
+    const parts = jwt.split('.');
+    if (parts.length !== 3) {
+      return { valid: false, reason: 'Invalid JWT format (expected 3 parts)' };
+    }
+
+    const [headerB64, payloadB64, signatureB64] = parts;
+
+    // Decode and validate header
+    const header = JSON.parse(atob(headerB64!.replace(/-/g, '+').replace(/_/g, '/')));
+    if (header.alg !== 'ES256') {
+      return { valid: false, reason: `Unsupported algorithm: ${header.alg}` };
+    }
+
+    // Decode and validate payload
+    const payload = JSON.parse(atob(payloadB64!.replace(/-/g, '+').replace(/_/g, '/')));
+    const now = Math.floor(Date.now() / 1000);
+
+    // Check expiration
+    if (!payload.exp || typeof payload.exp !== 'number') {
+      return { valid: false, reason: 'Missing exp claim' };
+    }
+    if (payload.exp < now) {
+      return { valid: false, reason: 'JWT expired' };
+    }
+
+    // Check audience
+    if (!payload.aud || payload.aud !== expectedAudience) {
+      return {
+        valid: false,
+        reason: `Invalid audience (expected ${expectedAudience}, got ${payload.aud})`,
+      };
+    }
+
+    // Check subject
+    if (!payload.sub || typeof payload.sub !== 'string') {
+      return { valid: false, reason: 'Missing sub claim' };
+    }
+
+    // Get VAPID public key for signature verification
+    const vapidInfo = await kmsUser.getVAPIDPublicKey('demouser@ats.run');
+    if (!vapidInfo) {
+      return { valid: false, reason: 'No VAPID key available' };
+    }
+
+    // Import public key
+    const publicKeyBytes = base64UrlToUint8Array(vapidInfo.publicKey);
+    const publicKey = await crypto.subtle.importKey(
+      'raw',
+      publicKeyBytes,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify']
+    );
+
+    // Verify signature (DER-encoded from KMS)
+    const signatureBytes = base64UrlToUint8Array(signatureB64!);
+    const dataToVerify = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+
+    const valid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      publicKey,
+      signatureBytes,
+      dataToVerify
+    );
+
+    if (!valid) {
+      return { valid: false, reason: 'Signature verification failed' };
+    }
+
+    return { valid: true, claims: payload };
+  } catch (error) {
+    return {
+      valid: false,
+      reason: `Validation error: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * Send a test push notification (Phase C: mock push delivery)
+ */
+async function sendTestPush(): Promise<void> {
+  try {
+    console.log('[Full Demo] Sending test push...');
+
+    // Get subscription to retrieve endpoint for validation
+    const subResult = await kmsUser.getPushSubscription();
+    if (!subResult.subscription) {
+      alert('No push subscription available. Please create a lease first.');
+      return;
+    }
+
+    const sub = subResult.subscription;
+    const pushServiceUrl = new URL(sub.endpoint);
+
+    // Get active lease with matching kid
+    const userId = 'demouser@ats.run';
+    const { leases } = await kmsUser.getUserLeases(userId);
+
+    // Get current VAPID key to filter leases by matching kid
+    const vapidInfo = await kmsUser.getVAPIDPublicKey(userId);
+    if (!vapidInfo) {
+      alert('No VAPID key found. Please set up passphrase first.');
+      return;
+    }
+
+    const now = Date.now();
+    const activeLeases = leases.filter(
+      (lease) => lease.exp > now && lease.kid === vapidInfo.kid
+    );
+
+    if (activeLeases.length === 0) {
+      alert('No active leases found for current VAPID key. Please create a new lease.');
+      return;
+    }
+
+    const lease = activeLeases[0];
+    console.log(`[Full Demo] Using lease: ${lease.leaseId} (kid: ${lease.kid})`);
+
+    // Issue JWT (worker automatically uses subscription from VAPID key)
+    console.log('[Full Demo] Issuing JWT for push notification...');
+    const jwtResult = await kmsUser.issueVAPIDJWT({
+      leaseId: lease.leaseId!,
+    });
+
+    console.log('[Full Demo] JWT issued:', jwtResult.jwt.substring(0, 50) + '...');
+
+    // **VALIDATE JWT (simulates relay server validation)**
+    console.log('[Full Demo] Validating JWT...');
+    const validation = await validateVAPIDJWT(jwtResult.jwt, pushServiceUrl.origin);
+
+    if (!validation.valid) {
+      throw new Error(`JWT validation failed: ${validation.reason}`);
+    }
+
+    console.log('[Full Demo] ✅ JWT validated successfully', validation.claims);
+
+    // Send mock push to service worker
+    const registration = await navigator.serviceWorker.ready;
+    if (!registration.active) {
+      throw new Error('No active service worker');
+    }
+
+    const messageChannel = new MessageChannel();
+    await new Promise<void>((resolve, reject) => {
+      messageChannel.port1.onmessage = (event) => {
+        if (event.data.success) {
+          resolve();
+        } else {
+          reject(new Error(event.data.error));
+        }
+      };
+
+      registration.active!.postMessage(
+        {
+          type: 'mock-push',
+          endpoint: sub.endpoint,
+          jwt: jwtResult.jwt,
+          payload: {
+            title: 'ATS KMS Demo',
+            body: 'Test notification - JWT validated successfully!',
+            tag: 'test-push',
+            data: { timestamp: Date.now() },
+          },
+        },
+        [messageChannel.port2]
+      );
+    });
+
+    console.log('[Full Demo] ✅ Push notification sent successfully');
+    alert('Push notification sent! Check your notifications.\n\nJWT was validated before delivery.');
+  } catch (error) {
+    console.error('[Full Demo] Failed to send push:', error);
+    alert(`Push send failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

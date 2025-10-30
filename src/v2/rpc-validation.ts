@@ -337,32 +337,47 @@ export function validateCreateLease(params: unknown): {
   return result;
 }
 
-export function validateExtendLease(params: unknown): {
-  leaseId: string;
+export function validateExtendLeases(params: unknown): {
+  leaseIds: string[];
   userId: string;
   requestAuth?: boolean;
   credentials?: AuthCredentials;
 } {
-  const p = validateParamsObject('extendLease', params);
+  const p = validateParamsObject('extendLeases', params);
+
+  // Validate leaseIds array
+  if (!Array.isArray(p.leaseIds)) {
+    throw new Error(`RPC extendLeases: Invalid leaseIds - expected array, got ${typeof p.leaseIds}`);
+  }
+  if (p.leaseIds.length === 0) {
+    throw new Error(`RPC extendLeases: leaseIds array cannot be empty`);
+  }
+  const leaseIds = p.leaseIds.map((id: unknown, index: number) => {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new Error(`RPC extendLeases: Invalid leaseId at index ${index} - expected non-empty string`);
+    }
+    return id;
+  });
+
   const result: {
-    leaseId: string;
+    leaseIds: string[];
     userId: string;
     requestAuth?: boolean;
     credentials?: AuthCredentials;
   } = {
-    leaseId: validateString('extendLease', 'leaseId', p.leaseId),
-    userId: validateString('extendLease', 'userId', p.userId),
+    leaseIds,
+    userId: validateString('extendLeases', 'userId', p.userId),
   };
 
   // requestAuth is optional boolean
-  const requestAuth = validateOptionalBoolean('extendLease', 'requestAuth', p.requestAuth);
+  const requestAuth = validateOptionalBoolean('extendLeases', 'requestAuth', p.requestAuth);
   if (requestAuth !== undefined) {
     result.requestAuth = requestAuth;
   }
 
   // credentials are optional (provided by client after auth modal)
   if (p.credentials !== undefined) {
-    result.credentials = validateAuthCredentials('extendLease', p.credentials);
+    result.credentials = validateAuthCredentials('extendLeases', p.credentials);
   }
 
   return result;

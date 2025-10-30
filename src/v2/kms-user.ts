@@ -104,7 +104,7 @@ export interface LeaseResult {
 }
 
 /**
- * Extend lease result
+ * Extend lease result (single lease)
  */
 export interface ExtendLeaseResult {
   leaseId: string;
@@ -112,6 +112,26 @@ export interface ExtendLeaseResult {
   iat: number;
   kid: string;
   autoExtend: boolean;
+}
+
+/**
+ * Individual lease result in batch operation
+ */
+export interface ExtendLeasesItemResult {
+  leaseId: string;
+  status: 'extended' | 'skipped';
+  reason?: string;
+  result?: ExtendLeaseResult;
+}
+
+/**
+ * Batch extend leases result
+ */
+export interface ExtendLeasesResult {
+  results: ExtendLeasesItemResult[];
+  extended: number;
+  skipped: number;
+  failed: number;
 }
 
 /**
@@ -1047,81 +1067,69 @@ export class KMSUser {
   }
 
   /**
-   * Extend an existing lease.
+   * Extend one or more existing leases.
    *
-   * Updates the lease expiration to 30 days from now. If the lease has `autoExtend=true`,
-   * this can be called without re-authentication. If `autoExtend=false`, the user will be
-   * prompted to unlock the KMS before extending.
+   * Updates lease expirations to 30 days from now. This method accepts an array of lease IDs
+   * and processes them in batch, returning detailed results for each lease.
    *
    * **Auto-Extend Behavior:**
    * - `autoExtend=true` (default): Extension works without authentication
-   * - `autoExtend=false`: Requires authentication (set `requestAuth: true`)
+   * - `autoExtend=false`: Requires authentication OR will be skipped if `requestAuth` not set
    *
-   * **Belt-and-Suspenders Check:** This method verifies the lease's `autoExtend` flag
-   * before sending the request. If the lease has `autoExtend=false` and you don't set
-   * `requestAuth: true`, the request will be rejected immediately without contacting the KMS.
+   * **Smart Skipping:** If `requestAuth` is not set, the worker will automatically skip
+   * non-extendable leases (autoExtend=false) and return them with status='skipped'. This
+   * allows "Extend All Leases" to gracefully handle mixed lease types.
    *
-   * **Security Note:** The lease must be for the current VAPID key. If the VAPID key has
-   * been regenerated, the extension will fail and a new lease must be created.
+   * **Single Authentication:** When `requestAuth=true`, the user authenticates once and
+   * all leases (both extendable and non-extendable) are processed with credentials.
+   *
+   * **Security Note:** Leases must be for the current VAPID key. If the VAPID key has
+   * been regenerated, extensions will fail and new leases must be created.
    *
    * @category VAPID Lease Operations
    *
-   * @param leaseId - The ID of the lease to extend
-   * @param userId - The user ID who owns the lease
+   * @param leaseIds - Array of lease IDs to extend
+   * @param userId - The user ID who owns the leases
    * @param options - Extension options
-   * @param options.requestAuth - Set to true to request user authentication for non-extendable leases
+   * @param options.requestAuth - Set to true to request user authentication for all leases
    *
-   * @returns Promise resolving to extended lease information
+   * @returns Promise resolving to batch result with per-lease details
    *
-   * @throws {Error} Lease not found
-   * @throws {Error} Authentication required (if autoExtend=false and requestAuth not set)
-   * @throws {Error} Lease is for different VAPID key
    * @throws {Error} KMS not initialized
    *
    * @example
    * ```typescript
-   * // Extend an auto-extendable lease (no auth required)
-   * const result = await kmsUser.extendLease('lease-abc-123', 'user@example.com');
-   * console.log('New expiration:', new Date(result.exp));
+   * // Extend multiple auto-extendable leases (skips non-extendable)
+   * const result = await kmsUser.extendLeases(
+   *   ['lease-abc-123', 'lease-def-456', 'lease-ghi-789'],
+   *   'user@example.com'
+   * );
+   * console.log(`Extended: ${result.extended}, Skipped: ${result.skipped}`);
    *
-   * // Extend a non-extendable lease (requires auth)
-   * const result = await kmsUser.extendLease('lease-def-456', 'user@example.com', { requestAuth: true });
-   * console.log('New expiration:', new Date(result.exp));
+   * // Extend with authentication (processes all leases)
+   * const result = await kmsUser.extendLeases(
+   *   ['lease-abc-123', 'lease-def-456'],
+   *   'user@example.com',
+   *   { requestAuth: true }
+   * );
    * ```
    *
    * @see {@link createLease} to create a new lease
    * @see {@link verifyLease} to verify lease validity
    */
-  async extendLease(
-    leaseId: string,
+  async extendLeases(
+    leaseIds: string[],
     userId: string,
     options?: { requestAuth?: boolean }
-  ): Promise<ExtendLeaseResult> {
-    // Belt-and-suspenders check: Verify lease autoExtend status before sending request
-    // This prevents unnecessary round-trips for leases that can't be extended without auth
-    const { leases } = await this.getUserLeases(userId);
-    const lease = leases.find((l) => l.leaseId === leaseId);
-
-    if (!lease) {
-      throw new Error(`Lease not found: ${leaseId}`);
-    }
-
-    // If lease doesn't allow auto-extend and user didn't request auth, reject immediately
-    if (lease.autoExtend === false && !options?.requestAuth) {
-      throw new Error(
-        `Cannot extend non-extendable lease without authentication. ` +
-        `Set requestAuth: true to prompt for user authentication.`
-      );
-    }
-
+  ): Promise<ExtendLeasesResult> {
     // Show iframe if authentication is requested (needed for modal to be visible)
     if (options?.requestAuth && this.iframe) {
       this.iframe.style.display = 'block';
     }
 
     try {
-      const result = await this.sendRequest<ExtendLeaseResult>('extendLease', {
-        leaseId,
+      const result = await this.sendRequest<ExtendLeasesResult>('extendLeases', {
+        leaseIds,
         userId,
         requestAuth: options?.requestAuth ?? false,
       });

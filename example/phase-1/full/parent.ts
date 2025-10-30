@@ -838,20 +838,22 @@ async function extendAllLeases(): Promise<void> {
       return;
     }
 
-    // Extend each active lease
-    const results = [];
-    for (const lease of activeLeases) {
-      try {
-        // Pass requestAuth: true for non-extendable leases
-        const options = lease.autoExtend === false ? { requestAuth: true } : undefined;
-        const result = await kmsUser.extendLease(lease.leaseId, userId, options);
-        results.push({ lease, result, success: true, error: null });
-        console.log(`[Full Demo] ✅ Extended lease ${lease.leaseId}`);
-      } catch (error) {
-        results.push({ lease, result: null, success: false, error: error instanceof Error ? error.message : String(error) });
-        console.error(`[Full Demo] ❌ Failed to extend lease ${lease.leaseId}:`, error);
-      }
-    }
+    // Extend all active leases in batch (worker will skip non-extendable leases)
+    const leaseIds = activeLeases.map((l) => l.leaseId);
+    const batchResult = await kmsUser.extendLeases(leaseIds, userId);
+
+    console.log(`[Full Demo] Batch result: ${batchResult.extended} extended, ${batchResult.skipped} skipped`);
+
+    // Map results back to leases for display
+    const results = batchResult.results.map((itemResult) => {
+      const lease = activeLeases.find((l) => l.leaseId === itemResult.leaseId);
+      return {
+        lease: lease!,
+        result: itemResult.result,
+        success: itemResult.status === 'extended',
+        error: itemResult.reason || null,
+      };
+    });
 
     // Display results
     const resultsHtml = results
@@ -958,20 +960,22 @@ async function extendAllLeasesWithAuth(): Promise<void> {
       return;
     }
 
-    // Extend each active lease, passing requestAuth: true for non-extendable leases
-    const results = [];
-    for (const lease of activeLeases) {
-      try {
-        // Always pass requestAuth: true for non-extendable leases, undefined for extendable
-        const options = lease.autoExtend === false ? { requestAuth: true } : undefined;
-        const result = await kmsUser.extendLease(lease.leaseId, userId, options);
-        results.push({ lease, result, success: true, error: null });
-        console.log(`[Full Demo] ✅ Extended lease ${lease.leaseId} ${lease.autoExtend === false ? '(with auth)' : ''}`);
-      } catch (error) {
-        results.push({ lease, result: null, success: false, error: error instanceof Error ? error.message : String(error) });
-        console.error(`[Full Demo] ❌ Failed to extend lease ${lease.leaseId}:`, error);
-      }
-    }
+    // Extend all active leases in batch with authentication (single auth for all non-extendable leases)
+    const leaseIds = activeLeases.map((l) => l.leaseId);
+    const batchResult = await kmsUser.extendLeases(leaseIds, userId, { requestAuth: true });
+
+    console.log(`[Full Demo] Batch result with auth: ${batchResult.extended} extended, ${batchResult.skipped} skipped`);
+
+    // Map results back to leases for display
+    const results = batchResult.results.map((itemResult) => {
+      const lease = activeLeases.find((l) => l.leaseId === itemResult.leaseId);
+      return {
+        lease: lease!,
+        result: itemResult.result,
+        success: itemResult.status === 'extended',
+        error: itemResult.reason || null,
+      };
+    });
 
     // Display results
     const resultsHtml = results

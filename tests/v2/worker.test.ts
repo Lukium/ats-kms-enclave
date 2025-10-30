@@ -772,7 +772,7 @@ describe('createLease', () => {
   });
 });
 
-describe('extendLease', () => {
+describe('extendLeases', () => {
   const passphrase = 'extend-lease-passphrase-123';
   let leaseId: string;
   let kid: string;
@@ -799,21 +799,29 @@ describe('extendLease', () => {
 
   it('should extend lease successfully', async () => {
     // Extend the lease twice and verify exp increases
-    const extendResponse1 = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    const extendResponse1 = await handleMessage(createRequest('extendLeases', { leaseIds: [leaseId], userId: 'user-123' }));
     expect(extendResponse1.error).toBeUndefined();
-    const extendResult1 = getResult<{ leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean }>(
-      extendResponse1
-    );
+    const batchResult1 = getResult<{
+      results: Array<{ leaseId: string; status: string; result?: { leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean } }>;
+      extended: number;
+    }>(extendResponse1);
+    expect(batchResult1.extended).toBe(1);
+    expect(batchResult1.results).toHaveLength(1);
+    const extendResult1 = batchResult1.results[0]!.result!;
 
     // Wait a bit to ensure timestamps differ
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Extend again
-    const extendResponse2 = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    const extendResponse2 = await handleMessage(createRequest('extendLeases', { leaseIds: [leaseId], userId: 'user-123' }));
     expect(extendResponse2.error).toBeUndefined();
-    const extendResult2 = getResult<{ leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean }>(
-      extendResponse2
-    );
+    const batchResult2 = getResult<{
+      results: Array<{ leaseId: string; status: string; result?: { leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean } }>;
+      extended: number;
+    }>(extendResponse2);
+    expect(batchResult2.extended).toBe(1);
+    expect(batchResult2.results).toHaveLength(1);
+    const extendResult2 = batchResult2.results[0]!.result!;
 
     // Verify basic properties
     expect(extendResult2.leaseId).toBe(leaseId);
@@ -844,19 +852,24 @@ describe('extendLease', () => {
 
     // Extend the lease - must provide credentials for non-extendable leases
     const extendResponse = await handleMessage(
-      createRequest('extendLease', {
-        leaseId: leaseIdNoAuto,
+      createRequest('extendLeases', {
+        leaseIds: [leaseIdNoAuto],
         userId: 'user-123',
+        requestAuth: true,
         credentials: createPassphraseCredentials(passphrase),
       })
     );
 
     expect(extendResponse.error).toBeUndefined();
-    const extendResult = getResult<{ autoExtend: boolean }>(extendResponse);
-    expect(extendResult.autoExtend).toBe(false);
+    const batchResult = getResult<{
+      results: Array<{ status: string; result?: { autoExtend: boolean } }>;
+      extended: number;
+    }>(extendResponse);
+    expect(batchResult.extended).toBe(1);
+    expect(batchResult.results[0]!.result!.autoExtend).toBe(false);
   });
 
-  it('should reject extending non-extendable lease without credentials', async () => {
+  it('should skip extending non-extendable lease without requestAuth', async () => {
     // Create a lease with autoExtend=false
     const leaseResponse = await handleMessage(
       createRequest('createLease', {
@@ -869,11 +882,17 @@ describe('extendLease', () => {
     );
     const leaseIdNoAuto = getResult<{ leaseId: string }>(leaseResponse).leaseId;
 
-    // Attempt to extend without credentials - should fail
-    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId: leaseIdNoAuto, userId: 'user-123' }));
+    // Attempt to extend without requestAuth - should skip with reason
+    const extendResponse = await handleMessage(createRequest('extendLeases', { leaseIds: [leaseIdNoAuto], userId: 'user-123' }));
 
-    expect(extendResponse.error).toBeDefined();
-    expect(extendResponse.error).toContain('Cannot extend non-extendable lease without authentication');
+    expect(extendResponse.error).toBeUndefined();
+    const batchResult = getResult<{
+      results: Array<{ status: string; reason?: string }>;
+      skipped: number;
+    }>(extendResponse);
+    expect(batchResult.skipped).toBe(1);
+    expect(batchResult.results[0]!.status).toBe('skipped');
+    expect(batchResult.results[0]!.reason).toContain('autoExtend=false');
   });
 
   it('should allow multiple extensions', async () => {
@@ -882,10 +901,10 @@ describe('extendLease', () => {
     // Extend 3 times
     for (let i = 0; i < 3; i++) {
       await new Promise((resolve) => setTimeout(resolve, 10));
-      const extendResponse = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+      const extendResponse = await handleMessage(createRequest('extendLeases', { leaseIds: [leaseId], userId: 'user-123' }));
       expect(extendResponse.error).toBeUndefined();
-      const extendResult = getResult<{ exp: number }>(extendResponse);
-      expirations.push(extendResult.exp);
+      const batchResult = getResult<{ results: Array<{ result?: { exp: number } }> }>(extendResponse);
+      expirations.push(batchResult.results[0]!.result!.exp);
     }
 
     // Each expiration should be greater than the previous
@@ -893,27 +912,39 @@ describe('extendLease', () => {
     expect(expirations[2]).toBeGreaterThan(expirations[1]!);
   });
 
-  it('should reject extending non-existent lease', async () => {
-    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId: 'lease-nonexistent', userId: 'user-123' }));
+  it('should skip extending non-existent lease', async () => {
+    const extendResponse = await handleMessage(createRequest('extendLeases', { leaseIds: ['lease-nonexistent'], userId: 'user-123' }));
 
-    expect(extendResponse.error).toBeDefined();
-    expect(extendResponse.error).toContain('not found');
+    expect(extendResponse.error).toBeUndefined();
+    const batchResult = getResult<{
+      results: Array<{ status: string; reason?: string }>;
+      skipped: number;
+    }>(extendResponse);
+    expect(batchResult.skipped).toBe(1);
+    expect(batchResult.results[0]!.status).toBe('skipped');
+    expect(batchResult.results[0]!.reason).toContain('not found');
   });
 
-  it('should reject extending lease for different VAPID key', async () => {
+  it('should skip extending lease for different VAPID key', async () => {
     // Regenerate VAPID key
     await handleMessage(createRequest('regenerateVAPID', { credentials: createPassphraseCredentials(passphrase) }));
 
     // Try to extend lease created with old VAPID key
-    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    const extendResponse = await handleMessage(createRequest('extendLeases', { leaseIds: [leaseId], userId: 'user-123' }));
 
-    expect(extendResponse.error).toBeDefined();
-    expect(extendResponse.error).toContain('different VAPID key');
+    expect(extendResponse.error).toBeUndefined();
+    const batchResult = getResult<{
+      results: Array<{ status: string; reason?: string }>;
+      skipped: number;
+    }>(extendResponse);
+    expect(batchResult.skipped).toBe(1);
+    expect(batchResult.results[0]!.status).toBe('skipped');
+    expect(batchResult.results[0]!.reason).toContain('different VAPID key');
   });
 
   it('should create audit log entry for extension', async () => {
     // Extend the lease
-    await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    await handleMessage(createRequest('extendLeases', { leaseIds: [leaseId], userId: 'user-123' }));
 
     // Get audit log
     const auditResponse = await handleMessage(createRequest('getAuditLog', {}));
@@ -928,11 +959,12 @@ describe('extendLease', () => {
 
   it('should update exp to 30 days from now', async () => {
     const beforeExtend = Date.now();
-    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    const extendResponse = await handleMessage(createRequest('extendLeases', { leaseIds: [leaseId], userId: 'user-123' }));
     const afterExtend = Date.now();
 
     expect(extendResponse.error).toBeUndefined();
-    const extendResult = getResult<{ exp: number }>(extendResponse);
+    const batchResult = getResult<{ results: Array<{ result?: { exp: number } }> }>(extendResponse);
+    const extendResult = batchResult.results[0]!.result!;
 
     // exp should be approximately 30 days from now
     const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;

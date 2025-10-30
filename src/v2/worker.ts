@@ -221,8 +221,8 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleCreateLease(validators.validateCreateLease(params), id);
         break;
 
-      case 'extendLease':
-        result = await handleExtendLease(validators.validateExtendLease(params), id);
+      case 'extendLeases':
+        result = await handleExtendLeases(validators.validateExtendLeases(params), id);
         break;
 
       case 'issueVAPIDJWT':
@@ -1063,93 +1063,185 @@ async function handleCreateLease(
  * If autoExtend is false on the lease, this operation requires authentication.
  * If autoExtend is true, this can be called without re-authentication.
  */
-async function handleExtendLease(
+/**
+ * Batch extend multiple leases with smart skipping.
+ *
+ * Processes an array of lease IDs and extends each one. If requestAuth is false
+ * and a lease has autoExtend=false, it will be skipped rather than throwing an error.
+ * This allows "Extend All Leases" to work gracefully with mixed lease types.
+ */
+async function handleExtendLeases(
   params: {
-    leaseId: string;
+    leaseIds: string[];
     userId: string;
     requestAuth?: boolean;
     credentials?: AuthCredentials;
   },
   requestId: string
-): Promise<{ leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean }> {
-  const { leaseId, credentials } = params;
+): Promise<{
+  results: Array<{
+    leaseId: string;
+    status: 'extended' | 'skipped';
+    reason?: string;
+    result?: { leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean };
+  }>;
+  extended: number;
+  skipped: number;
+  failed: number;
+}> {
+  const { leaseIds, credentials, requestAuth } = params;
+  const results: Array<{
+    leaseId: string;
+    status: 'extended' | 'skipped';
+    reason?: string;
+    result?: { leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean };
+  }> = [];
 
-  // Fetch existing lease
-  const existingLease = await getLease(leaseId);
-  if (!existingLease) {
-    throw new Error(`Lease not found: ${leaseId}`);
-  }
+  let extended = 0;
+  let skipped = 0;
+  let failed = 0;
 
-  // Check if autoExtend is disabled - if so, require and validate credentials
-  if (existingLease.autoExtend === false) {
-    if (!credentials) {
-      throw new Error(
-        'Cannot extend non-extendable lease without authentication. ' +
-        'Credentials are required for leases with autoExtend=false.'
-      );
-    }
-
-    // Validate the credentials by attempting unlock
+  // Validate credentials once if provided (for non-extendable leases)
+  let credentialsValid = false;
+  if (credentials) {
     try {
       await withUnlock(credentials, async (_mkek, _ms) => {
-        // Credentials are valid if withUnlock succeeds
-        // (No operation needed - validation is implicit in withUnlock success)
+        credentialsValid = true;
+        return Promise.resolve();
       });
     } catch (err: unknown) {
-      throw new Error(`Authentication failed: ${getErrorMessage(err)}`);
+      // If credentials are invalid, mark all non-extendable leases as skipped
+      for (const leaseId of leaseIds) {
+        const existingLease = await getLease(leaseId);
+        if (existingLease && existingLease.autoExtend === false) {
+          results.push({
+            leaseId,
+            status: 'skipped',
+            reason: `Authentication failed: ${getErrorMessage(err)}`,
+          });
+          skipped++;
+        }
+      }
+      if (skipped === leaseIds.length) {
+        return { results, extended, skipped, failed };
+      }
     }
   }
 
-  // Verify lease is for current VAPID key
-  const allKeys = await getAllWrappedKeys();
-  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
-  if (vapidKeys.length === 0) {
-    throw new Error('No VAPID key found');
+  // Process each lease
+  for (const leaseId of leaseIds) {
+    try {
+      // Fetch existing lease
+      const existingLease = await getLease(leaseId);
+      if (!existingLease) {
+        results.push({
+          leaseId,
+          status: 'skipped',
+          reason: `Lease not found: ${leaseId}`,
+        });
+        skipped++;
+        continue;
+      }
+
+      // Smart skipping: if lease requires auth but none provided, skip it
+      if (existingLease.autoExtend === false && !requestAuth) {
+        results.push({
+          leaseId,
+          status: 'skipped',
+          reason: 'Lease has autoExtend=false and authentication was not requested',
+        });
+        skipped++;
+        continue;
+      }
+
+      // If lease requires auth and requestAuth is true, but credentials are invalid, skip
+      if (existingLease.autoExtend === false && requestAuth && !credentialsValid) {
+        results.push({
+          leaseId,
+          status: 'skipped',
+          reason: 'Authentication required but credentials not valid',
+        });
+        skipped++;
+        continue;
+      }
+
+      // Verify lease is for current VAPID key
+      const allKeys = await getAllWrappedKeys();
+      const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+      if (vapidKeys.length === 0) {
+        results.push({
+          leaseId,
+          status: 'skipped',
+          reason: 'No VAPID key found',
+        });
+        skipped++;
+        continue;
+      }
+
+      vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
+      const currentVapidKey = vapidKeys[0];
+      const currentKid = currentVapidKey!.kid;
+
+      if (existingLease.kid !== currentKid) {
+        results.push({
+          leaseId,
+          status: 'skipped',
+          reason: `Lease is for different VAPID key (lease kid: ${existingLease.kid}, current kid: ${currentKid})`,
+        });
+        skipped++;
+        continue;
+      }
+
+      // Extend the lease
+      const now = Date.now();
+      const newExp = now + 30 * 24 * 60 * 60 * 1000; // 30 days from now
+
+      const updatedLease: LeaseRecord = {
+        ...existingLease,
+        exp: newExp,
+        createdAt: now,
+      };
+
+      await storeLease(updatedLease);
+
+      // Log the extension
+      await logOperation({
+        op: 'extend-lease',
+        kid: updatedLease.kid,
+        requestId,
+        userId: updatedLease.userId,
+        details: {
+          action: 'extend-lease',
+          leaseId: updatedLease.leaseId,
+          userId: updatedLease.userId,
+          newExp,
+          autoExtend: updatedLease.autoExtend,
+        },
+      });
+
+      results.push({
+        leaseId,
+        status: 'extended',
+        result: {
+          leaseId: updatedLease.leaseId,
+          exp: updatedLease.exp,
+          iat: updatedLease.createdAt,
+          kid: updatedLease.kid,
+          autoExtend: updatedLease.autoExtend ?? false,
+        },
+      });
+      extended++;
+    } catch (err: unknown) {
+      results.push({
+        leaseId,
+        status: 'skipped',
+        reason: `Error extending lease: ${getErrorMessage(err)}`,
+      });
+      failed++;
+    }
   }
 
-  vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
-  const currentVapidKey = vapidKeys[0];
-  const currentKid = currentVapidKey!.kid;
-
-  if (existingLease.kid !== currentKid) {
-    throw new Error(`Lease is for different VAPID key (lease kid: ${existingLease.kid}, current kid: ${currentKid})`);
-  }
-
-  // Extend the lease: update exp and iat, preserve everything else
-  const now = Date.now();
-  const newExp = now + 30 * 24 * 60 * 60 * 1000; // 30 days from now
-
-  const updatedLease: LeaseRecord = {
-    ...existingLease,
-    exp: newExp,
-    createdAt: now, // Update creation time to track when lease was last extended
-  };
-
-  // Store updated lease
-  await storeLease(updatedLease);
-
-  // Log the extension
-  await logOperation({
-    op: 'extend-lease',
-    kid: updatedLease.kid,
-    requestId,
-    userId: updatedLease.userId,
-    details: {
-      action: 'extend-lease',
-      leaseId: updatedLease.leaseId,
-      userId: updatedLease.userId,
-      newExp,
-      autoExtend: updatedLease.autoExtend,
-    },
-  });
-
-  return {
-    leaseId: updatedLease.leaseId,
-    exp: updatedLease.exp,
-    iat: updatedLease.createdAt,
-    kid: updatedLease.kid,
-    autoExtend: updatedLease.autoExtend ?? false,
-  };
+  return { results, extended, skipped, failed };
 }
 
 /**

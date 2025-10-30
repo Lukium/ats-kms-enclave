@@ -133,9 +133,9 @@ export class KMSClient {
       return; // Don't forward to worker yet
     }
 
-    // Special case: extendLease only requires auth if requestAuth flag is set
+    // Special case: extendLeases only requires auth if requestAuth flag is set
     if (
-      request?.method === 'extendLease' &&
+      request?.method === 'extendLeases' &&
       request.params &&
       typeof request.params === 'object' &&
       'requestAuth' in request.params &&

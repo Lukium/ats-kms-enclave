@@ -411,7 +411,7 @@ export type RPCMethod =
   | 'getPublicKey'
   | 'getVAPIDKid'
   | 'createLease'
-  | 'extendLease'
+  | 'extendLeases'
   | 'issueVAPIDJWT'
   | 'issueVAPIDJWTs'
   | 'getUserLeases'

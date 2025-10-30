@@ -36,29 +36,29 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-30 21:49:17 UTC*
+*Last updated: 2025-10-30 22:43:36 UTC*
 
 **Test Results:**
 - Test Files: 9 passed (9)
 - Tests: 401 passed (401)
-- Duration: 28.25s
+- Duration: 29.52s
 
 **Coverage Report:**
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 13145   │   85.65│    83.59 │   85.58│   85.65 │
- v2/audit.ts        │ 614     │   99.18│    96.22 │     100│   99.18 │ 5 lines
+All files           │ 13285   │   85.37│    83.23 │   85.58│   85.37 │
+ v2/audit.ts        │ 614     │   99.18│    96.15 │     100│   99.18 │ 5 lines
  v2/client.ts       │ 1237    │   36.77│    74.41 │   66.66│   36.77 │ 600 lines
  v2/crypto-utils.ts │ 415     │   95.65│    95.45 │   94.44│   95.65 │ 18 lines
  v2/error-utils.ts  │ 95      │     100│      100 │     100│     100 │ 
- v2/kms-user.ts     │ 1861    │   92.79│    70.90 │   65.62│   92.79 │ 134 lines
- v2/rpc-validation.ts│ 613     │   93.95│    87.80 │   94.59│   93.95 │ 37 lines
+ v2/kms-user.ts     │ 1890    │   92.74│    70.90 │   65.62│   92.74 │ 137 lines
+ v2/rpc-validation.ts│ 631     │   93.49│    86.61 │   94.59│   93.49 │ 41 lines
  v2/storage-types.ts│ 50      │   87.75│    50.00 │     100│   87.75 │ 6 lines
- v2/storage.ts      │ 649     │   93.95│    88.46 │   97.72│   93.95 │ 37 lines
+ v2/storage.ts      │ 649     │   93.95│    88.60 │   97.72│   93.95 │ 37 lines
  v2/unlock.ts       │ 458     │   99.12│    93.02 │     100│   99.12 │ 4 lines
  v2/webauthn-types.ts│ 105     │   93.26│    18.18 │   66.66│   93.26 │ 7 lines
- v2/worker.ts       │ 1753    │   86.87│    78.21 │   80.00│   86.87 │ 230 lines
+ v2/worker.ts       │ 1846    │   85.63│    77.77 │   80.00│   85.63 │ 265 lines
 ```
 <!-- END AUTO-GENERATED -->
 

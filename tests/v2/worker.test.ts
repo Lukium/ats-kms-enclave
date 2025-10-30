@@ -50,6 +50,14 @@ function createPassphraseCredentials(passphrase: string): AuthCredentials {
   return { method: 'passphrase', passphrase, userId: 'test@example.com' };
 }
 
+/**
+ * Helper to safely extract result from RPC response in tests.
+ * Tests know the expected response shape, so this is safe.
+ */
+function getResult<T>(response: { result?: unknown }): T {
+  return response.result as T;
+}
+
 // ============================================================================
 // RPC Message Handling Tests
 // ============================================================================
@@ -106,8 +114,9 @@ describe('setupPassphrase', () => {
       success: true,
       enrollmentId: 'enrollment:passphrase:v2',
     });
-    expect(response.result.vapidPublicKey).toBeDefined();
-    expect(response.result.vapidKid).toBeDefined();
+    const setupResult = getResult<{ vapidPublicKey: string; vapidKid: string }>(response);
+    expect(setupResult.vapidPublicKey).toBeDefined();
+    expect(setupResult.vapidKid).toBeDefined();
   });
 
   it('should reject short passphrase', async () => {
@@ -145,8 +154,9 @@ describe('setupPasskeyPRF', () => {
       success: true,
       enrollmentId: 'enrollment:passkey-prf:v2',
     });
-    expect(response.result.vapidPublicKey).toBeDefined();
-    expect(response.result.vapidKid).toBeDefined();
+    const setupResult = getResult<{ vapidPublicKey: string; vapidKid: string }>(response);
+    expect(setupResult.vapidPublicKey).toBeDefined();
+    expect(setupResult.vapidKid).toBeDefined();
   });
 
   it('should reject missing credentialId', async () => {
@@ -188,8 +198,9 @@ describe('setupPasskeyGate', () => {
       success: true,
       enrollmentId: 'enrollment:passkey-gate:v2',
     });
-    expect(response.result.vapidPublicKey).toBeDefined();
-    expect(response.result.vapidKid).toBeDefined();
+    const setupResult = getResult<{ vapidPublicKey: string; vapidKid: string }>(response);
+    expect(setupResult.vapidPublicKey).toBeDefined();
+    expect(setupResult.vapidKid).toBeDefined();
   });
 
   it('should reject missing credentialId', async () => {
@@ -264,9 +275,10 @@ describe('generateVAPID', () => {
     expect(response.error).toBeUndefined();
     expect(response.result).toHaveProperty('kid');
     expect(response.result).toHaveProperty('publicKey');
-    expect(response.result.kid).toBeDefined();
-    expect(response.result.publicKey).toBeDefined();
-    expect(response.result.publicKey.length).toBeGreaterThan(0);
+    const vapidResult = getResult<{ kid: string; publicKey: string }>(response);
+    expect(vapidResult.kid).toBeDefined();
+    expect(vapidResult.publicKey).toBeDefined();
+    expect(vapidResult.publicKey.length).toBeGreaterThan(0);
   });
 
   it('should fail without setup', async () => {
@@ -303,7 +315,7 @@ describe('regenerateVAPID', () => {
     // Generate initial VAPID key
     const credentials = createPassphraseCredentials(passphrase);
     const initialResponse = await handleMessage(createRequest('generateVAPID', { credentials }));
-    const initialKid = initialResponse.result.kid;
+    const initialKid = getResult<{ kid: string }>(initialResponse).kid;
 
     expect(initialResponse.error).toBeUndefined();
     expect(initialKid).toBeDefined();
@@ -315,14 +327,15 @@ describe('regenerateVAPID', () => {
     expect(regenerateResponse.error).toBeUndefined();
     expect(regenerateResponse.result).toHaveProperty('kid');
     expect(regenerateResponse.result).toHaveProperty('publicKey');
-    expect(regenerateResponse.result.kid).toBeDefined();
-    expect(regenerateResponse.result.publicKey).toBeDefined();
+    const regenerateResult = getResult<{ kid: string; publicKey: string }>(regenerateResponse);
+    expect(regenerateResult.kid).toBeDefined();
+    expect(regenerateResult.publicKey).toBeDefined();
 
     // New kid should be different from old kid
-    expect(regenerateResponse.result.kid).not.toBe(initialKid);
+    expect(regenerateResult.kid).not.toBe(initialKid);
 
     // Public key should be valid (65 bytes base64url-encoded)
-    expect(regenerateResponse.result.publicKey.length).toBeGreaterThan(0);
+    expect(regenerateResult.publicKey.length).toBeGreaterThan(0);
   });
 
   it('should delete old VAPID key after regeneration', async () => {
@@ -335,7 +348,7 @@ describe('regenerateVAPID', () => {
     // Generate initial VAPID key
     const credentials = createPassphraseCredentials(passphrase);
     const initialResponse = await handleMessage(createRequest('generateVAPID', { credentials }));
-    const initialKid = initialResponse.result.kid;
+    const initialKid = getResult<{ kid: string }>(initialResponse).kid;
 
     // Verify old key exists
     const oldKeyResponse = await handleMessage(createRequest('getPublicKey', { kid: initialKid }));
@@ -369,10 +382,11 @@ describe('regenerateVAPID', () => {
     const auditResponse = await handleMessage(auditRequest);
 
     expect(auditResponse.error).toBeUndefined();
-    expect(auditResponse.result.entries).toBeDefined();
+    const auditResult = getResult<{ entries: any[] }>(auditResponse);
+    expect(auditResult.entries).toBeDefined();
 
     // Find regenerate-vapid entry
-    const regenerateEntry = auditResponse.result.entries.find(
+    const regenerateEntry = auditResult.entries.find(
       (entry: any) => entry.op === 'regenerate-vapid'
     );
 
@@ -441,18 +455,18 @@ describe('regenerateVAPID', () => {
 
     // Generate first key
     const first = await handleMessage(createRequest('generateVAPID', { credentials }));
-    const firstKid = first.result.kid;
+    const firstKid = getResult<{ kid: string }>(first).kid;
 
     // Generate second key (this creates a second VAPID key)
     const second = await handleMessage(createRequest('generateVAPID', { credentials }));
-    const secondKid = second.result.kid;
+    const secondKid = getResult<{ kid: string }>(second).kid;
 
     // Both keys should exist
     expect(firstKid).not.toBe(secondKid);
 
     // Regenerate - should delete ALL existing VAPID keys
     const regenerateResponse = await handleMessage(createRequest('regenerateVAPID', { credentials }));
-    const newKid = regenerateResponse.result.kid;
+    const newKid = getResult<{ kid: string }>(regenerateResponse).kid;
 
     expect(regenerateResponse.error).toBeUndefined();
     expect(newKid).not.toBe(firstKid);
@@ -481,7 +495,7 @@ describe('regenerateVAPID', () => {
 
     // Generate initial VAPID key
     const vapidResponse = await handleMessage(createRequest('generateVAPID', { credentials }));
-    const oldKid = vapidResponse.result.kid;
+    const oldKid = getResult<{ kid: string }>(vapidResponse).kid;
 
     // Create a lease with the initial key
     const leaseResponse = await handleMessage(
@@ -498,7 +512,7 @@ describe('regenerateVAPID', () => {
         credentials,
       })
     );
-    const leaseId = leaseResponse.result.leaseId;
+    const leaseId = getResult<{ leaseId: string }>(leaseResponse).leaseId;
 
     expect(leaseResponse.error).toBeUndefined();
     expect(leaseId).toBeDefined();
@@ -508,11 +522,11 @@ describe('regenerateVAPID', () => {
       createRequest('verifyLease', { leaseId })
     );
     expect(verifyBeforeResponse.error).toBeUndefined();
-    expect(verifyBeforeResponse.result.valid).toBe(true);
+    expect(getResult<{ valid: boolean }>(verifyBeforeResponse).valid).toBe(true);
 
     // Regenerate VAPID key (should delete old key and create new one)
     const regenerateResponse = await handleMessage(createRequest('regenerateVAPID', { credentials }));
-    const newKid = regenerateResponse.result.kid;
+    const newKid = getResult<{ kid: string }>(regenerateResponse).kid;
 
     expect(regenerateResponse.error).toBeUndefined();
     expect(newKid).not.toBe(oldKid);
@@ -523,8 +537,9 @@ describe('regenerateVAPID', () => {
     );
 
     // Lease verification should fail because the kid referenced in the lease no longer matches current key
-    expect(verifyAfterResponse.result.valid).toBe(false);
-    expect(verifyAfterResponse.result.reason).toBe('wrong-key');
+    const verifyAfterResult = getResult<{ valid: boolean; reason: string }>(verifyAfterResponse);
+    expect(verifyAfterResult.valid).toBe(false);
+    expect(verifyAfterResult.reason).toBe('wrong-key');
   });
 });
 
@@ -540,7 +555,7 @@ describe('signJWT', () => {
       createRequest('generateVAPID', { credentials: createPassphraseCredentials(passphrase) })
     );
 
-    kid = vapidResponse.result!.kid;
+    kid = getResult<{ kid: string }>(vapidResponse).kid;
   });
 
   it('should sign JWT successfully', async () => {
@@ -561,10 +576,11 @@ describe('signJWT', () => {
 
     expect(response.error).toBeUndefined();
     expect(response.result).toHaveProperty('jwt');
-    expect(response.result.jwt).toBeDefined();
+    const jwtResult = getResult<{ jwt: string }>(response);
+    expect(jwtResult.jwt).toBeDefined();
 
     // JWT should have 3 parts
-    const parts = response.result.jwt.split('.');
+    const parts = jwtResult.jwt.split('.');
     expect(parts).toHaveLength(3);
 
     // Parse header
@@ -661,8 +677,9 @@ describe('createLease', () => {
     expect(response.result).toHaveProperty('leaseId');
     expect(response.result).toHaveProperty('exp');
     expect(response.result).toHaveProperty('quotas');
-    expect(response.result.leaseId).toMatch(/^lease-/);
-    expect(response.result.quotas).toHaveProperty('tokensPerHour');
+    const leaseResult = getResult<{ leaseId: string; quotas: { tokensPerHour: number } }>(response);
+    expect(leaseResult.leaseId).toMatch(/^lease-/);
+    expect(leaseResult.quotas).toHaveProperty('tokensPerHour');
   });
 
   it('should reject ttlHours > 24', async () => {
@@ -712,7 +729,7 @@ describe('verifyLease', () => {
         credentials: createPassphraseCredentials(passphrase),
       })
     );
-    kid = vapidResponse.result!.kid;
+    kid = getResult<{ kid: string }>(vapidResponse).kid;
 
     // Create a lease
     const leaseResponse = await handleMessage(
@@ -723,7 +740,7 @@ describe('verifyLease', () => {
         credentials: createPassphraseCredentials(passphrase),
       })
     );
-    leaseId = leaseResponse.result!.leaseId;
+    leaseId = getResult<{ leaseId: string }>(leaseResponse).leaseId;
   });
 
   it('should verify valid lease successfully', async () => {
@@ -734,7 +751,8 @@ describe('verifyLease', () => {
     expect(response.result).toHaveProperty('valid', true);
     expect(response.result).toHaveProperty('leaseId', leaseId);
     expect(response.result).toHaveProperty('kid'); // Should return the lease's kid
-    expect(response.result.reason).toBeUndefined();
+    const verifyResult = getResult<{ reason?: string }>(response);
+    expect(verifyResult.reason).toBeUndefined();
   });
 
   it('should return invalid for non-existent lease', async () => {
@@ -758,7 +776,7 @@ describe('verifyLease', () => {
         credentials: createPassphraseCredentials(passphrase),
       })
     );
-    const expiredLeaseId = expiredLeaseResponse.result!.leaseId;
+    const expiredLeaseId = getResult<{ leaseId: string }>(expiredLeaseResponse).leaseId;
 
     // Wait for lease to expire
     await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -782,7 +800,7 @@ describe('verifyLease', () => {
         credentials: createPassphraseCredentials(passphrase),
       })
     );
-    const newKid = newVapidResponse.result!.kid;
+    const newKid = getResult<{ kid: string }>(newVapidResponse).kid;
 
     // The old lease is now bound to the old kid, not the new one
     const request = createRequest('verifyLease', { leaseId });
@@ -809,7 +827,7 @@ describe('issueVAPIDJWT', () => {
     const vapidResponse = await handleMessage(
       createRequest('generateVAPID', { credentials: createPassphraseCredentials(passphrase) })
     );
-    kid = vapidResponse.result!.kid;
+    kid = getResult<{ kid: string }>(vapidResponse).kid;
 
     // Create lease
     const leaseResponse = await handleMessage(
@@ -822,7 +840,7 @@ describe('issueVAPIDJWT', () => {
         credentials: createPassphraseCredentials(passphrase),
       })
     );
-    leaseId = leaseResponse.result!.leaseId;
+    leaseId = getResult<{ leaseId: string }>(leaseResponse).leaseId;
   });
 
   it('should issue JWT with lease successfully', async () => {
@@ -841,7 +859,8 @@ describe('issueVAPIDJWT', () => {
     expect(response.result).toHaveProperty('exp');
 
     // JWT should be valid
-    const parts = response.result.jwt.split('.');
+    const issueResult = getResult<{ jwt: string }>(response);
+    const parts = issueResult.jwt.split('.');
     expect(parts).toHaveLength(3);
   });
 
@@ -919,8 +938,9 @@ describe('isSetup', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result.isSetup).toBe(false);
-    expect(response.result.methods).toEqual([]);
+    const setupResult = getResult<{ isSetup: boolean; methods: string[] }>(response);
+    expect(setupResult.isSetup).toBe(false);
+    expect(setupResult.methods).toEqual([]);
   });
 
   it('should return true after passphrase setup', async () => {
@@ -929,8 +949,9 @@ describe('isSetup', () => {
     const request = createRequest('isSetup', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
-    expect(response.result.isSetup).toBe(true);
-    expect(response.result.methods).toContain('passphrase');
+    const setupResult = getResult<{ isSetup: boolean; methods: string[] }>(response);
+    expect(setupResult.isSetup).toBe(true);
+    expect(setupResult.methods).toContain('passphrase');
   });
 
   it('should return true after passkey setup', async () => {
@@ -944,8 +965,9 @@ describe('isSetup', () => {
     const request = createRequest('isSetup', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
-    expect(response.result.isSetup).toBe(true);
-    expect(response.result.methods).toContain('passkey');
+    const setupResult = getResult<{ isSetup: boolean; methods: string[] }>(response);
+    expect(setupResult.isSetup).toBe(true);
+    expect(setupResult.methods).toContain('passkey');
   });
 });
 
@@ -955,7 +977,7 @@ describe('getEnrollments', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result.enrollments).toEqual([]);
+    expect(getResult<{ enrollments: string[] }>(response).enrollments).toEqual([]);
   });
 
   it('should return passphrase enrollment', async () => {
@@ -964,7 +986,7 @@ describe('getEnrollments', () => {
     const request = createRequest('getEnrollments', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
-    expect(response.result.enrollments).toContain('enrollment:passphrase:v2');
+    expect(getResult<{ enrollments: string[] }>(response).enrollments).toContain('enrollment:passphrase:v2');
   });
 
   it('should return multiple enrollments', async () => {
@@ -985,8 +1007,9 @@ describe('getEnrollments', () => {
     const request = createRequest('getEnrollments', { userId: 'test@example.com' });
     const response = await handleMessage(request);
 
-    expect(response.result.enrollments).toContain('enrollment:passphrase:v2');
-    expect(response.result.enrollments).toContain('enrollment:passkey-prf:v2');
+    const enrollmentsResult = getResult<{ enrollments: string[] }>(response);
+    expect(enrollmentsResult.enrollments).toContain('enrollment:passphrase:v2');
+    expect(enrollmentsResult.enrollments).toContain('enrollment:passkey-prf:v2');
   });
 });
 
@@ -996,8 +1019,9 @@ describe('verifyAuditChain', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result.valid).toBe(true);
-    expect(response.result.verified).toBe(0);
+    const verifyResult = getResult<{ valid: boolean; verified: number }>(response);
+    expect(verifyResult.valid).toBe(true);
+    expect(verifyResult.verified).toBe(0);
   });
 
   it('should verify audit chain after operations', async () => {
@@ -1011,8 +1035,9 @@ describe('verifyAuditChain', () => {
     const request = createRequest('verifyAuditChain');
     const response = await handleMessage(request);
 
-    expect(response.result.valid).toBe(true);
-    expect(response.result.verified).toBeGreaterThan(0);
+    const verifyResult = getResult<{ valid: boolean; verified: number }>(response);
+    expect(verifyResult.valid).toBe(true);
+    expect(verifyResult.verified).toBeGreaterThan(0);
   });
 });
 
@@ -1027,7 +1052,7 @@ describe('getPublicKey', () => {
         credentials: createPassphraseCredentials('pubkey-test-123'),
       })
     );
-    kid = vapidResponse.result!.kid;
+    kid = getResult<{ kid: string }>(vapidResponse).kid;
   });
 
   it('should retrieve public key', async () => {
@@ -1035,8 +1060,9 @@ describe('getPublicKey', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result.publicKey).toBeDefined();
-    expect(response.result.publicKey.length).toBeGreaterThan(0);
+    const keyResult = getResult<{ publicKey: string }>(response);
+    expect(keyResult.publicKey).toBeDefined();
+    expect(keyResult.publicKey.length).toBeGreaterThan(0);
   });
 
   it('should fail for non-existent kid', async () => {
@@ -1057,8 +1083,9 @@ describe('getAuditPublicKey', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result.publicKey).toBeDefined();
-    expect(response.result.publicKey.length).toBeGreaterThan(0);
+    const keyResult = getResult<{ publicKey: string }>(response);
+    expect(keyResult.publicKey).toBeDefined();
+    expect(keyResult.publicKey.length).toBeGreaterThan(0);
   });
 });
 
@@ -1073,18 +1100,18 @@ describe('resetKMS', () => {
 
     // Verify setup
     const setupCheck = await handleMessage(createRequest('isSetup', { userId: 'test@example.com' }));
-    expect(setupCheck.result.isSetup).toBe(true);
+    expect(getResult<{ isSetup: boolean }>(setupCheck).isSetup).toBe(true);
 
     // Reset
     const resetRequest = createRequest('resetKMS', { userId: 'test@example.com' });
     const resetResponse = await handleMessage(resetRequest);
 
     expect(resetResponse.error).toBeUndefined();
-    expect(resetResponse.result.success).toBe(true);
+    expect(getResult<{ success: boolean }>(resetResponse).success).toBe(true);
 
     // Verify not setup anymore
     const afterReset = await handleMessage(createRequest('isSetup', { userId: 'test@example.com' }));
-    expect(afterReset.result.isSetup).toBe(false);
+    expect(getResult<{ isSetup: boolean }>(afterReset).isSetup).toBe(false);
   });
 });
 
@@ -1101,7 +1128,7 @@ describe('removeEnrollment', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeUndefined();
-    expect(response.result.success).toBe(true);
+    expect(getResult<{ success: boolean }>(response).success).toBe(true);
   });
 
   it('should require valid credentials', async () => {
@@ -1139,7 +1166,7 @@ describe('worker integration', () => {
       })
     );
     expect(vapidResponse.error).toBeUndefined();
-    const kid = vapidResponse.result!.kid;
+    const kid = getResult<{ kid: string }>(vapidResponse).kid;
 
     // 3. Create lease
     const leaseResponse = await handleMessage(
@@ -1151,7 +1178,7 @@ describe('worker integration', () => {
       })
     );
     expect(leaseResponse.error).toBeUndefined();
-    const leaseId = leaseResponse.result!.leaseId;
+    const leaseId = getResult<{ leaseId: string }>(leaseResponse).leaseId;
 
     // 4. Issue JWT
     const jwtResponse = await handleMessage(
@@ -1163,15 +1190,15 @@ describe('worker integration', () => {
       })
     );
     expect(jwtResponse.error).toBeUndefined();
-    expect(jwtResponse.result.jwt).toBeDefined();
+    expect(getResult<{ jwt: string }>(jwtResponse).jwt).toBeDefined();
 
     // 5. Verify audit chain
     const auditResponse = await handleMessage(createRequest('verifyAuditChain', { userId: 'test@example.com' }));
-    expect(auditResponse.result.valid).toBe(true);
+    expect(getResult<{ valid: boolean }>(auditResponse).valid).toBe(true);
 
     // 6. Check quota state
     const enrollmentsResponse = await handleMessage(createRequest('getEnrollments', { userId: 'test@example.com' }));
-    expect(enrollmentsResponse.result.enrollments).toContain('enrollment:passphrase:v2');
+    expect(getResult<{ enrollments: string[] }>(enrollmentsResponse).enrollments).toContain('enrollment:passphrase:v2');
   });
 
   it('should support multi-enrollment workflow', async () => {
@@ -1209,7 +1236,7 @@ describe('worker integration', () => {
     expect(vapidWithPRF.error).toBeUndefined();
 
     // Both should generate valid keys
-    expect(vapidWithPassphrase.result.kid).toBeDefined();
-    expect(vapidWithPRF.result.kid).toBeDefined();
+    expect(getResult<{ kid: string }>(vapidWithPassphrase).kid).toBeDefined();
+    expect(getResult<{ kid: string }>(vapidWithPRF).kid).toBeDefined();
   });
 });

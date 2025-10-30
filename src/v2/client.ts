@@ -223,7 +223,7 @@ export class KMSClient {
             const errorMsg = typeof response.error === 'string' ? response.error : response.error.message;
           reject(new Error(errorMsg));
           } else {
-            resolve(response.result?.enrollments || []);
+            resolve((response.result as { enrollments: string[] } | undefined)?.enrollments || []);
           }
         }
       };
@@ -352,7 +352,7 @@ export class KMSClient {
       }
 
       // Extract userId from the pending request params
-      const userId = this.pendingUnlockRequest.params?.userId;
+      const userId = (this.pendingUnlockRequest.params as { userId?: string } | undefined)?.userId;
       if (!userId) {
         throw new Error('userId not found in request params');
       }
@@ -381,7 +381,7 @@ export class KMSClient {
       const requestWithCredentials: RPCRequest = {
         ...this.pendingUnlockRequest,
         params: {
-          ...this.pendingUnlockRequest.params,
+          ...(this.pendingUnlockRequest.params as Record<string, unknown>),
           credentials,
         },
       };
@@ -417,7 +417,7 @@ export class KMSClient {
       }
 
       // Extract userId from the pending request params
-      const userId = this.pendingUnlockRequest.params?.userId;
+      const userId = (this.pendingUnlockRequest.params as { userId?: string } | undefined)?.userId;
       if (!userId) {
         throw new Error('userId not found in request params');
       }
@@ -426,7 +426,7 @@ export class KMSClient {
       const requestWithCredentials: RPCRequest = {
         ...this.pendingUnlockRequest,
         params: {
-          ...this.pendingUnlockRequest.params,
+          ...(this.pendingUnlockRequest.params as Record<string, unknown>),
           credentials: { method: 'passphrase', passphrase, userId },
         },
       };

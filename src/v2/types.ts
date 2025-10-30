@@ -237,15 +237,15 @@ export interface UnlockOperationResult<T> {
  * `kmsVersion` facilitate correlation on the client side.
  */
 
-export interface RPCRequest {
+export interface RPCRequest<TParams = unknown> {
   id: string;
   method: string;
-  params: any;
+  params: TParams;
 }
 
-export interface RPCResponse {
+export interface RPCResponse<TResult = unknown> {
   id: string;
-  result?: any;
+  result?: TResult;
   error?: string | { code: string; message: string };
 }
 
@@ -308,7 +308,7 @@ export interface VAPIDPayload {
   exp: number;
   sub: string;
   jti: string;
-  [claim: string]: any;
+  [claim: string]: unknown;
 }
 
 /* ------------------------------------------------------------------

@@ -133,6 +133,18 @@ export class KMSClient {
       return; // Don't forward to worker yet
     }
 
+    // Special case: extendLease only requires auth if requestAuth flag is set
+    if (
+      request?.method === 'extendLease' &&
+      request.params &&
+      typeof request.params === 'object' &&
+      'requestAuth' in request.params &&
+      request.params.requestAuth === true
+    ) {
+      this.showUnlockModal(request);
+      return; // Don't forward to worker yet
+    }
+
     // Forward to Worker
     try {
       this.worker.postMessage(event.data);
@@ -438,9 +450,9 @@ export class KMSClient {
       this.setupUnlockResponseListener(requestWithCredentials);
       this.worker?.postMessage(requestWithCredentials);
     } catch (err: unknown) {
+      console.error('[KMS Client] Passphrase unlock failed:', err);
       this.hideLoading();
       this.showError(`Unlock failed: ${getErrorMessage(err)}`);
-      console.error('[KMS Client] Passphrase unlock failed:', err);
     }
   }
 

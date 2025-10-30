@@ -65,6 +65,24 @@ function validateNumber(method: string, paramName: string, value: unknown): numb
 }
 
 /**
+ * Validate boolean parameter
+ */
+function validateBoolean(method: string, paramName: string, value: unknown): boolean {
+  if (typeof value !== 'boolean') {
+    throw new RPCValidationError(method, paramName, 'boolean', value);
+  }
+  return value;
+}
+
+/**
+ * Validate optional boolean parameter
+ */
+function validateOptionalBoolean(method: string, paramName: string, value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  return validateBoolean(method, paramName, value);
+}
+
+/**
  * Validate ArrayBuffer parameter (convert Uint8Array to ArrayBuffer if needed)
  */
 function validateBuffer(method: string, paramName: string, value: unknown): ArrayBuffer {
@@ -297,13 +315,57 @@ export function validateCreateLease(params: unknown): {
   userId: string;
   ttlHours: number;
   credentials: AuthCredentials;
+  autoExtend?: boolean;
 } {
   const p = validateParamsObject('createLease', params);
-  return {
+  const result: {
+    userId: string;
+    ttlHours: number;
+    credentials: AuthCredentials;
+    autoExtend?: boolean;
+  } = {
     userId: validateString('createLease', 'userId', p.userId),
     ttlHours: validateNumber('createLease', 'ttlHours', p.ttlHours),
     credentials: validateAuthCredentials('createLease', p.credentials),
   };
+
+  const autoExtend = validateOptionalBoolean('createLease', 'autoExtend', p.autoExtend);
+  if (autoExtend !== undefined) {
+    result.autoExtend = autoExtend;
+  }
+
+  return result;
+}
+
+export function validateExtendLease(params: unknown): {
+  leaseId: string;
+  userId: string;
+  requestAuth?: boolean;
+  credentials?: AuthCredentials;
+} {
+  const p = validateParamsObject('extendLease', params);
+  const result: {
+    leaseId: string;
+    userId: string;
+    requestAuth?: boolean;
+    credentials?: AuthCredentials;
+  } = {
+    leaseId: validateString('extendLease', 'leaseId', p.leaseId),
+    userId: validateString('extendLease', 'userId', p.userId),
+  };
+
+  // requestAuth is optional boolean
+  const requestAuth = validateOptionalBoolean('extendLease', 'requestAuth', p.requestAuth);
+  if (requestAuth !== undefined) {
+    result.requestAuth = requestAuth;
+  }
+
+  // credentials are optional (provided by client after auth modal)
+  if (p.credentials !== undefined) {
+    result.credentials = validateAuthCredentials('extendLease', p.credentials);
+  }
+
+  return result;
 }
 
 export function validateIssueVAPIDJWT(params: unknown): {

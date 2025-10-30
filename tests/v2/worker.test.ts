@@ -682,18 +682,18 @@ describe('createLease', () => {
     expect(leaseResult.quotas).toHaveProperty('tokensPerHour');
   });
 
-  it('should reject ttlHours > 24', async () => {
+  it('should reject ttlHours > 720', async () => {
     const request = createRequest('createLease', {
       userId: 'user-123',
       subs: [],
-      ttlHours: 25,
+      ttlHours: 721,
       credentials: createPassphraseCredentials(passphrase),
     });
 
     const response = await handleMessage(request);
 
     expect(response.error).toBeDefined();
-    expect(response.error).toContain('24');
+    expect(response.error).toContain('720');
   });
 
   it('should reject ttlHours <= 0', async () => {
@@ -707,6 +707,240 @@ describe('createLease', () => {
     const response = await handleMessage(request);
 
     expect(response.error).toBeDefined();
+  });
+
+  it('should default autoExtend to true', async () => {
+    const request = createRequest('createLease', {
+      userId: 'user-123',
+      subs: [],
+      ttlHours: 12,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    const leaseResult = getResult<{ autoExtend?: boolean }>(response);
+    expect(leaseResult.autoExtend).toBe(true);
+  });
+
+  it('should accept autoExtend=true explicitly', async () => {
+    const request = createRequest('createLease', {
+      userId: 'user-123',
+      subs: [],
+      ttlHours: 12,
+      credentials: createPassphraseCredentials(passphrase),
+      autoExtend: true,
+    });
+
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    const leaseResult = getResult<{ autoExtend?: boolean }>(response);
+    expect(leaseResult.autoExtend).toBe(true);
+  });
+
+  it('should accept autoExtend=false', async () => {
+    const request = createRequest('createLease', {
+      userId: 'user-123',
+      subs: [],
+      ttlHours: 12,
+      credentials: createPassphraseCredentials(passphrase),
+      autoExtend: false,
+    });
+
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    const leaseResult = getResult<{ autoExtend?: boolean }>(response);
+    expect(leaseResult.autoExtend).toBe(false);
+  });
+
+  it('should include autoExtend in response', async () => {
+    const request = createRequest('createLease', {
+      userId: 'user-123',
+      subs: [],
+      ttlHours: 12,
+      credentials: createPassphraseCredentials(passphrase),
+      autoExtend: false,
+    });
+
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toHaveProperty('autoExtend');
+  });
+});
+
+describe('extendLease', () => {
+  const passphrase = 'extend-lease-passphrase-123';
+  let leaseId: string;
+  let kid: string;
+
+  beforeEach(async () => {
+    // Setup passphrase and generate VAPID
+    await handleMessage(createRequest('setupPassphrase', { userId: 'test@example.com', passphrase }));
+    const vapidResponse = await handleMessage(
+      createRequest('generateVAPID', { credentials: createPassphraseCredentials(passphrase) })
+    );
+    kid = getResult<{ kid: string }>(vapidResponse).kid;
+
+    // Create a lease with autoExtend=true by default
+    const leaseResponse = await handleMessage(
+      createRequest('createLease', {
+        userId: 'user-123',
+        subs: [],
+        ttlHours: 12,
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+    leaseId = getResult<{ leaseId: string }>(leaseResponse).leaseId;
+  });
+
+  it('should extend lease successfully', async () => {
+    // Extend the lease twice and verify exp increases
+    const extendResponse1 = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    expect(extendResponse1.error).toBeUndefined();
+    const extendResult1 = getResult<{ leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean }>(
+      extendResponse1
+    );
+
+    // Wait a bit to ensure timestamps differ
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Extend again
+    const extendResponse2 = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    expect(extendResponse2.error).toBeUndefined();
+    const extendResult2 = getResult<{ leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean }>(
+      extendResponse2
+    );
+
+    // Verify basic properties
+    expect(extendResult2.leaseId).toBe(leaseId);
+    expect(extendResult2.kid).toBe(kid);
+    expect(extendResult2.autoExtend).toBe(true);
+
+    // Verify exp increased
+    expect(extendResult2.exp).toBeGreaterThan(extendResult1.exp);
+
+    // Verify the lease is still valid
+    const verifyResponse = await handleMessage(createRequest('verifyLease', { leaseId }));
+    const verifyResult = getResult<{ valid: boolean }>(verifyResponse);
+    expect(verifyResult.valid).toBe(true);
+  });
+
+  it('should preserve autoExtend flag when extending', async () => {
+    // Create a lease with autoExtend=false
+    const leaseResponse = await handleMessage(
+      createRequest('createLease', {
+        userId: 'user-123',
+        subs: [],
+        ttlHours: 12,
+        credentials: createPassphraseCredentials(passphrase),
+        autoExtend: false,
+      })
+    );
+    const leaseIdNoAuto = getResult<{ leaseId: string }>(leaseResponse).leaseId;
+
+    // Extend the lease - must provide credentials for non-extendable leases
+    const extendResponse = await handleMessage(
+      createRequest('extendLease', {
+        leaseId: leaseIdNoAuto,
+        userId: 'user-123',
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+
+    expect(extendResponse.error).toBeUndefined();
+    const extendResult = getResult<{ autoExtend: boolean }>(extendResponse);
+    expect(extendResult.autoExtend).toBe(false);
+  });
+
+  it('should reject extending non-extendable lease without credentials', async () => {
+    // Create a lease with autoExtend=false
+    const leaseResponse = await handleMessage(
+      createRequest('createLease', {
+        userId: 'user-123',
+        subs: [],
+        ttlHours: 12,
+        credentials: createPassphraseCredentials(passphrase),
+        autoExtend: false,
+      })
+    );
+    const leaseIdNoAuto = getResult<{ leaseId: string }>(leaseResponse).leaseId;
+
+    // Attempt to extend without credentials - should fail
+    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId: leaseIdNoAuto, userId: 'user-123' }));
+
+    expect(extendResponse.error).toBeDefined();
+    expect(extendResponse.error).toContain('Cannot extend non-extendable lease without authentication');
+  });
+
+  it('should allow multiple extensions', async () => {
+    const expirations: number[] = [];
+
+    // Extend 3 times
+    for (let i = 0; i < 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const extendResponse = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+      expect(extendResponse.error).toBeUndefined();
+      const extendResult = getResult<{ exp: number }>(extendResponse);
+      expirations.push(extendResult.exp);
+    }
+
+    // Each expiration should be greater than the previous
+    expect(expirations[1]).toBeGreaterThan(expirations[0]!);
+    expect(expirations[2]).toBeGreaterThan(expirations[1]!);
+  });
+
+  it('should reject extending non-existent lease', async () => {
+    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId: 'lease-nonexistent', userId: 'user-123' }));
+
+    expect(extendResponse.error).toBeDefined();
+    expect(extendResponse.error).toContain('not found');
+  });
+
+  it('should reject extending lease for different VAPID key', async () => {
+    // Regenerate VAPID key
+    await handleMessage(createRequest('regenerateVAPID', { credentials: createPassphraseCredentials(passphrase) }));
+
+    // Try to extend lease created with old VAPID key
+    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+
+    expect(extendResponse.error).toBeDefined();
+    expect(extendResponse.error).toContain('different VAPID key');
+  });
+
+  it('should create audit log entry for extension', async () => {
+    // Extend the lease
+    await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+
+    // Get audit log
+    const auditResponse = await handleMessage(createRequest('getAuditLog', {}));
+    const auditLog = getResult<{ entries: Array<{ op: string; details?: { leaseId?: string } }> }>(auditResponse);
+
+    // Find extend-lease entry
+    const extendEntry = auditLog.entries.find(
+      (entry) => entry.op === 'extend-lease' && entry.details?.leaseId === leaseId
+    );
+    expect(extendEntry).toBeDefined();
+  });
+
+  it('should update exp to 30 days from now', async () => {
+    const beforeExtend = Date.now();
+    const extendResponse = await handleMessage(createRequest('extendLease', { leaseId, userId: 'user-123' }));
+    const afterExtend = Date.now();
+
+    expect(extendResponse.error).toBeUndefined();
+    const extendResult = getResult<{ exp: number }>(extendResponse);
+
+    // exp should be approximately 30 days from now
+    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+    const expectedExpMin = beforeExtend + thirtyDaysInMs;
+    const expectedExpMax = afterExtend + thirtyDaysInMs;
+
+    expect(extendResult.exp).toBeGreaterThanOrEqual(expectedExpMin);
+    expect(extendResult.exp).toBeLessThanOrEqual(expectedExpMax);
   });
 });
 

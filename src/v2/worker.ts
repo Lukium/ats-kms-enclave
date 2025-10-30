@@ -221,6 +221,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleCreateLease(validators.validateCreateLease(params), id);
         break;
 
+      case 'extendLease':
+        result = await handleExtendLease(validators.validateExtendLease(params), id);
+        break;
+
       case 'issueVAPIDJWT':
         result = await handleIssueVAPIDJWT(validators.validateIssueVAPIDJWT(params), id);
         break;
@@ -910,14 +914,15 @@ async function handleCreateLease(
     userId: string;
     ttlHours: number;
     credentials: AuthCredentials;
+    autoExtend?: boolean;
   },
   requestId: string
-): Promise<{ leaseId: string; exp: number; quotas: QuotaState }> {
-  const { userId, ttlHours, credentials } = params;
+): Promise<{ leaseId: string; exp: number; quotas: QuotaState; autoExtend?: boolean }> {
+  const { userId, ttlHours, credentials, autoExtend } = params;
 
-  // Validate TTL (max 24 hours)
-  if (ttlHours <= 0 || ttlHours > 24) {
-    throw new Error('ttlHours must be between 0 and 24');
+  // Validate TTL (max 720 hours / 30 days)
+  if (ttlHours <= 0 || ttlHours > 720) {
+    throw new Error('ttlHours must be between 0 and 720 (30 days)');
   }
 
   // Verify VAPID key exists (should have been generated during setup)
@@ -1012,6 +1017,7 @@ async function handleCreateLease(
     ttlHours,
     createdAt: now,
     exp,
+    autoExtend: autoExtend ?? true, // Default to true for best UX
     quotas,
     wrappedLeaseKey: result.result.wrappedLeaseKey,
     wrappedLeaseKeyIV: result.result.iv.buffer.slice(result.result.iv.byteOffset, result.result.iv.byteOffset + result.result.iv.byteLength),
@@ -1041,10 +1047,109 @@ async function handleCreateLease(
       leaseId,
       userId,
       ttlHours,
+      autoExtend: lease.autoExtend,
     },
   });
 
-  return { leaseId, exp, quotas };
+  return { leaseId, exp, quotas, autoExtend: lease.autoExtend ?? true };
+}
+
+/**
+ * Extend an existing lease.
+ *
+ * Updates the expiration timestamp to 30 days from now.
+ * Preserves the autoExtend flag and all other lease properties.
+ *
+ * If autoExtend is false on the lease, this operation requires authentication.
+ * If autoExtend is true, this can be called without re-authentication.
+ */
+async function handleExtendLease(
+  params: {
+    leaseId: string;
+    userId: string;
+    requestAuth?: boolean;
+    credentials?: AuthCredentials;
+  },
+  requestId: string
+): Promise<{ leaseId: string; exp: number; iat: number; kid: string; autoExtend: boolean }> {
+  const { leaseId, credentials } = params;
+
+  // Fetch existing lease
+  const existingLease = await getLease(leaseId);
+  if (!existingLease) {
+    throw new Error(`Lease not found: ${leaseId}`);
+  }
+
+  // Check if autoExtend is disabled - if so, require and validate credentials
+  if (existingLease.autoExtend === false) {
+    if (!credentials) {
+      throw new Error(
+        'Cannot extend non-extendable lease without authentication. ' +
+        'Credentials are required for leases with autoExtend=false.'
+      );
+    }
+
+    // Validate the credentials by attempting unlock
+    try {
+      await withUnlock(credentials, async (_mkek, _ms) => {
+        // Credentials are valid if withUnlock succeeds
+        // (No operation needed - validation is implicit in withUnlock success)
+      });
+    } catch (err: unknown) {
+      throw new Error(`Authentication failed: ${getErrorMessage(err)}`);
+    }
+  }
+
+  // Verify lease is for current VAPID key
+  const allKeys = await getAllWrappedKeys();
+  const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
+  if (vapidKeys.length === 0) {
+    throw new Error('No VAPID key found');
+  }
+
+  vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
+  const currentVapidKey = vapidKeys[0];
+  const currentKid = currentVapidKey!.kid;
+
+  if (existingLease.kid !== currentKid) {
+    throw new Error(`Lease is for different VAPID key (lease kid: ${existingLease.kid}, current kid: ${currentKid})`);
+  }
+
+  // Extend the lease: update exp and iat, preserve everything else
+  const now = Date.now();
+  const newExp = now + 30 * 24 * 60 * 60 * 1000; // 30 days from now
+
+  const updatedLease: LeaseRecord = {
+    ...existingLease,
+    exp: newExp,
+    createdAt: now, // Update creation time to track when lease was last extended
+  };
+
+  // Store updated lease
+  await storeLease(updatedLease);
+
+  // Log the extension
+  await logOperation({
+    op: 'extend-lease',
+    kid: updatedLease.kid,
+    requestId,
+    userId: updatedLease.userId,
+    details: {
+      action: 'extend-lease',
+      leaseId: updatedLease.leaseId,
+      userId: updatedLease.userId,
+      newExp,
+      autoExtend: updatedLease.autoExtend,
+    },
+  });
+
+  return {
+    leaseId: updatedLease.leaseId,
+    exp: updatedLease.exp,
+    iat: updatedLease.createdAt,
+    kid: updatedLease.kid,
+    autoExtend: updatedLease.autoExtend ?? false,
+  };
 }
 
 /**

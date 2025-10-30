@@ -518,25 +518,26 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
         </button>
       </div>
       <div id="push-subscription-status" class="info-message" style="margin-top: 0.5rem;"></div>
-
-      <h4 style="margin-top: 1.5rem; font-size: 1rem; color: #888;">Step 2: Send Test Notification</h4>
-      <button id="send-test-push-btn" class="operation-btn" style="background-color: #28a745; margin-top: 0.5rem;">
-        📬 Send Test Push Notification
-      </button>
-      <div class="info-message" style="color: #28a745; margin-top: 0.5rem;">
-        💡 Validates JWT and sends a test notification to your browser
-      </div>
     </div>
 
+    <hr style="margin: 1.5rem 0; border: none; border-top: 2px solid #e2e8f0;">
 
     <div class="operation-section">
       <h3>🎫 VAPID Lease Operations</h3>
       <p>Generate time-limited VAPID authorization leases.</p>
 
+      <h4 style="margin-top: 1.5rem; font-size: 1rem; color: #888;">Step 2: Create Lease & Issue JWTs</h4>
+
       <div id="lease-verification-results"></div>
 
-      <button id="create-lease-btn" class="operation-btn" style="margin-top: 0.5rem;">🎫 Create Lease</button>
-      <button id="verify-leases-btn" class="operation-btn" style="margin-top: 0.5rem;">🔍 Verify All Leases</button>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+        <button id="create-lease-extendable-btn" class="operation-btn" style="background-color: #28a745;">🎫 Create Extendable Lease</button>
+        <button id="create-lease-non-extendable-btn" class="operation-btn" style="background-color: #6c757d;">🎫 Create Non-Extendable Lease</button>
+        <button id="extend-all-leases-btn" class="operation-btn" style="background-color: #007bff;">🔄 Extend All Leases</button>
+        <button id="extend-all-leases-with-auth-btn" class="operation-btn" style="background-color: #17a2b8;">🔐 Extend Leases with Auth</button>
+        <button id="verify-leases-btn" class="operation-btn">🔍 Verify All Leases</button>
+        <button id="clear-invalid-leases-btn" class="operation-btn" style="background-color: #dc3545;">🗑️ Clear Invalid Leases</button>
+      </div>
 
       <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
         <label for="jwt-count-input" style="font-size: 0.9rem;">JWTs to issue:</label>
@@ -549,6 +550,21 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
           style="width: 80px; padding: 0.5rem; border: 1px solid #333; background: #1a1a1a; color: #fff; border-radius: 4px;"
         />
         <button id="issue-jwts-btn" class="operation-btn">🎟️ Issue JWTs from Lease</button>
+      </div>
+    </div>
+
+    <hr style="margin: 1.5rem 0; border: none; border-top: 2px solid #e2e8f0;">
+
+    <div class="operation-section">
+      <h3>📬 Test Push Notification</h3>
+      <p>Send a test notification using the issued JWT.</p>
+
+      <h4 style="margin-top: 1.5rem; font-size: 1rem; color: #888;">Step 3: Send Test Notification</h4>
+      <button id="send-test-push-btn" class="operation-btn" style="background-color: #28a745; margin-top: 0.5rem;">
+        📬 Send Test Push Notification
+      </button>
+      <div class="info-message" style="color: #28a745; margin-top: 0.5rem;">
+        💡 Validates JWT and sends a test notification to your browser
       </div>
     </div>
 
@@ -573,8 +589,12 @@ function renderLeaseUI(status: { isSetup: boolean; methods: string[] }): void {
   // Add event listeners
   document.getElementById('subscribe-push-btn')?.addEventListener('click', subscribeToPushNotifications);
   document.getElementById('unsubscribe-push-btn')?.addEventListener('click', unsubscribeFromPushNotifications);
-  document.getElementById('create-lease-btn')?.addEventListener('click', () => createLease(status));
+  document.getElementById('create-lease-extendable-btn')?.addEventListener('click', () => createLease(status, true));
+  document.getElementById('create-lease-non-extendable-btn')?.addEventListener('click', () => createLease(status, false));
+  document.getElementById('extend-all-leases-btn')?.addEventListener('click', () => extendAllLeases());
+  document.getElementById('extend-all-leases-with-auth-btn')?.addEventListener('click', () => extendAllLeasesWithAuth());
   document.getElementById('verify-leases-btn')?.addEventListener('click', () => verifyAllLeases());
+  document.getElementById('clear-invalid-leases-btn')?.addEventListener('click', () => clearInvalidLeases());
   document.getElementById('issue-jwts-btn')?.addEventListener('click', () => issueJWTsFromLease());
   document.getElementById('send-test-push-btn')?.addEventListener('click', sendTestPush);
   document.getElementById('regenerate-vapid-btn')?.addEventListener('click', regenerateVAPIDKey);
@@ -689,9 +709,9 @@ async function unsubscribeFromPushNotifications(): Promise<void> {
 /**
  * Create a VAPID lease (Phase B: requires existing push subscription)
  */
-async function createLease(status: { isSetup: boolean; methods: string[] }): Promise<void> {
+async function createLease(status: { isSetup: boolean; methods: string[] }, autoExtend: boolean): Promise<void> {
   try {
-    console.log('[Full Demo] Creating VAPID lease...');
+    console.log(`[Full Demo] Creating VAPID lease (autoExtend: ${autoExtend})...`);
 
     // Check if push subscription exists (required for lease creation in Phase 1)
     const { subscription } = await kmsUser.getPushSubscription();
@@ -702,12 +722,13 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
 
     // Create lease (NO subs parameter - worker reads subscription from VAPID key)
     const userId = 'demouser@ats.run';
-    const ttlHours = 24; // 24 hour lease
+    const ttlHours = 720; // 30 days (720 hours) lease
 
-    console.log('[Full Demo] Calling createLease with:', { userId, ttlHours });
+    console.log('[Full Demo] Calling createLease with:', { userId, ttlHours, autoExtend });
     const result = await kmsUser.createLease({
       userId,
       ttlHours,
+      autoExtend,
     });
     console.log('[Full Demo] Lease created:', result);
 
@@ -721,6 +742,12 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
           <div class="artifact-card">
             <div class="artifact-title">Lease ID</div>
             <div class="artifact-data"><code>${result.leaseId}</code></div>
+          </div>
+          <div class="artifact-card">
+            <div class="artifact-title">Auto-Extend</div>
+            <div class="artifact-data" style="color: ${result.autoExtend ? '#28a745' : '#6c757d'};">
+              ${result.autoExtend ? '✅ Enabled (can extend without re-authentication)' : '❌ Disabled (requires authentication to extend)'}
+            </div>
           </div>
           <div class="artifact-card">
             <div class="artifact-title">Expiration</div>
@@ -751,6 +778,244 @@ async function createLease(status: { isSetup: boolean; methods: string[] }): Pro
   } catch (error) {
     console.error('[Full Demo] Lease creation failed:', error);
     alert(`Lease creation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Extend all extendable leases
+ */
+async function extendAllLeases(): Promise<void> {
+  try {
+    console.log('[Full Demo] Extending all leases...');
+
+    // Get all leases for the user
+    const userId = 'demouser@ats.run';
+    const { leases } = await kmsUser.getUserLeases(userId);
+
+    const resultsContainer = document.getElementById('lease-result');
+    if (!resultsContainer) return;
+
+    if (leases.length === 0) {
+      resultsContainer.innerHTML = `
+        <div class="info-message" style="margin-bottom: 1.5rem;">
+          <h4>No Leases Found</h4>
+          <p>Create a lease first to test extension.</p>
+          <button id="dismiss-results-btn" class="operation-btn">✖ Dismiss</button>
+        </div>
+      `;
+      document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+        resultsContainer.innerHTML = '';
+      });
+      return;
+    }
+
+    console.log(`[Full Demo] Found ${leases.length} lease(s), attempting to extend...`);
+
+    // Get current VAPID key to filter leases
+    const vapidInfo = await kmsUser.getVAPIDPublicKey(userId);
+    if (!vapidInfo) {
+      alert('No VAPID key found. Please set up passphrase first.');
+      return;
+    }
+
+    // Filter for non-expired leases with matching kid
+    const now = Date.now();
+    const activeLeases = leases.filter(
+      (lease) => lease.exp > now && lease.kid === vapidInfo.kid
+    );
+
+    if (activeLeases.length === 0) {
+      resultsContainer.innerHTML = `
+        <div class="info-message" style="margin-bottom: 1.5rem;">
+          <h4>No Active Leases Found</h4>
+          <p>All leases are either expired or for a different VAPID key.</p>
+          <button id="dismiss-results-btn" class="operation-btn">✖ Dismiss</button>
+        </div>
+      `;
+      document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+        resultsContainer.innerHTML = '';
+      });
+      return;
+    }
+
+    // Extend each active lease
+    const results = [];
+    for (const lease of activeLeases) {
+      try {
+        // Pass requestAuth: true for non-extendable leases
+        const options = lease.autoExtend === false ? { requestAuth: true } : undefined;
+        const result = await kmsUser.extendLease(lease.leaseId, userId, options);
+        results.push({ lease, result, success: true, error: null });
+        console.log(`[Full Demo] ✅ Extended lease ${lease.leaseId}`);
+      } catch (error) {
+        results.push({ lease, result: null, success: false, error: error instanceof Error ? error.message : String(error) });
+        console.error(`[Full Demo] ❌ Failed to extend lease ${lease.leaseId}:`, error);
+      }
+    }
+
+    // Display results
+    const resultsHtml = results
+      .map(
+        ({ lease, result, success, error }) => `
+      <div class="artifact-card ${success ? 'valid' : 'invalid'}">
+        <div class="artifact-title">
+          ${success ? '✅' : '❌'} Lease Extension
+        </div>
+        <div class="artifact-data">
+          <div><strong>Lease ID:</strong> <code style="word-break: break-all;">${lease.leaseId}</code></div>
+          <div><strong>Status:</strong> ${success ? 'Extended' : 'Failed'}</div>
+          ${success && result ? `
+            <div><strong>New Expiration:</strong> ${new Date(result.exp).toLocaleString()}</div>
+            <div><strong>Auto-Extend:</strong> ${result.autoExtend ? '✅ Enabled' : '❌ Disabled'}</div>
+          ` : ''}
+          ${error ? `<div style="color: #dc3545;"><strong>Error:</strong> ${error}</div>` : ''}
+        </div>
+      </div>
+    `
+      )
+      .join('');
+
+    const successCount = results.filter((r) => r.success).length;
+    const failCount = results.length - successCount;
+
+    resultsContainer.innerHTML = `
+      <div class="${successCount === results.length ? 'success' : 'warning'}-message" style="margin-bottom: 1.5rem;">
+        <h4>Extend All Leases Results</h4>
+        <p>Processed ${results.length} lease(s): ${successCount} extended, ${failCount} failed</p>
+        ${resultsHtml}
+        <button id="dismiss-results-btn" class="operation-btn">✖ Dismiss</button>
+      </div>
+    `;
+
+    // Add event listener
+    document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+      resultsContainer.innerHTML = '';
+    });
+
+    // Refresh displays
+    await displayVAPIDKeyInfo();
+    await loadAuditLog();
+  } catch (error) {
+    console.error('[Full Demo] Extend all leases failed:', error);
+    alert(`Extend all leases failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Extend all leases with authentication (requests auth for non-extendable leases)
+ */
+async function extendAllLeasesWithAuth(): Promise<void> {
+  try {
+    console.log('[Full Demo] Extending all leases with auth...');
+
+    // Get all leases for the user
+    const userId = 'demouser@ats.run';
+    const { leases } = await kmsUser.getUserLeases(userId);
+
+    const resultsContainer = document.getElementById('lease-result');
+    if (!resultsContainer) return;
+
+    if (leases.length === 0) {
+      resultsContainer.innerHTML = `
+        <div class="info-message" style="margin-bottom: 1.5rem;">
+          <h4>No Leases Found</h4>
+          <p>Create a lease first to test extension.</p>
+          <button id="dismiss-results-btn" class="operation-btn">✖ Dismiss</button>
+        </div>
+      `;
+      document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+        resultsContainer.innerHTML = '';
+      });
+      return;
+    }
+
+    console.log(`[Full Demo] Found ${leases.length} lease(s), attempting to extend with auth...`);
+
+    // Get current VAPID key to filter leases
+    const vapidInfo = await kmsUser.getVAPIDPublicKey(userId);
+    if (!vapidInfo) {
+      alert('No VAPID key found. Please set up passphrase first.');
+      return;
+    }
+
+    // Filter for non-expired leases with matching kid
+    const now = Date.now();
+    const activeLeases = leases.filter(
+      (lease) => lease.exp > now && lease.kid === vapidInfo.kid
+    );
+
+    if (activeLeases.length === 0) {
+      resultsContainer.innerHTML = `
+        <div class="info-message" style="margin-bottom: 1.5rem;">
+          <h4>No Active Leases Found</h4>
+          <p>All leases are either expired or for a different VAPID key.</p>
+          <button id="dismiss-results-btn" class="operation-btn">✖ Dismiss</button>
+        </div>
+      `;
+      document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+        resultsContainer.innerHTML = '';
+      });
+      return;
+    }
+
+    // Extend each active lease, passing requestAuth: true for non-extendable leases
+    const results = [];
+    for (const lease of activeLeases) {
+      try {
+        // Always pass requestAuth: true for non-extendable leases, undefined for extendable
+        const options = lease.autoExtend === false ? { requestAuth: true } : undefined;
+        const result = await kmsUser.extendLease(lease.leaseId, userId, options);
+        results.push({ lease, result, success: true, error: null });
+        console.log(`[Full Demo] ✅ Extended lease ${lease.leaseId} ${lease.autoExtend === false ? '(with auth)' : ''}`);
+      } catch (error) {
+        results.push({ lease, result: null, success: false, error: error instanceof Error ? error.message : String(error) });
+        console.error(`[Full Demo] ❌ Failed to extend lease ${lease.leaseId}:`, error);
+      }
+    }
+
+    // Display results
+    const resultsHtml = results
+      .map(
+        ({ lease, result, success, error }) => `
+      <div class="artifact-card ${success ? 'valid' : 'invalid'}">
+        <div class="artifact-title">
+          ${success ? '✅' : '❌'} Lease ${lease.leaseId.substring(0, 8)}...
+          ${lease.autoExtend === false ? '(Non-Extendable)' : '(Auto-Extendable)'}
+        </div>
+        <div class="artifact-content">
+          ${
+            success && result
+              ? `
+            <div><strong>New Expiration:</strong> ${new Date(result.exp).toLocaleString()}</div>
+            <div><strong>Issued At:</strong> ${new Date(result.iat).toLocaleString()}</div>
+            <div><strong>Auto-Extend:</strong> ${result.autoExtend ? 'Yes' : 'No'}</div>
+          `
+              : `<div><strong>Error:</strong> ${error}</div>`
+          }
+        </div>
+      </div>
+    `
+      )
+      .join('');
+
+    resultsContainer.innerHTML = `
+      <div class="info-message" style="margin-bottom: 1.5rem;">
+        <h4>Extend All Leases Results (With Auth)</h4>
+        <p>Extended ${results.filter((r) => r.success).length} of ${results.length} lease(s)</p>
+        <p style="font-size: 0.85rem; color: #666;">Non-extendable leases required authentication</p>
+        <button id="dismiss-results-btn" class="operation-btn">✖ Dismiss</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        ${resultsHtml}
+      </div>
+    `;
+
+    document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+      resultsContainer.innerHTML = '';
+    });
+  } catch (error) {
+    console.error('[Full Demo] Extend all leases with auth failed:', error);
+    alert(`Extend all leases with auth failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -1149,6 +1414,92 @@ async function verifyAllLeases(): Promise<void> {
   } catch (error) {
     console.error('[Full Demo] Lease verification failed:', error);
     alert(`Lease verification failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Clear all invalid leases (expired or wrong kid)
+ */
+async function clearInvalidLeases(): Promise<void> {
+  try {
+    console.log('[Full Demo] Clearing invalid leases...');
+
+    // Get all leases for the user
+    const userId = 'demouser@ats.run';
+    const { leases } = await kmsUser.getUserLeases(userId);
+
+    const resultsContainer = document.getElementById('lease-result');
+    if (!resultsContainer) return;
+
+    if (leases.length === 0) {
+      resultsContainer.innerHTML = `
+        <div class="info-message" style="margin-bottom: 1.5rem;">
+          <h4>No Leases Found</h4>
+          <p>Create a lease first to test clearing.</p>
+          <button id="dismiss-results-btn" class="operation-btn">✖  Dismiss</button>
+        </div>
+      `;
+      document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+        resultsContainer.innerHTML = '';
+      });
+      return;
+    }
+
+    console.log(`[Full Demo] Found ${leases.length} lease(s), clearing invalid ones...`);
+
+    // Verify each lease with deleteIfInvalid=true
+    let deletedCount = 0;
+    const results = [];
+    for (const lease of leases) {
+      const result = await kmsUser.verifyLease(lease.leaseId, true);
+      if (!result.valid) {
+        deletedCount++;
+      }
+      results.push({ lease, result, deleted: !result.valid });
+    }
+
+    // Display results
+    const resultsHtml = results
+      .map(
+        ({ lease, result, deleted }) => `
+      <div class="artifact-card ${deleted ? 'invalid' : 'valid'}">
+        <div class="artifact-title">
+          ${deleted ? '🗑️' : '✅'} ${deleted ? 'Deleted Invalid Lease' : 'Valid Lease (Kept)'}
+        </div>
+        <div class="artifact-data">
+          <div><strong>Lease ID:</strong> <code style="word-break: break-all;">${lease.leaseId}</code></div>
+          <div><strong>Status:</strong> ${deleted ? 'Deleted' : 'Valid (Kept)'}</div>
+          ${result.reason ? `<div><strong>Reason:</strong> ${result.reason}</div>` : ''}
+          <div><strong>Key ID:</strong> <code>${result.kid}</code></div>
+          <div><strong>Expires:</strong> ${new Date(lease.exp).toLocaleString()}</div>
+        </div>
+      </div>
+    `
+      )
+      .join('');
+
+    const keptCount = results.length - deletedCount;
+
+    resultsContainer.innerHTML = `
+      <div class="${deletedCount > 0 ? 'warning' : 'success'}-message" style="margin-bottom: 1.5rem;">
+        <h4>Clear Invalid Leases Results</h4>
+        <p>Processed ${results.length} lease(s): ${deletedCount} deleted, ${keptCount} kept</p>
+        ${resultsHtml}
+        <button id="dismiss-results-btn" class="operation-btn">✖  Dismiss</button>
+      </div>
+    `;
+
+    // Add event listener
+    document.getElementById('dismiss-results-btn')?.addEventListener('click', () => {
+      resultsContainer.innerHTML = '';
+    });
+
+    // Refresh displays
+    await displayVAPIDKeyInfo();
+    await loadAuditLog();
+  } catch (error) {
+    console.error('[Full Demo] Clear invalid leases failed:', error);
+    alert(`Clear invalid leases failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

@@ -76,6 +76,7 @@ import {
 } from './crypto-utils';
 import { getErrorMessage } from './error-utils';
 import * as validators from './rpc-validation';
+import { loadRateLimitState } from './storage-types';
 
 // ============================================================================
 // Session Key Cache (Lease-Scoped)
@@ -1036,22 +1037,22 @@ async function handleIssueVAPIDJWT(
   }
 
   // Check quota (simplified: tokens per hour)
-  const quotaState = (await getMeta(`quota:${leaseId}`)) as any;
-  if (quotaState) {
-    const hourAgo = Date.now() - 3600 * 1000;
-    if (quotaState.lastResetAt < hourAgo) {
-      // Reset quota
-      quotaState.tokensIssued = 0;
-      quotaState.lastResetAt = Date.now();
-    }
+  const rawQuotaState = await getMeta(`quota:${leaseId}`);
+  const quotaState = loadRateLimitState(rawQuotaState);
 
-    if (quotaState.tokensIssued >= lease.quotas.tokensPerHour) {
-      throw new Error('Quota exceeded: tokens per hour');
-    }
-
-    quotaState.tokensIssued++;
-    await putMeta(`quota:${leaseId}`, quotaState);
+  const hourAgo = Date.now() - 3600 * 1000;
+  if (quotaState.lastResetAt < hourAgo) {
+    // Reset quota
+    quotaState.tokensIssued = 0;
+    quotaState.lastResetAt = Date.now();
   }
+
+  if (quotaState.tokensIssued >= lease.quotas.tokensPerHour) {
+    throw new Error('Quota exceeded: tokens per hour');
+  }
+
+  quotaState.tokensIssued++;
+  await putMeta(`quota:${leaseId}`, quotaState);
 
   // Build JWT payload (use provided jti/exp or generate new ones)
   const jti = params.jti ?? crypto.randomUUID();

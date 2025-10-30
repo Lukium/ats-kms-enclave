@@ -926,6 +926,39 @@ describe('issueVAPIDJWT', () => {
     expect(response2.error).toBeDefined();
     expect(response2.error).toContain('Quota exceeded');
   });
+
+  it('should reject JWT issuance after VAPID regeneration', async () => {
+    // Issue JWT successfully with current lease/kid
+    const request1 = createRequest('issueVAPIDJWT', {
+      leaseId,
+      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
+      kid,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+
+    const response1 = await handleMessage(request1);
+    expect(response1.error).toBeUndefined();
+
+    // Regenerate VAPID key (invalidates all existing leases)
+    const regenerateResponse = await handleMessage(
+      createRequest('regenerateVAPID', { credentials: createPassphraseCredentials(passphrase) })
+    );
+    const newKid = getResult<{ kid: string }>(regenerateResponse).kid;
+    expect(newKid).not.toBe(kid); // Should be a new key
+
+    // Try to issue JWT with old lease - should fail due to kid mismatch
+    const request2 = createRequest('issueVAPIDJWT', {
+      leaseId, // Old lease with old kid
+      endpoint: { url: 'https://push.example.com/sub1', aud: 'https://fcm.googleapis.com', eid: 'ep-1' },
+      kid,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+
+    const response2 = await handleMessage(request2);
+    expect(response2.error).toBeDefined();
+    expect(response2.error).toContain('invalidated');
+    expect(response2.error).toContain('wrong-key');
+  });
 });
 
 // ============================================================================

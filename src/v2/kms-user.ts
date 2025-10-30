@@ -662,14 +662,25 @@ export class KMSUser {
    * Issue VAPID JWT for endpoint using lease authorization.
    * No credentials required - the lease IS the authorization.
    *
+   * Automatically verifies the lease is valid before issuing JWT.
+   * This prevents JWT issuance against expired or invalidated leases.
+   *
    * @param params - Issuance parameters
    * @returns JWT result
+   * @throws {Error} If lease is invalid (expired, wrong-key, not-found)
    */
   async issueVAPIDJWT(params: {
     leaseId: string;
     endpoint: { url: string; aud: string; eid: string };
     kid?: string; // Optional - auto-detected if not provided (per V2 spec)
   }): Promise<JWTResult> {
+    // Auto-verify lease before issuing JWT (fail-fast)
+    const verification = await this.verifyLease(params.leaseId);
+
+    if (!verification.valid) {
+      throw new Error(`Cannot issue JWT: lease ${verification.reason || 'invalid'}`);
+    }
+
     return this.sendRequest<JWTResult>('issueVAPIDJWT', params);
   }
 
@@ -684,11 +695,15 @@ export class KMSUser {
    * The stagger interval is 60% of the JWT TTL (540s for 900s TTL), ensuring seamless
    * rotation: when JWT[0] reaches 60% TTL, JWT[1] is already valid.
    *
+   * Automatically verifies the lease is valid before issuing JWTs.
+   * This prevents JWT issuance against expired or invalidated leases.
+   *
    * @param params.leaseId - Lease ID
    * @param params.endpoint - Push endpoint details
    * @param params.count - Number of JWTs to issue (1-10, hard limit)
    * @param params.kid - Optional VAPID key ID (auto-detected if not provided)
    * @returns Array of JWT results with staggered expirations
+   * @throws {Error} If lease is invalid (expired, wrong-key, not-found)
    */
   async issueVAPIDJWTs(params: {
     leaseId: string;
@@ -696,6 +711,13 @@ export class KMSUser {
     count: number;
     kid?: string;
   }): Promise<JWTResult[]> {
+    // Auto-verify lease before issuing JWTs (fail-fast for entire batch)
+    const verification = await this.verifyLease(params.leaseId);
+
+    if (!verification.valid) {
+      throw new Error(`Cannot issue JWTs: lease ${verification.reason || 'invalid'}`);
+    }
+
     return this.sendRequest<JWTResult[]>('issueVAPIDJWTs', params);
   }
 

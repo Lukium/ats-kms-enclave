@@ -654,11 +654,28 @@ describe('lease operations', () => {
       kid: 'test-kid',
     });
 
-    const [request] = postMessageSpy.mock.calls[0]! as [any, string];
-    expect(request.method).toBe('issueVAPIDJWT');
+    // First call: verifyLease (auto-verification before JWT issuance)
+    const [verifyRequest] = postMessageSpy.mock.calls[0]! as [any, string];
+    expect(verifyRequest.method).toBe('verifyLease');
 
     env.simulateIframeMessage({
-      id: request.id,
+      id: verifyRequest.id,
+      result: {
+        leaseId: 'lease-123',
+        valid: true,
+        kid: 'test-kid',
+      },
+    });
+
+    // Wait for verifyLease to complete before checking issueVAPIDJWT call
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Second call: issueVAPIDJWT (after successful verification)
+    const [jwtRequest] = postMessageSpy.mock.calls[1]! as [any, string];
+    expect(jwtRequest.method).toBe('issueVAPIDJWT');
+
+    env.simulateIframeMessage({
+      id: jwtRequest.id,
       result: {
         jwt: 'eyJhbGciOi...test-jwt',
         jti: 'jti-123',

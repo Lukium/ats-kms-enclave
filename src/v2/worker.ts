@@ -1081,6 +1081,27 @@ async function handleIssueVAPIDJWT(
     throw new Error('Lease expired');
   }
 
+  // Check if lease kid matches current VAPID key (same logic as verifyLease)
+  // This prevents JWT issuance after VAPID regeneration
+  const allKeysForValidation = await getAllWrappedKeys();
+  const vapidKeysForValidation = allKeysForValidation.filter((k) => k.purpose === 'vapid');
+
+  if (vapidKeysForValidation.length === 0) {
+    throw new Error('No VAPID key available');
+  }
+
+  // Sort by createdAt descending to get the most recent key first
+  vapidKeysForValidation.sort((a, b) => b.createdAt - a.createdAt);
+  const currentKid = vapidKeysForValidation[0]?.kid;
+
+  if (!currentKid) {
+    throw new Error('Failed to determine current VAPID key');
+  }
+
+  if (lease.kid !== currentKid) {
+    throw new Error('Lease invalidated by VAPID key rotation (wrong-key)');
+  }
+
   // Load LAK (Lease Audit Key) for audit logging
   // This loads the LAK private key and sets it as the active audit signer
   await loadLAK(leaseId, lease.lakDelegationCert);

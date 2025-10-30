@@ -70,6 +70,7 @@ import {
   getUserLeases,
   storeLease,
   getLease,
+  deleteLease,
   setPushSubscription,
   removePushSubscription,
   getPushSubscription,
@@ -1390,8 +1391,11 @@ async function handleGetUserLeases(params: { userId: string }): Promise<{ leases
  *
  * This is a read-only operation and does not create audit entries.
  */
-async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVerificationResult> {
-  const { leaseId } = params;
+async function handleVerifyLease(params: {
+  leaseId: string;
+  deleteIfInvalid?: boolean;
+}): Promise<LeaseVerificationResult> {
+  const { leaseId, deleteIfInvalid = false } = params;
 
   // Retrieve lease
   const lease = await getLease(leaseId);
@@ -1406,6 +1410,10 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
 
   // Check expiration
   if (Date.now() >= lease.exp) {
+    // Delete if requested
+    if (deleteIfInvalid) {
+      await deleteLease(leaseId);
+    }
     return {
       leaseId,
       valid: false,
@@ -1419,6 +1427,10 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
   const vapidKeys = allKeys.filter((k) => k.purpose === 'vapid');
 
   if (vapidKeys.length === 0) {
+    // Delete if requested (no VAPID key means lease is invalid)
+    if (deleteIfInvalid) {
+      await deleteLease(leaseId);
+    }
     return {
       leaseId,
       valid: false,
@@ -1433,6 +1445,10 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
   // Check if lease kid matches current VAPID key (most recent)
   const firstKey = vapidKeys[0];
   if (!firstKey) {
+    // Delete if requested
+    if (deleteIfInvalid) {
+      await deleteLease(leaseId);
+    }
     return {
       leaseId,
       valid: false,
@@ -1442,6 +1458,10 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
   }
   const currentKid = firstKey.kid;
   if (lease.kid !== currentKid) {
+    // Delete if requested (wrong key = stale lease)
+    if (deleteIfInvalid) {
+      await deleteLease(leaseId);
+    }
     return {
       leaseId,
       valid: false,

@@ -789,10 +789,17 @@ export class KMSUser {
    * This is a read-only operation that does not create audit entries.
    *
    * @param leaseId - Lease ID to verify
+   * @param deleteIfInvalid - If true, delete the lease if it's invalid (expired or wrong key)
    * @returns Verification result with validity status and reason if invalid
    */
-  async verifyLease(leaseId: string): Promise<LeaseVerificationResult> {
-    return this.sendRequest<LeaseVerificationResult>('verifyLease', { leaseId });
+  async verifyLease(
+    leaseId: string,
+    deleteIfInvalid?: boolean
+  ): Promise<LeaseVerificationResult> {
+    return this.sendRequest<LeaseVerificationResult>('verifyLease', {
+      leaseId,
+      ...(deleteIfInvalid !== undefined && { deleteIfInvalid }),
+    });
   }
 
   /**

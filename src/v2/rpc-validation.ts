@@ -391,11 +391,24 @@ export function validateGetUserLeases(params: unknown): { userId: string } {
   };
 }
 
-export function validateVerifyLease(params: unknown): { leaseId: string } {
+export function validateVerifyLease(params: unknown): {
+  leaseId: string;
+  deleteIfInvalid?: boolean;
+} {
   const p = validateParamsObject('verifyLease', params);
-  return {
+  const result: { leaseId: string; deleteIfInvalid?: boolean } = {
     leaseId: validateString('verifyLease', 'leaseId', p.leaseId),
   };
+
+  // Optional parameter
+  if ('deleteIfInvalid' in p) {
+    if (typeof p.deleteIfInvalid !== 'boolean') {
+      throw new Error('verifyLease: deleteIfInvalid must be a boolean');
+    }
+    result.deleteIfInvalid = p.deleteIfInvalid;
+  }
+
+  return result;
 }
 
 export function validateGetVAPIDKid(_params: unknown): Record<string, never> {

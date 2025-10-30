@@ -1070,7 +1070,7 @@ async function issueJWTsFromLease(): Promise<void> {
     }
 
     // Use the first active lease (in production, we'd let user select)
-    const lease = activeLeases[0];
+    const lease = activeLeases[0]!;
     console.log(`[Full Demo] Using lease: ${lease.leaseId} (kid: ${lease.kid})`);
 
     // Get push subscription for endpoint info display
@@ -1080,11 +1080,17 @@ async function issueJWTsFromLease(): Promise<void> {
       return;
     }
 
-    // Issue JWTs (NO endpoint parameter - worker reads subscription from VAPID key)
+    // Issue JWTs with endpoint info from subscription
+    const pushServiceUrl = new URL(subscription.endpoint);
     console.log(`[Full Demo] Issuing ${count} JWT(s)...`);
     const startTime = performance.now();
     const jwts = await kmsUser.issueVAPIDJWTs({
       leaseId: lease.leaseId,
+      endpoint: {
+        url: subscription.endpoint,
+        aud: pushServiceUrl.origin,
+        eid: subscription.eid,
+      },
       count,
     });
     const duration = performance.now() - startTime;
@@ -1101,7 +1107,7 @@ async function issueJWTsFromLease(): Promise<void> {
         <div class="artifact-title">JWT ${idx + 1}</div>
         <div class="artifact-data"><code style="font-size: 0.8rem; word-break: break-all;">${jwt.jwt}</code></div>
         <div class="artifact-title">Expires</div>
-        <div class="artifact-data">${new Date(jwt.exp * 1000).toLocaleString()}</div>
+        <div class="artifact-data">${new Date(jwt.exp! * 1000).toLocaleString()}</div>
         <div class="artifact-title">JTI</div>
         <div class="artifact-data"><code>${jwt.jti}</code></div>
       </div>
@@ -1213,7 +1219,7 @@ async function validateVAPIDJWT(
     const publicKeyBytes = base64UrlToUint8Array(vapidInfo.publicKey);
     const publicKey = await crypto.subtle.importKey(
       'raw',
-      publicKeyBytes,
+      publicKeyBytes as BufferSource,
       { name: 'ECDSA', namedCurve: 'P-256' },
       false,
       ['verify']
@@ -1226,7 +1232,7 @@ async function validateVAPIDJWT(
     const valid = await crypto.subtle.verify(
       { name: 'ECDSA', hash: 'SHA-256' },
       publicKey,
-      signatureBytes,
+      signatureBytes as BufferSource,
       dataToVerify
     );
 
@@ -1281,13 +1287,18 @@ async function sendTestPush(): Promise<void> {
       return;
     }
 
-    const lease = activeLeases[0];
+    const lease = activeLeases[0]!;
     console.log(`[Full Demo] Using lease: ${lease.leaseId} (kid: ${lease.kid})`);
 
-    // Issue JWT (worker automatically uses subscription from VAPID key)
+    // Issue JWT with endpoint info (reuse subscription from above)
     console.log('[Full Demo] Issuing JWT for push notification...');
     const jwtResult = await kmsUser.issueVAPIDJWT({
-      leaseId: lease.leaseId!,
+      leaseId: lease.leaseId,
+      endpoint: {
+        url: sub.endpoint,
+        aud: pushServiceUrl.origin,
+        eid: sub.eid,
+      },
     });
 
     console.log('[Full Demo] JWT issued:', jwtResult.jwt.substring(0, 50) + '...');

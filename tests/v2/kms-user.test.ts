@@ -233,7 +233,7 @@ describe('KMSUser initialization', () => {
     expect(iframe?.allow).toContain('publickey-credentials');
     expect(mockBody.appendChild).toHaveBeenCalled();
 
-    await kmsUser.terminate();
+    kmsUser.terminate();
   });
 
   it('should throw error if already initialized', async () => {
@@ -245,7 +245,7 @@ describe('KMSUser initialization', () => {
 
     await expect(kmsUser.init()).rejects.toThrow('already initialized');
 
-    await kmsUser.terminate();
+    kmsUser.terminate();
   });
 
   it('should timeout waiting for ready signal', async () => {
@@ -269,7 +269,7 @@ describe('KMSUser initialization', () => {
     const iframe = env.getCurrentIframe();
     expect(iframe?.style.display).toBe('none');
 
-    await kmsUser.terminate();
+    kmsUser.terminate();
   });
 });
 
@@ -293,7 +293,7 @@ describe('RPC communication', () => {
     // Wait a bit for any pending async operations to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
     try {
-      await kmsUser.terminate();
+      kmsUser.terminate();
     } catch {
       // Ignore termination errors in cleanup
     }
@@ -437,7 +437,7 @@ describe('setup operations', () => {
     // Wait a bit for any pending async operations to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
     try {
-      await kmsUser.terminate();
+      kmsUser.terminate();
     } catch {
       // Ignore termination errors in cleanup
     }
@@ -557,7 +557,7 @@ describe('VAPID operations', () => {
     // Wait a bit for any pending async operations to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
     try {
-      await kmsUser.terminate();
+      kmsUser.terminate();
     } catch {
       // Ignore termination errors in cleanup
     }
@@ -605,7 +605,7 @@ describe('lease operations', () => {
     // Wait a bit for any pending async operations to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
     try {
-      await kmsUser.terminate();
+      kmsUser.terminate();
     } catch {
       // Ignore termination errors in cleanup
     }
@@ -692,7 +692,7 @@ describe('status and management', () => {
     // Wait a bit for any pending async operations to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
     try {
-      await kmsUser.terminate();
+      kmsUser.terminate();
     } catch {
       // Ignore termination errors in cleanup
     }
@@ -817,7 +817,7 @@ describe('lifecycle management', () => {
     const iframe = env.getCurrentIframe();
     const removeChildSpy = vi.spyOn(iframe!.parentNode!, 'removeChild');
 
-    await kmsUser.terminate();
+    kmsUser.terminate();
 
     expect(removeChildSpy).toHaveBeenCalled();
   });
@@ -832,7 +832,7 @@ describe('lifecycle management', () => {
     kmsUser.isSetup();
 
     // Terminate before response - should clean up without errors
-    await kmsUser.terminate();
+    kmsUser.terminate();
 
     // Verify terminate completed successfully
     expect(true).toBe(true);

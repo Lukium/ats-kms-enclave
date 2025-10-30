@@ -242,7 +242,7 @@ export async function jwkThumbprintP256(jwk: JsonWebKey): Promise<string> {
 function canonicalise(obj: Record<string, unknown>): string {
   const keys = Object.keys(obj).sort();
   const entries = keys.map((k) => [k, obj[k]]);
-  return '{' + entries.map(([k, v]) => `"${k}":${JSON.stringify(v)}`).join(',') + '}';
+  return '{' + entries.map(([k, v]) => `"${String(k)}":${JSON.stringify(v)}`).join(',') + '}';
 }
 
 /**

@@ -310,11 +310,15 @@ async function handleSetupPassphrase(
   await ensureAuditKey(mkek);
 
   // Generate VAPID keypair (per V2 spec: generate during setup)
-  const keypair = (await crypto.subtle.generateKey(
+  const keypairResult = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     true, // temporarily extractable for wrapping
     ['sign', 'verify']
-  )) as CryptoKeyPair;
+  );
+  if (!('privateKey' in keypairResult) || !('publicKey' in keypairResult)) {
+    throw new Error('Failed to generate ECDSA keypair');
+  }
+  const keypair = keypairResult;
 
   // Export public key (raw format, 65 bytes)
   const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
@@ -392,11 +396,15 @@ async function handleSetupPasskeyPRF(
   await ensureAuditKey(mkek);
 
   // Generate VAPID keypair (per V2 spec: generate during setup)
-  const keypair = (await crypto.subtle.generateKey(
+  const keypairResult = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     true, // temporarily extractable for wrapping
     ['sign', 'verify']
-  )) as CryptoKeyPair;
+  );
+  if (!('privateKey' in keypairResult) || !('publicKey' in keypairResult)) {
+    throw new Error('Failed to generate ECDSA keypair');
+  }
+  const keypair = keypairResult;
 
   // Export public key (raw format, 65 bytes)
   const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
@@ -469,11 +477,15 @@ async function handleSetupPasskeyGate(
   await ensureAuditKey(mkek);
 
   // Generate VAPID keypair (per V2 spec: generate during setup)
-  const keypair = (await crypto.subtle.generateKey(
+  const keypairResult = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     true, // temporarily extractable for wrapping
     ['sign', 'verify']
-  )) as CryptoKeyPair;
+  );
+  if (!('privateKey' in keypairResult) || !('publicKey' in keypairResult)) {
+    throw new Error('Failed to generate ECDSA keypair');
+  }
+  const keypair = keypairResult;
 
   // Export public key (raw format, 65 bytes)
   const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
@@ -595,14 +607,15 @@ async function handleAddEnrollment(
     const rpId = typeof validatedCreds.rpId === 'string' ? validatedCreds.rpId : '';
     enrollmentResult = await setupPasskeyGate(userId, validatedCreds.credentialId, ms, rpId);
   } else {
-    throw new Error(`Unknown enrollment method: ${method}`);
+    const exhaustive: never = method;
+    throw new Error(`Unknown enrollment method: ${String(exhaustive)}`);
   }
 
   // Zeroize MS
   ms.fill(0);
 
-  if (!enrollmentResult!.success) {
-    throw new Error(enrollmentResult!.error);
+  if (!enrollmentResult.success) {
+    throw new Error(enrollmentResult.error);
   }
 
   await logOperation({
@@ -636,11 +649,15 @@ async function handleGenerateVAPID(
     await ensureAuditKey(mkek);
 
     // Generate ECDSA P-256 keypair
-    const keypair = (await crypto.subtle.generateKey(
+    const keypairResult = await crypto.subtle.generateKey(
       { name: 'ECDSA', namedCurve: 'P-256' },
       true, // temporarily extractable for wrapping
       ['sign', 'verify']
-    )) as CryptoKeyPair;
+    );
+    if (!('privateKey' in keypairResult) || !('publicKey' in keypairResult)) {
+      throw new Error('Failed to generate ECDSA keypair');
+    }
+    const keypair = keypairResult;
 
     // Export public key (raw format, 65 bytes)
     const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
@@ -712,11 +729,15 @@ async function handleRegenerateVAPID(
     }
 
     // Generate new ECDSA P-256 keypair
-    const keypair = (await crypto.subtle.generateKey(
+    const keypairResult = await crypto.subtle.generateKey(
       { name: 'ECDSA', namedCurve: 'P-256' },
       true, // temporarily extractable for wrapping
       ['sign', 'verify']
-    )) as CryptoKeyPair;
+    );
+    if (!('privateKey' in keypairResult) || !('publicKey' in keypairResult)) {
+      throw new Error('Failed to generate ECDSA keypair');
+    }
+    const keypair = keypairResult;
 
     // Export public key (raw format, 65 bytes)
     const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
@@ -894,12 +915,15 @@ async function handleCreateLease(
   vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
 
   // Use most recent VAPID key (multi-key rotation is future work)
-  const vapidKeyRecord = vapidKeys[0]!;
+  const vapidKeyRecord = vapidKeys[0];
+  if (!vapidKeyRecord) {
+    throw new Error('VAPID key record not found after filtering');
+  }
   const kid = vapidKeyRecord.kid;
 
   // Generate lease ID and salt
   const leaseId = `lease-${crypto.randomUUID()}`;
-  const leaseSalt = crypto.getRandomValues(new Uint8Array(32)) as Uint8Array<ArrayBuffer>;
+  const leaseSalt = crypto.getRandomValues(new Uint8Array(32));
 
   // Calculate lease expiration time (needed for LAK delegation cert)
   const now = Date.now();
@@ -1039,7 +1063,11 @@ async function handleIssueVAPIDJWT(
       throw new Error('Multiple VAPID keys found. Please specify kid explicitly.');
     }
 
-    kid = vapidKeys[0]!.kid;
+    const firstKey = vapidKeys[0];
+    if (!firstKey) {
+      throw new Error('No VAPID key found after filtering');
+    }
+    kid = firstKey.kid;
   }
 
   // Retrieve lease
@@ -1367,7 +1395,16 @@ async function handleVerifyLease(params: { leaseId: string }): Promise<LeaseVeri
   vapidKeys.sort((a, b) => b.createdAt - a.createdAt);
 
   // Check if lease kid matches current VAPID key (most recent)
-  const currentKid = vapidKeys[0]!.kid;
+  const firstKey = vapidKeys[0];
+  if (!firstKey) {
+    return {
+      leaseId,
+      valid: false,
+      reason: 'no-vapid-key',
+      kid: lease.kid,
+    };
+  }
+  const currentKid = firstKey.kid;
   if (lease.kid !== currentKid) {
     return {
       leaseId,
@@ -1401,7 +1438,12 @@ async function handleGetVAPIDKid(): Promise<{ kid: string }> {
     throw new Error('Multiple VAPID keys found. Please use getPublicKey(kid) with explicit kid.');
   }
 
-  return { kid: vapidKeys[0]!.kid };
+  const firstKey = vapidKeys[0];
+  if (!firstKey) {
+    throw new Error('No VAPID key found after filtering');
+  }
+
+  return { kid: firstKey.kid };
 }
 
 // ============================================================================
@@ -1413,7 +1455,7 @@ async function handleGetVAPIDKid(): Promise<{ kid: string }> {
  */
 async function handleResetKMS(): Promise<{ success: true }> {
   // Close DB
-  await closeDB();
+  closeDB();
 
   // Delete database
   const deleteRequest = indexedDB.deleteDatabase('kms-v2');

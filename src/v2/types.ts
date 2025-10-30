@@ -253,13 +253,28 @@ export interface RPCResponse<TResult = unknown> {
 export type RPCMethod =
   | 'setupPassphrase'
   | 'setupPasskey'
+  | 'setupPasskeyPRF'
+  | 'setupPasskeyGate'
   | 'unlockWithPassphrase'
   | 'unlockWithPasskey'
+  | 'addEnrollment'
+  | 'removeEnrollment'
+  | 'getEnrollments'
   | 'generateVAPID'
+  | 'regenerateVAPID'
   | 'signJWT'
   | 'getPublicKey'
+  | 'getVAPIDKid'
+  | 'createLease'
+  | 'issueVAPIDJWT'
+  | 'issueVAPIDJWTs'
+  | 'getUserLeases'
+  | 'verifyLease'
   | 'getAuditLog'
-  | string;
+  | 'verifyAuditChain'
+  | 'getAuditPublicKey'
+  | 'isSetup'
+  | 'resetKMS';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)

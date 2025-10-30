@@ -261,7 +261,7 @@ export class KMSUser {
    * Terminate the KMS iframe
    * Clears all pending requests without rejecting them to avoid unhandled rejection errors
    */
-  async terminate(): Promise<void> {
+  terminate(): void {
     // Clear all pending request timeouts
     for (const pending of this.pendingRequests.values()) {
       clearTimeout(pending.timeoutId as number);

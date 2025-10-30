@@ -68,6 +68,7 @@ export class KMSClient {
    *
    * @throws {Error} If already initialized or Worker creation fails
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async init(): Promise<void> {
     if (this.isInitialized) {
       throw new Error('KMSClient already initialized');
@@ -402,6 +403,7 @@ export class KMSClient {
    *
    * @param passphrase - User-entered passphrase
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   private async handlePassphraseUnlock(passphrase: string): Promise<void> {
     if (!passphrase || passphrase.trim().length === 0) {
       this.showError('Please enter a passphrase');
@@ -1144,6 +1146,7 @@ export class KMSClient {
    *
    * Useful for testing or manual cleanup.
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async terminate(): Promise<void> {
     if (this.worker) {
       this.worker.terminate();

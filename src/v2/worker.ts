@@ -28,6 +28,7 @@ import type {
   QuotaState,
   AuditEntryV2,
   LeaseVerificationResult,
+  VerificationResult,
 } from './types';
 import {
   setupPassphrase,
@@ -177,7 +178,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
 
   try {
-    let result: any;
+    let result: unknown;
 
     switch (method) {
       // === Setup Operations ===
@@ -523,11 +524,21 @@ async function handleAddEnrollment(
     userId: string;
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
     credentials: AuthCredentials;
-    newCredentials: any;
+    newCredentials: unknown;
   },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string }> {
   const { userId, method, credentials, newCredentials } = params;
+
+  // Validate newCredentials structure based on method
+  function validateNewCredentials(m: string, creds: unknown): Record<string, unknown> {
+    if (typeof creds !== 'object' || creds === null) {
+      throw new Error(`newCredentials must be an object for ${m}`);
+    }
+    return creds as Record<string, unknown>;
+  }
+
+  const validatedCreds = validateNewCredentials(method, newCredentials);
 
   // Unlock to verify credentials and ensure audit key is loaded
   await withUnlock(credentials, async (mkek, _ms) => {
@@ -556,17 +567,33 @@ async function handleAddEnrollment(
   // Setup new enrollment with existing MS
   let enrollmentResult;
   if (method === 'passphrase') {
-    enrollmentResult = await setupPassphrase(userId, newCredentials.passphrase, ms);
+    if (typeof validatedCreds.passphrase !== 'string') {
+      throw new Error('passphrase must be a string');
+    }
+    enrollmentResult = await setupPassphrase(userId, validatedCreds.passphrase, ms);
   } else if (method === 'passkey-prf') {
+    if (!(validatedCreds.credentialId instanceof ArrayBuffer)) {
+      throw new Error('credentialId must be an ArrayBuffer');
+    }
+    if (!(validatedCreds.prfOutput instanceof ArrayBuffer)) {
+      throw new Error('prfOutput must be an ArrayBuffer');
+    }
+    // rpId is optional with default value ''
+    const rpId = typeof validatedCreds.rpId === 'string' ? validatedCreds.rpId : '';
     enrollmentResult = await setupPasskeyPRF(
       userId,
-      newCredentials.credentialId,
-      newCredentials.prfOutput,
+      validatedCreds.credentialId,
+      validatedCreds.prfOutput,
       ms,
-      newCredentials.rpId
+      rpId
     );
   } else if (method === 'passkey-gate') {
-    enrollmentResult = await setupPasskeyGate(userId, newCredentials.credentialId, ms, newCredentials.rpId);
+    if (!(validatedCreds.credentialId instanceof ArrayBuffer)) {
+      throw new Error('credentialId must be an ArrayBuffer');
+    }
+    // rpId is optional with default value ''
+    const rpId = typeof validatedCreds.rpId === 'string' ? validatedCreds.rpId : '';
+    enrollmentResult = await setupPasskeyGate(userId, validatedCreds.credentialId, ms, rpId);
   } else {
     throw new Error(`Unknown enrollment method: ${method}`);
   }
@@ -1247,7 +1274,7 @@ async function handleGetEnrollments(params?: { userId?: string }): Promise<{ enr
 /**
  * Verify audit chain integrity.
  */
-async function handleVerifyAuditChain(): Promise<any> {
+async function handleVerifyAuditChain(): Promise<VerificationResult> {
   return await verifyAuditChain();
 }
 
@@ -1392,7 +1419,7 @@ async function handleResetKMS(): Promise<{ success: true }> {
   const deleteRequest = indexedDB.deleteDatabase('kms-v2');
   await new Promise<void>((resolve, reject) => {
     deleteRequest.onsuccess = (): void => resolve();
-    deleteRequest.onerror = (): void => reject(deleteRequest.error);
+    deleteRequest.onerror = (): void => reject(new Error(deleteRequest.error?.message ?? 'Failed to delete database'));
   });
 
   // Reinitialize

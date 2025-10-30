@@ -157,7 +157,8 @@ export class KMSClient {
    */
   private handleWorkerMessage(event: MessageEvent): void {
     try {
-      this.sendToParent(event.data);
+      const data = event.data as RPCResponse | { type: string; [key: string]: unknown };
+      this.sendToParent(data);
     } catch (err: unknown) {
       console.error('[KMS Client] Failed to forward message to parent:', err);
     }
@@ -187,7 +188,7 @@ export class KMSClient {
    *
    * @param data - Data to send
    */
-  private sendToParent(data: any): void {
+  private sendToParent(data: RPCResponse | { type: string; [key: string]: unknown }): void {
     if (!window.parent) {
       console.error('[KMS Client] No parent window available');
       return;
@@ -915,15 +916,16 @@ export class KMSClient {
       this.worker?.postMessage(setupRequest);
 
       // Wait for response
-      const response: any = await new Promise((resolve, reject) => {
+      const response: unknown = await new Promise((resolve, reject) => {
         const handler = (event: MessageEvent): void => {
-          const resp = event.data;
-          if (resp.id === setupRequest.id) {
+          const data = event.data as RPCResponse;
+          if (data.id === setupRequest.id) {
             this.worker?.removeEventListener('message', handler);
-            if (resp.error) {
-              reject(new Error(resp.error));
+            if (data.error) {
+              const errorMsg = typeof data.error === 'string' ? data.error : data.error.message;
+              reject(new Error(errorMsg));
             } else {
-              resolve(resp.result);
+              resolve(data.result);
             }
           }
         };
@@ -944,7 +946,7 @@ export class KMSClient {
 
       // Notify parent window via postMessage
       if (window.opener) {
-        window.opener.postMessage({
+        (window.opener as Window).postMessage({
           type: 'kms:setup-complete',
           method: prfOutput ? 'passkey-prf' : 'passkey-gate',
           result: response,
@@ -1035,15 +1037,16 @@ export class KMSClient {
       this.worker?.postMessage(setupRequest);
 
       // Wait for response
-      const response: any = await new Promise((resolve, reject) => {
+      const response: unknown = await new Promise((resolve, reject) => {
         const handler = (event: MessageEvent): void => {
-          const resp = event.data;
-          if (resp.id === setupRequest.id) {
+          const data = event.data as RPCResponse;
+          if (data.id === setupRequest.id) {
             this.worker?.removeEventListener('message', handler);
-            if (resp.error) {
-              reject(new Error(resp.error));
+            if (data.error) {
+              const errorMsg = typeof data.error === 'string' ? data.error : data.error.message;
+              reject(new Error(errorMsg));
             } else {
-              resolve(resp.result);
+              resolve(data.result);
             }
           }
         };
@@ -1061,7 +1064,7 @@ export class KMSClient {
 
       // Notify parent window via postMessage
       if (window.opener) {
-        window.opener.postMessage({
+        (window.opener as Window).postMessage({
           type: 'kms:setup-complete',
           method: 'passphrase',
           result: response,
@@ -1213,6 +1216,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   }
 
   // Export for debugging
-  (window as any).__kmsClient = client;
-  (window as any).__kmsContext = { isIframe, isStandaloneSetup };
+  (window as Window & { __kmsClient?: unknown }).__kmsClient = client;
+  (window as Window & { __kmsContext?: unknown }).__kmsContext = { isIframe, isStandaloneSetup };
 }

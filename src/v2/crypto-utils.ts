@@ -239,7 +239,7 @@ export async function jwkThumbprintP256(jwk: JsonWebKey): Promise<string> {
  * and using `JSON.stringify`. This helper is used by AAD builders to
  * ensure deterministic encoding regardless of property order.
  */
-function canonicalise(obj: Record<string, any>): string {
+function canonicalise(obj: Record<string, unknown>): string {
   const keys = Object.keys(obj).sort();
   const entries = keys.map((k) => [k, obj[k]]);
   return '{' + entries.map(([k, v]) => `"${k}":${JSON.stringify(v)}`).join(',') + '}';
@@ -252,7 +252,7 @@ function canonicalise(obj: Record<string, any>): string {
  * canonicalised and encoded as UTF‑8 bytes.
  */
 export function buildMSEncryptionAAD(config: MSAADConfig): ArrayBuffer {
-  const obj: any = {
+  const obj: Record<string, unknown> = {
     kmsVersion: config.kmsVersion,
     method: config.method,
     algVersion: config.algVersion,
@@ -273,7 +273,7 @@ export function buildMSEncryptionAAD(config: MSAADConfig): ArrayBuffer {
  * substitution of wrapped keys between contexts.
  */
 export function buildKeyWrapAAD(metadata: KeyWrapAADConfig): ArrayBuffer {
-  const obj: any = {
+  const obj: Record<string, unknown> = {
     kmsVersion: metadata.kmsVersion,
     kid: metadata.kid,
     alg: metadata.alg,
@@ -401,8 +401,11 @@ export async function calibratePBKDF2Iterations(
  * as a base64url string suitable for storage in the KMS config.
  */
 export async function getPlatformHash(): Promise<string> {
+  const concurrency = typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator
+    ? String((navigator as Navigator & { hardwareConcurrency?: number }).hardwareConcurrency ?? '')
+    : '';
   const info = typeof navigator !== 'undefined'
-    ? [navigator.userAgent, navigator.platform, (navigator as any).hardwareConcurrency ?? ''].join('|')
+    ? [navigator.userAgent, navigator.platform, concurrency].join('|')
     : [process.platform, process.arch, process.version].join('|');
   const data = new TextEncoder().encode(info);
   // Use WebCrypto subtle.digest which works in both browser and Node.js

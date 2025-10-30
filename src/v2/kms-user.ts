@@ -25,6 +25,7 @@ import type {
   RPCResponse,
   RPCMethod,
   AuthCredentials,
+  AuditEntryV2,
   LeaseRecord,
   LeaseVerificationResult,
 } from './types.js';
@@ -57,7 +58,7 @@ export interface KMSUserConfig {
  * Pending RPC request
  */
 interface PendingRequest {
-  resolve: (result: any) => void;
+  resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timeoutId: NodeJS.Timeout | number;
   method: string;
@@ -223,7 +224,8 @@ export class KMSUser {
       }, timeout);
 
       const checkReady = (event: MessageEvent): void => {
-        if (event.origin === this.kmsOrigin && event.data?.type === 'kms:ready') {
+        const data = event.data as { type?: string };
+        if (event.origin === this.kmsOrigin && data?.type === 'kms:ready') {
           clearTimeout(timeoutId);
           window.removeEventListener('message', checkReady);
           this.isReady = true;
@@ -286,7 +288,8 @@ export class KMSUser {
     }
 
     // Handle ready signal (already handled in waitForReady)
-    if (event.data?.type === 'kms:ready') {
+    const data = event.data as { type?: string };
+    if (data?.type === 'kms:ready') {
       return;
     }
 
@@ -329,7 +332,7 @@ export class KMSUser {
    */
   private async sendRequest<T>(
     method: RPCMethod,
-    params: any,
+    params: unknown,
     timeout?: number
   ): Promise<T> {
     if (!this.isInitialized || !this.isReady) {
@@ -352,7 +355,7 @@ export class KMSUser {
 
       // Store pending request
       this.pendingRequests.set(requestId, {
-        resolve,
+        resolve: resolve as (result: unknown) => void,
         reject,
         timeoutId,
         method,
@@ -525,7 +528,7 @@ export class KMSUser {
     userId: string,
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate',
     credentials: AuthCredentials,
-    newCredentials: any
+    newCredentials: unknown
   ): Promise<SetupResult> {
     return this.sendRequest<SetupResult>('addEnrollment', {
       userId,
@@ -733,8 +736,8 @@ export class KMSUser {
    *
    * @returns All audit log entries
    */
-  async getAuditLog(): Promise<{ entries: any[] }> {
-    return this.sendRequest<{ entries: any[] }>('getAuditLog', {});
+  async getAuditLog(): Promise<{ entries: AuditEntryV2[] }> {
+    return this.sendRequest<{ entries: AuditEntryV2[] }>('getAuditLog', {});
   }
 
   /**

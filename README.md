@@ -36,29 +36,29 @@ See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-30 12:53:24 UTC*
+*Last updated: 2025-10-30 13:23:25 UTC*
 
 **Test Results:**
 - Test Files: 6 passed (6)
 - Tests: 227 passed (227)
-- Duration: 22.93s
+- Duration: 22.62s
 
 **Coverage Report:**
 ```
 File                │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-All files           │ 11256   │   82.49│    81.39 │   83.88│   82.49 │
+All files           │ 11292   │   82.27│    81.05 │   83.96│   82.27 │
  v2/audit.ts        │ 614     │   97.87│    86.66 │     100│   97.87 │ 13 lines
- v2/client.ts       │ 1219    │   37.01│    88.57 │   66.66│   37.01 │ 587 lines
- v2/crypto-utils.ts │ 412     │   96.35│    95.45 │   94.44│   96.35 │ 15 lines
+ v2/client.ts       │ 1222    │   37.00│    88.57 │   66.66│   37.00 │ 589 lines
+ v2/crypto-utils.ts │ 415     │   95.65│    95.45 │   94.44│   95.65 │ 18 lines
  v2/error-utils.ts  │ 95      │   69.14│    33.33 │   66.66│   69.14 │ 29 lines
- v2/kms-user.ts     │ 798     │   88.20│    73.07 │   71.42│   88.20 │ 94 lines
+ v2/kms-user.ts     │ 801     │   88.25│    73.07 │   71.42│   88.25 │ 94 lines
  v2/rpc-validation.ts│ 469     │   79.91│    68.05 │   77.41│   79.91 │ 94 lines
  v2/storage-types.ts│ 50      │   87.75│    50.00 │     100│   87.75 │ 6 lines
  v2/storage.ts      │ 549     │     100│    89.39 │     100│     100 │ 
  v2/unlock.ts       │ 458     │   91.68│    82.35 │   93.33│   91.68 │ 38 lines
  v2/webauthn-types.ts│ 105     │   93.26│    18.18 │   66.66│   93.26 │ 7 lines
- v2/worker.ts       │ 1481    │   89.66│    84.86 │   84.00│   89.66 │ 153 lines
+ v2/worker.ts       │ 1508    │   88.91│    83.54 │   84.61│   88.91 │ 167 lines
 ```
 <!-- END AUTO-GENERATED -->
 

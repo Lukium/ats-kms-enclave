@@ -15,10 +15,10 @@ export default defineConfig({
       },
     },
   ],
-  root: path.resolve(__dirname, './phase-1/full'),
+  root: path.resolve(__dirname, './phase-1'),
   publicDir: false,
   build: {
-    outDir: 'dist-full-kms',
+    outDir: 'dist-kms',
     emptyOutDir: true,
   },
   resolve: {

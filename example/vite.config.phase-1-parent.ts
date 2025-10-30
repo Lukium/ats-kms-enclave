@@ -5,10 +5,20 @@ import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  root: path.resolve(__dirname, './phase-1/iframe-isolation'),
+  plugins: [
+    {
+      name: 'full-reload',
+      handleHotUpdate({ server }) {
+        // Force full reload instead of HMR to prevent duplicate worker instances
+        server.ws.send({ type: 'full-reload' });
+        return [];
+      },
+    },
+  ],
+  root: path.resolve(__dirname, './phase-1'),
   publicDir: false,
   build: {
-    outDir: 'dist-integration-tests',
+    outDir: 'dist-parent',
     emptyOutDir: true,
   },
   resolve: {
@@ -17,23 +27,21 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5178,
-    strictPort: true, // Fail if port is already in use
+    port: 5173,
+    strictPort: true,
     fs: {
-      // Allow serving files from repository root (needed for src/ access)
       allow: [path.resolve(__dirname, '..')],
     },
     headers: {
-      // CSP for Integration Tests Page
+      // CSP for Parent PWA (matches integration tests structure)
       'Content-Security-Policy': [
         "default-src 'self'",
         "script-src 'self'",
-        "frame-src http://localhost:5177", // Allow KMS iframe
-        "connect-src 'self' ws://localhost:5178", // Allow Vite HMR
+        "frame-src http://localhost:5174", // Allow KMS iframe
+        "connect-src 'self' ws://localhost:5173", // Allow Vite HMR
         "worker-src 'self' blob:", // Allow Vite HMR workers
         "style-src 'self' 'unsafe-inline'", // TODO: Remove unsafe-inline in production
       ].join('; '),
     },
-    open: '/integration-tests.html', // Auto-open integration tests page
   },
 });

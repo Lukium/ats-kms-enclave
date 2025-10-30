@@ -22,16 +22,11 @@
     "build": "node build/esbuild.js --dev",
     "build:dev": "node build/esbuild.js --dev",
     "build:reproducible": "node build/esbuild.js --reproducible",
-    "demo": "vite --config example/vite.config.phase-1-security-flow.ts",
-    "demo:build": "vite build --config example/vite.config.ts",
-    "demo:phase-0": "vite --config example/vite.config.ts",
-    "demo:phase-1-security-flow": "vite --config example/vite.config.phase-1-security-flow.ts",
-    "demo:phase-1-iframe-isolation:parent": "vite --config example/vite.config.phase-1-iframe-isolation-parent.ts",
-    "demo:phase-1-iframe-isolation:kms": "vite --config example/vite.config.phase-1-iframe-isolation-kms.ts",
-    "demo:phase-1-iframe-isolation:integration": "vite --config example/vite.config.phase-1-integration-tests.ts",
-    "demo:phase-1-full:parent": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-full-parent.ts",
-    "demo:phase-1-full:kms": "lsof -ti:5174 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-full-kms.ts",
-    "demo:enhanced": "vite --config example/vite.config.ts --open /index-enhanced.html"
+    "demo": "vite --config example/vite.config.phase-0.ts",
+    "demo:build": "vite build --config example/vite.config.phase-0.ts",
+    "demo:phase-0": "vite --config example/vite.config.phase-0.ts",
+    "demo:phase-1:parent": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-parent.ts",
+    "demo:phase-1:kms": "lsof -ti:5174 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-kms.ts"
   },
   "keywords": [
     "cryptography",

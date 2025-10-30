@@ -486,7 +486,7 @@ describe('regenerateVAPID', () => {
     // Create a lease with the initial key
     const leaseResponse = await handleMessage(
       createRequest('createLease', {
-        kid: oldKid,
+        userId: 'test@example.com',
         subs: [
           {
             url: 'https://example.com/push',

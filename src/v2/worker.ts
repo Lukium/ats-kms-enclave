@@ -75,6 +75,7 @@ import {
   arrayBufferToBase64url,
 } from './crypto-utils';
 import { getErrorMessage } from './error-utils';
+import * as validators from './rpc-validation';
 
 // ============================================================================
 // Session Key Cache (Lease-Scoped)
@@ -180,54 +181,54 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
     switch (method) {
       // === Setup Operations ===
       case 'setupPassphrase':
-        result = await handleSetupPassphrase(params, id);
+        result = await handleSetupPassphrase(validators.validateSetupPassphrase(params), id);
         break;
 
       case 'setupPasskeyPRF':
-        result = await handleSetupPasskeyPRF(params, id);
+        result = await handleSetupPasskeyPRF(validators.validateSetupPasskeyPRF(params), id);
         break;
 
       case 'setupPasskeyGate':
-        result = await handleSetupPasskeyGate(params, id);
+        result = await handleSetupPasskeyGate(validators.validateSetupPasskeyGate(params), id);
         break;
 
       case 'addEnrollment':
-        result = await handleAddEnrollment(params, id);
+        result = await handleAddEnrollment(validators.validateAddEnrollment(params), id);
         break;
 
       // === VAPID Operations ===
       case 'generateVAPID':
-        result = await handleGenerateVAPID(params, id);
+        result = await handleGenerateVAPID(validators.validateGenerateVAPID(params), id);
         break;
 
       case 'regenerateVAPID':
-        result = await handleRegenerateVAPID(params, id);
+        result = await handleRegenerateVAPID(validators.validateRegenerateVAPID(params), id);
         break;
 
       case 'signJWT':
-        result = await handleSignJWT(params, id);
+        result = await handleSignJWT(validators.validateSignJWT(params), id);
         break;
 
       // === VAPID Lease Operations ===
       case 'createLease':
-        result = await handleCreateLease(params, id);
+        result = await handleCreateLease(validators.validateCreateLease(params), id);
         break;
 
       case 'issueVAPIDJWT':
-        result = await handleIssueVAPIDJWT(params, id);
+        result = await handleIssueVAPIDJWT(validators.validateIssueVAPIDJWT(params), id);
         break;
 
       case 'issueVAPIDJWTs':
-        result = await handleIssueVAPIDJWTs(params, id);
+        result = await handleIssueVAPIDJWTs(validators.validateIssueVAPIDJWTs(params), id);
         break;
 
       // === Status/Query Operations ===
       case 'isSetup':
-        result = await handleIsSetup(params);
+        result = await handleIsSetup(validators.validateIsSetup(params));
         break;
 
       case 'getEnrollments':
-        result = await handleGetEnrollments(params);
+        result = await handleGetEnrollments(validators.validateGetEnrollments(params));
         break;
 
       case 'verifyAuditChain':
@@ -239,7 +240,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         break;
 
       case 'getPublicKey':
-        result = await handleGetPublicKey(params);
+        result = await handleGetPublicKey(validators.validateGetPublicKey(params));
         break;
 
       case 'getAuditPublicKey':
@@ -247,11 +248,11 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         break;
 
       case 'getUserLeases':
-        result = await handleGetUserLeases(params);
+        result = await handleGetUserLeases(validators.validateGetUserLeases(params));
         break;
 
       case 'verifyLease':
-        result = await handleVerifyLease(params);
+        result = await handleVerifyLease(validators.validateVerifyLease(params));
         break;
 
       case 'getVAPIDKid':
@@ -264,7 +265,7 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         break;
 
       case 'removeEnrollment':
-        result = await handleRemoveEnrollment(params, id);
+        result = await handleRemoveEnrollment(validators.validateRemoveEnrollment(params), id);
         break;
 
       default:

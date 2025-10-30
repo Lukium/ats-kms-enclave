@@ -131,7 +131,7 @@ export async function subscribeToPush(
   try {
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: vapidPublicKey,
+      applicationServerKey: vapidPublicKey as BufferSource,
     });
 
     console.log('[Push Utils] Push subscription created:', subscription.endpoint);
@@ -200,7 +200,7 @@ export function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+    binary += String.fromCharCode(bytes[i]!);
   }
   const base64 = btoa(binary);
   // Convert base64 to base64url

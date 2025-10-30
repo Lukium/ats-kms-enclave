@@ -28,7 +28,7 @@ const kmsUser = new KMSUser({
 
 // DOM Elements
 const auditLogEl = document.getElementById('audit-log')!;
-const resetDemoBtn = document.getElementById('reset-demo-btn')!;
+const resetDemoBtn = document.getElementById('reset-demo-btn')! as HTMLButtonElement;
 const setupOperationEl = document.getElementById('setup-operation')!;
 const leaseOperationEl = document.getElementById('lease-operation')!;
 
@@ -709,7 +709,7 @@ async function unsubscribeFromPushNotifications(): Promise<void> {
 /**
  * Create a VAPID lease (Phase B: requires existing push subscription)
  */
-async function createLease(status: { isSetup: boolean; methods: string[] }, autoExtend: boolean): Promise<void> {
+async function createLease(_status: { isSetup: boolean; methods: string[] }, autoExtend: boolean): Promise<void> {
   try {
     console.log(`[Full Demo] Creating VAPID lease (autoExtend: ${autoExtend})...`);
 
@@ -720,15 +720,23 @@ async function createLease(status: { isSetup: boolean; methods: string[] }, auto
       return;
     }
 
-    // Create lease (NO subs parameter - worker reads subscription from VAPID key)
+    // Create lease with subscription info
     const userId = 'demouser@ats.run';
     const ttlHours = 720; // 30 days (720 hours) lease
 
-    console.log('[Full Demo] Calling createLease with:', { userId, ttlHours, autoExtend });
+    // Build subs array from push subscription
+    const pushServiceUrl = new URL(subscription.endpoint);
+    const subs = [{
+      url: subscription.endpoint,
+      aud: pushServiceUrl.origin,
+      eid: subscription.eid,
+    }];
+
+    console.log('[Full Demo] Calling createLease with:', { userId, ttlHours, subs });
     const result = await kmsUser.createLease({
       userId,
+      subs,
       ttlHours,
-      autoExtend,
     });
     console.log('[Full Demo] Lease created:', result);
 
@@ -742,12 +750,6 @@ async function createLease(status: { isSetup: boolean; methods: string[] }, auto
           <div class="artifact-card">
             <div class="artifact-title">Lease ID</div>
             <div class="artifact-data"><code>${result.leaseId}</code></div>
-          </div>
-          <div class="artifact-card">
-            <div class="artifact-title">Auto-Extend</div>
-            <div class="artifact-data" style="color: ${result.autoExtend ? '#28a745' : '#6c757d'};">
-              ${result.autoExtend ? '✅ Enabled (can extend without re-authentication)' : '❌ Disabled (requires authentication to extend)'}
-            </div>
           </div>
           <div class="artifact-card">
             <div class="artifact-title">Expiration</div>

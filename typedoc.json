@@ -1,0 +1,36 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/v2/kms-user.ts", "src/v2/types.ts"],
+  "out": "docs/API/generated",
+  "plugin": ["typedoc-plugin-markdown"],
+  "readme": "none",
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Setup Operations",
+    "VAPID Key Management",
+    "VAPID Lease Operations",
+    "Push Notifications",
+    "Status and Query Operations",
+    "Management Operations"
+  ],
+  "sort": ["kind", "instance-first", "alphabetical"],
+  "kindSortOrder": [
+    "Class",
+    "Constructor",
+    "Property",
+    "Method",
+    "TypeAlias",
+    "Interface"
+  ],
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "includeVersion": true,
+  "gitRevision": "main",
+  "gitRemote": "origin",
+  "sourceLinkTemplate": "https://github.com/your-org/ats-kms/blob/{gitRevision}/{path}#L{line}",
+  "navigationLinks": {
+    "GitHub": "https://github.com/your-org/ats-kms",
+    "Architecture Docs": "../architecture/crypto/README.md"
+  }
+}

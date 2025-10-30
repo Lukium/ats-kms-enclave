@@ -66,6 +66,7 @@ All files           │ 11684   │   83.81│    84.81 │   85.71│   83.81 �
 
 ### Quick Start
 
+- **[docs/API/README.md](docs/API/README.md)** - Complete API reference (TypeDoc-generated)
 - **[CLAUDE.md](CLAUDE.md)** - Guidance for AI assistants working with this codebase
 - **[docs/architecture/crypto/README.md](docs/architecture/crypto/README.md)** - Architecture overview
 - **[docs/architecture/crypto/design/](docs/architecture/crypto/design/)** - Detailed design components

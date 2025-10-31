@@ -262,7 +262,7 @@ export function validateSetupWithEncryptedCredentials(params: unknown): {
   }
 
   return {
-    method: method as 'passphrase' | 'passkey-prf' | 'passkey-gate',
+    method,
     transportKeyId: validateString('setupWithEncryptedCredentials', 'transportKeyId', p.transportKeyId),
     ephemeralPublicKey: validateString('setupWithEncryptedCredentials', 'ephemeralPublicKey', p.ephemeralPublicKey),
     iv: validateString('setupWithEncryptedCredentials', 'iv', p.iv),

@@ -163,13 +163,13 @@ export async function setupPasskeyPRF(
   );
   const now = Date.now();
   // Convert salts to ArrayBuffer (not SharedArrayBuffer) by slicing
-  const appSaltBuffer = appSalt.buffer.slice(appSalt.byteOffset, appSalt.byteOffset + appSalt.byteLength) as ArrayBuffer;
+  const appSaltBuffer = appSalt.buffer.slice(appSalt.byteOffset, appSalt.byteOffset + appSalt.byteLength);
   let hkdfSaltBuffer: ArrayBuffer;
   if (hkdfSalt instanceof Uint8Array) {
-    hkdfSaltBuffer = hkdfSalt.buffer.slice(hkdfSalt.byteOffset, hkdfSalt.byteOffset + hkdfSalt.byteLength) as ArrayBuffer;
+    hkdfSaltBuffer = hkdfSalt.buffer.slice(hkdfSalt.byteOffset, hkdfSalt.byteOffset + hkdfSalt.byteLength);
   } else {
     // Already an ArrayBuffer (from deriveDeterministicSalt)
-    hkdfSaltBuffer = hkdfSalt as ArrayBuffer;
+    hkdfSaltBuffer = hkdfSalt;
   }
   const config: PasskeyPRFConfigV2 = {
     kmsVersion: 2,
@@ -184,7 +184,7 @@ export async function setupPasskeyPRF(
       info: 'ATS/KMS/KEK-wrap/v2',
     },
     encryptedMS: ciphertext,
-    msIV: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer,
+    msIV: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength),
     msAAD: aad,
     msVersion: 1,
     createdAt: now,

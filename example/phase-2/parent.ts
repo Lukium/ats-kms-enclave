@@ -450,48 +450,131 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
 }
 
 /**
- * Setup passphrase authentication
- */
-/**
- * Setup Passphrase authentication - opens KMS in new window (first-party context)
+ * Setup passphrase authentication using stateless popup.
+ *
+ * This function uses the new stateless popup flow:
+ * 1. Generate ephemeral transport keys in iframe
+ * 2. Open popup with transport parameters in URL
+ * 3. Popup collects credentials and encrypts with transport key
+ * 4. Parent receives encrypted credentials (blind proxy)
+ * 5. Parent forwards encrypted credentials to iframe for decryption and storage
  */
 async function setupPassphrase(): Promise<void> {
-  console.log('[Full Demo] Opening KMS setup window...');
+  console.log('[Full Demo] Starting passphrase setup with stateless popup...');
 
-  // Open KMS in new window for passphrase setup
-  const setupWindow = window.open(
-    KMS_ORIGIN + '/?mode=setup&parentOrigin=' + encodeURIComponent(window.location.origin),
-    'kms-setup',
-    'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
-  );
+  try {
+    // Step 1: Get transport parameters from iframe KMS
+    const transportParams = await kmsUser.generateSetupTransportKey();
+    console.log('[Full Demo] Got transport parameters:', {
+      keyId: transportParams.keyId,
+      publicKey: transportParams.publicKey.slice(0, 20) + '...'
+    });
 
-  if (!setupWindow) {
-    alert('Failed to open setup window. Please allow popups for this site.');
-    return;
+    // Step 2: Open popup with transport parameters
+    const setupURL = new URL(KMS_ORIGIN + '/');
+    setupURL.searchParams.set('mode', 'setup');
+    setupURL.searchParams.set('transportKey', transportParams.publicKey);
+    setupURL.searchParams.set('keyId', transportParams.keyId);
+    setupURL.searchParams.set('appSalt', transportParams.appSalt);
+    setupURL.searchParams.set('hkdfSalt', transportParams.hkdfSalt);
+    setupURL.searchParams.set('parentOrigin', window.location.origin);
+
+    const setupWindow = window.open(
+      setupURL.toString(),
+      'kms-setup',
+      'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
+    );
+
+    if (!setupWindow) {
+      alert('Failed to open setup window. Please allow popups for this site.');
+      return;
+    }
+
+    console.log('[Full Demo] Popup opened, waiting for credentials...');
+
+    // Step 3: Wait for encrypted credentials from popup
+    const credentials = await new Promise<{
+      method: string;
+      transportKeyId: string;
+      ephemeralPublicKey: string;
+      iv: string;
+      encryptedCredentials: string;
+      userId: string;
+    }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Setup timeout (no credentials received)'));
+      }, 5 * 60 * 1000); // 5 minute timeout
+
+      const handler = (event: MessageEvent): void => {
+        if (event.origin !== KMS_ORIGIN) return;
+        if (event.data?.type === 'kms:setup-credentials') {
+          clearTimeout(timeout);
+          window.removeEventListener('message', handler);
+          resolve(event.data);
+        }
+      };
+
+      window.addEventListener('message', handler);
+    });
+
+    console.log('[Full Demo] Received encrypted credentials, importing to iframe...');
+
+    // Step 4: Forward encrypted credentials to iframe KMS
+    const result = await kmsUser.setupWithEncryptedCredentials({
+      method: credentials.method as 'passphrase' | 'passkey-prf' | 'passkey-gate',
+      transportKeyId: credentials.transportKeyId,
+      ephemeralPublicKey: credentials.ephemeralPublicKey,
+      iv: credentials.iv,
+      encryptedCredentials: credentials.encryptedCredentials,
+      userId: credentials.userId
+    });
+
+    console.log('[Full Demo] Setup completed successfully:', result);
+
+    // Step 5: Show success message
+    setupOperationEl.innerHTML = `
+      <div class="success-message">
+        <h4>✅ Setup Complete! (${credentials.method})</h4>
+        <div class="artifact-card">
+          <div class="artifact-title">Enrollment ID</div>
+          <div class="artifact-data"><code>${result.enrollmentId}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">VAPID Key ID</div>
+          <div class="artifact-data"><code>${result.vapidKid}</code></div>
+        </div>
+        <div class="artifact-card">
+          <div class="artifact-title">VAPID Public Key</div>
+          <div class="artifact-data"><code>${result.vapidPublicKey}</code></div>
+        </div>
+      </div>
+    `;
+
+    // Step 6: Reload audit log
+    await loadAuditLog();
+
+    // Step 7: Reload setup UI to reflect new enrollment
+    const status = await kmsUser.isSetup('demouser@ats.run');
+    renderSetupUI(status);
+    renderLeaseUI(status);
+
+    console.log('[Full Demo] UI updated after setup completion');
+
+  } catch (error) {
+    console.error('[Full Demo] Setup failed:', error);
+    alert(`Setup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-
-  console.log('[Full Demo] Setup window opened, waiting for completion message...');
 }
 
 /**
- * Setup WebAuthn authentication - opens KMS in new window (first-party context)
+ * Setup WebAuthn authentication using stateless popup.
+ *
+ * This function uses the same stateless popup flow as setupPassphrase().
+ * The popup will detect WebAuthn and handle PRF detection automatically.
  */
 async function setupWebAuthn(): Promise<void> {
-  console.log('[Full Demo] Opening KMS setup window...');
-
-  // Open KMS in new window for first-party WebAuthn registration
-  const setupWindow = window.open(
-    KMS_ORIGIN + '/?mode=setup&parentOrigin=' + encodeURIComponent(window.location.origin),
-    'kms-setup',
-    'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
-  );
-
-  if (!setupWindow) {
-    alert('Failed to open setup window. Please allow popups for this site.');
-    return;
-  }
-
-  console.log('[Full Demo] Setup window opened, waiting for completion...');
+  // Same implementation as setupPassphrase - popup handles method detection
+  await setupPassphrase();
 }
 
 /**

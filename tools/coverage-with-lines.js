@@ -9,7 +9,7 @@
 const GREEN = '\x1b[32m';
 const RESET = '\x1b[0m';
 
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -94,9 +94,9 @@ function main() {
   }
 
   console.log('\n📊 Coverage Report with Line Counts (V2 only)\n');
-  console.log('─'.repeat(100));
+  console.log('─'.repeat(110));
   console.log(
-    'File'.padEnd(20) +
+    'File'.padEnd(25) +
     '│ Lines'.padEnd(10) +
     '│ % Stmts'.padEnd(10) +
     '│ % Branch'.padEnd(11) +
@@ -104,14 +104,14 @@ function main() {
     '│ % Lines'.padEnd(10) +
     '│ Uncovered'
   );
-  console.log('─'.repeat(100));
+  console.log('─'.repeat(110));
 
   // Print totals
   const total = coverage.total;
   const totalLines = Object.values(lineCounts).reduce((sum, count) => sum + count, 0);
 
   console.log(
-    GREEN + 'All files'.padEnd(20) + RESET +
+    GREEN + 'All files'.padEnd(25) + RESET +
     '│' + GREEN + ` ${String(totalLines).padEnd(8)}` + RESET +
     '│' + GREEN + ` ${formatPct(total.statements.pct).padStart(7)}` + RESET +
     '│' + GREEN + ` ${formatPct(total.branches.pct).padStart(9)}` + RESET +
@@ -131,7 +131,7 @@ function main() {
     const uncoveredStr = uncovered > 0 ? `${uncovered} lines` : '';
 
     console.log(
-      GREEN + ` ${relPath}`.padEnd(20) + RESET +
+      GREEN + ` ${relPath}`.padEnd(25) + RESET +
       '│' + GREEN + ` ${String(lineCount).padEnd(8)}` + RESET +
       '│' + GREEN + ` ${formatPct(stats.statements.pct).padStart(7)}` + RESET +
       '│' + GREEN + ` ${formatPct(stats.branches.pct).padStart(9)}` + RESET +
@@ -141,7 +141,7 @@ function main() {
     );
   }
 
-  console.log('─'.repeat(100));
+  console.log('─'.repeat(110));
 
   // Check if coverage meets threshold (80% for V2)
   const threshold = 80;
@@ -161,6 +161,49 @@ function main() {
     console.log('   Functions:', total.functions.pct.toFixed(2) + '%');
     console.log();
   }
+
+  // Write formatted data to temp file for update-readme.js to consume
+  writeCoverageDataForReadme(coverage, lineCounts, totalLines);
+}
+
+/**
+ * Write coverage data to temp file for update-readme.js
+ */
+function writeCoverageDataForReadme(coverage, lineCounts, totalLines) {
+  const tmpFile = join(rootDir, '.coverage-readme-data.json');
+
+  // Count test files (v2 only)
+  const testsDir = join(rootDir, 'tests');
+  let testFileCount = 0;
+  function countTestFiles(dir) {
+    try {
+      const entries = readdirSync(dir);
+      for (const entry of entries) {
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        if (stat.isDirectory()) {
+          countTestFiles(fullPath);
+        } else if (entry.endsWith('.test.ts') && fullPath.includes('/v2/')) {
+          testFileCount++;
+        }
+      }
+    } catch {}
+  }
+  countTestFiles(testsDir);
+
+  // Get test count from coverage data (sum of covered + uncovered statements gives us rough test count)
+  const total = coverage.total;
+
+  const data = {
+    totalLines,
+    coverage,
+    lineCounts,
+    testFileCount,
+    timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+  };
+
+  writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
+  console.log(`📝 Coverage data written to ${tmpFile} for README update\n`);
 }
 
 main();

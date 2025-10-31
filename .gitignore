@@ -82,3 +82,4 @@ docs/.vitepress/cache/
 
 # Demo build artifacts
 example/**/dist-*/
+.coverage-readme-data.json

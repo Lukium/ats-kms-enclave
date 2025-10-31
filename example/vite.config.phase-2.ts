@@ -37,6 +37,11 @@ export default defineConfig({
         "worker-src 'self' blob:", // Allow Vite HMR workers
         "style-src 'self' 'unsafe-inline'", // TODO: Remove unsafe-inline in production
       ].join('; '),
+
+      // Cross-Origin Policies - Must match KMS popup for compatible browsing context
+      // This allows popup messaging while maintaining SharedArrayBuffer isolation
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
 });

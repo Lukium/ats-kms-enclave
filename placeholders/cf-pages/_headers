@@ -24,11 +24,12 @@
   # Permissions Policy - Disable unnecessary browser features
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
 
-  # Cross-Origin Policies - TEMPORARY: Most permissive for testing
-  # TODO: Restore strict policies after verifying popup messaging works
-  # Cross-Origin-Opener-Policy: same-origin-allow-popups
-  # Cross-Origin-Embedder-Policy: require-corp
-  # Cross-Origin-Resource-Policy: same-origin
+  # Cross-Origin Policies - Enable SharedArrayBuffer and allow popup messaging
+  # Using same-origin-allow-popups to maintain isolation while allowing parent→popup postMessage
+  # IMPORTANT: Parent PWA must use matching COOP/COEP headers for compatible browsing context
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
 
   # Standard security headers
   X-Content-Type-Options: nosniff

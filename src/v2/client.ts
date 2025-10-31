@@ -136,24 +136,12 @@ export class KMSClient {
         this.sendToParent({ type: 'kms:ready' });
       } else {
         /* c8 ignore start - stateless popup mode requires browser integration testing */
-        /* eslint-disable no-console, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
-        // Stateless popup mode - send handshake to window.opener for MessageChannel setup
-        console.log('[KMS Client] Stateless popup: Sending kms:ready handshake to window.opener');
-        if (!window.opener) {
-          console.error('[KMS Client] window.opener is null - cannot establish MessageChannel');
-        } else if (!this.popupState) {
-          console.error('[KMS Client] Missing state parameter - cannot send handshake');
-        } else if (!parentOriginParam) {
-          console.error('[KMS Client] Missing parentOrigin parameter - cannot send handshake');
-        } else {
-          // Send kms:ready handshake with state token
-          window.opener.postMessage(
-            { type: 'kms:ready', state: this.popupState },
-            parentOriginParam
-          );
-          console.log('[KMS Client] Sent kms:ready handshake with state:', this.popupState);
-        }
-        /* eslint-enable no-console, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+        /* eslint-disable no-console */
+        // Stateless popup mode - no handshake needed
+        // Parent will send kms:connect immediately with MessagePort
+        // (window.opener is blocked by cross-origin security anyway)
+        console.log('[KMS Client] Stateless popup: Waiting for kms:connect from parent...');
+        /* eslint-enable no-console */
         /* c8 ignore stop */
       }
     } catch (err: unknown) {
@@ -203,6 +191,13 @@ export class KMSClient {
 
       this.messagePort = event.ports[0] || null;
       console.log('[KMS Client] MessagePort established successfully');
+
+      // Signal to parent that connection is established (stops retry loop)
+      if (this.messagePort) {
+        this.messagePort.postMessage({ type: 'kms:connected' });
+        console.log('[KMS Client] Sent kms:connected confirmation to parent');
+      }
+
       return;
     }
     /* eslint-enable no-console, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */

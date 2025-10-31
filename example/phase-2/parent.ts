@@ -460,7 +460,7 @@ async function setupPassphrase(): Promise<void> {
 
   // Open KMS in new window for passphrase setup
   const setupWindow = window.open(
-    KMS_ORIGIN + '/?mode=setup&parentOrigin=' + encodeURIComponent(window.location.origin),
+    KMS_ORIGIN + '/?parentOrigin=' + encodeURIComponent(window.location.origin),
     'kms-setup',
     'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
   );
@@ -481,7 +481,7 @@ async function setupWebAuthn(): Promise<void> {
 
   // Open KMS in new window for first-party WebAuthn registration
   const setupWindow = window.open(
-    KMS_ORIGIN + '/?mode=setup&parentOrigin=' + encodeURIComponent(window.location.origin),
+    KMS_ORIGIN + '/?parentOrigin=' + encodeURIComponent(window.location.origin),
     'kms-setup',
     'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
   );

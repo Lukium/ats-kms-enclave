@@ -539,6 +539,7 @@ async function setupPassphrase(): Promise<void> {
         }
 
         try {
+          console.log('[Full Demo] Sending kms:hello to popup...');
           setupWindow.postMessage(
             { type: 'kms:hello', state, parent: window.location.origin },
             KMS_ORIGIN

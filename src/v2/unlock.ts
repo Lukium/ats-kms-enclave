@@ -163,10 +163,20 @@ export async function setupPasskeyPRF(
   );
   const now = Date.now();
   // Convert salts to ArrayBuffer (not SharedArrayBuffer) by slicing
-  const appSaltBuffer = appSalt.buffer.slice(appSalt.byteOffset, appSalt.byteOffset + appSalt.byteLength);
+  // Type assertions needed: TypedArray.buffer.slice() returns ArrayBuffer | SharedArrayBuffer
+  // but we need ArrayBuffer for WebCrypto APIs (which don't accept SharedArrayBuffer)
+   
+  const appSaltBuffer = appSalt.buffer.slice(
+    appSalt.byteOffset,
+    appSalt.byteOffset + appSalt.byteLength
+  ) as ArrayBuffer;
   let hkdfSaltBuffer: ArrayBuffer;
   if (hkdfSalt instanceof Uint8Array) {
-    hkdfSaltBuffer = hkdfSalt.buffer.slice(hkdfSalt.byteOffset, hkdfSalt.byteOffset + hkdfSalt.byteLength);
+     
+    hkdfSaltBuffer = hkdfSalt.buffer.slice(
+      hkdfSalt.byteOffset,
+      hkdfSalt.byteOffset + hkdfSalt.byteLength
+    ) as ArrayBuffer;
   } else {
     // Already an ArrayBuffer (from deriveDeterministicSalt)
     hkdfSaltBuffer = hkdfSalt;
@@ -184,6 +194,7 @@ export async function setupPasskeyPRF(
       info: 'ATS/KMS/KEK-wrap/v2',
     },
     encryptedMS: ciphertext,
+     
     msIV: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength),
     msAAD: aad,
     msVersion: 1,

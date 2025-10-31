@@ -143,6 +143,8 @@ function generateEnclaveCSS(): void {
 .logo {
   width: 48px;
   height: 48px;
+  max-width: 48px;
+  max-height: 48px;
   object-fit: contain;
 }
 
@@ -262,7 +264,7 @@ function generateEnclaveHTML(workerHash: string): void {
   <div class="enclave-status">
     <div class="header">
       <img src="logo.png" alt="AllTheServices" class="logo">
-      <h1>KMS Enclave</h1>
+      <h1>AllTheServices KMS Enclave</h1>
     </div>
     <p><span class="status">Active</span> - Worker loaded and ready</p>
     <div>

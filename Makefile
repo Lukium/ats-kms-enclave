@@ -85,9 +85,19 @@ demo-phase-0:
 
 # Run Phase 1 demo in browser
 demo-phase-1:
-	@echo "🚀 Starting Phase 1 demo..."
-	@echo "Opening http://localhost:5174"
-	pnpm demo:phase-1
+	@echo "🚀 Phase 1 Demo requires two terminals:"
+	@echo ""
+	@echo "Terminal 1 (KMS enclave):"
+	@echo "  pnpm demo:phase-1:kms"
+	@echo "  → http://localhost:5174"
+	@echo ""
+	@echo "Terminal 2 (Parent PWA):"
+	@echo "  pnpm demo:phase-1:parent"
+	@echo "  → http://localhost:5173"
+	@echo ""
+	@echo "Then open http://localhost:5173 in your browser"
+	@echo ""
+	@echo "See example/phase-1/README.md for full details"
 
 # Clean generated files
 clean:

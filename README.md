@@ -24,7 +24,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - Worker-based RPC protocol proof-of-concept
 - 108 tests passing (100% coverage)
 
-**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30)
+**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30) [`bf23208`](https://github.com/lukium/ats-kms/commit/bf23208)
 - ✅ **KMS Worker** - Secure cryptographic operations in dedicated Worker
 - ✅ **Client Bridge** - Type-safe RPC communication with parent PWA
 - ✅ **Passkey Unlock** - WebAuthn-based authentication (FIDO2/passkey)
@@ -38,7 +38,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - ✅ **Browser Integration** - Full Web Push subscription lifecycle
 - ✅ **401+ tests passing** - 85%+ coverage across all components
 
-**[Try the Phase 1 demo →](example/phase-1/README.md)** `make demo`
+**[Try the Phase 1 demo →](example/phase-1/README.md)** (requires two terminals: `pnpm demo:phase-1:kms` and `pnpm demo:phase-1:parent`, or run `make demo` for instructions)
 
 This represents the bulk of the core KMS functionality. See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the full roadmap.
 
@@ -277,7 +277,7 @@ We will respond within 48 hours and work with you to address the issue.
 - Worker-based RPC protocol proof-of-concept
 - 108 tests passing (100% coverage)
 
-**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30)
+**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30) [`bf23208`](https://github.com/lukium/ats-kms/commit/bf23208)
 - Production-ready KMS with full cryptographic operations
 - Passkey (WebAuthn) and passphrase (PBKDF2) unlock mechanisms
 - Lease-based JWT authorization

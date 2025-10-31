@@ -1208,7 +1208,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
   // Detect if we're in an iframe or standalone window
   const isIframe = window.self !== window.top;
-  const isStandaloneSetup = !isIframe && window.opener !== null;
+  // Check for setup mode via URL param OR window.opener
+  const isSetupMode = params.get('mode') === 'setup' || params.has('setup');
+  const isStandaloneSetup = !isIframe && (window.opener !== null || isSetupMode);
 
   // Create and initialize client
   const client = new KMSClient({ parentOrigin });

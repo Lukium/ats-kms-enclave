@@ -568,7 +568,7 @@ This is **required** for WebAuthn API to work. Iframes (even cross-origin) may n
 ```
 example/phase-1/
 ├── index.html              # Parent PWA entry point
-├── kms.html                # KMS iframe with authentication modals
+├── index.html (KMS)        # KMS page served as iframe or popup for setup
 ├── parent.ts               # Parent PWA logic (1,520 lines)
 ├── kms.ts                  # KMS iframe bootstrap (40 lines)
 ├── push-utils.ts           # Push notification utilities (258 lines)

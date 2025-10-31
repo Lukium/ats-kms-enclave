@@ -61,19 +61,7 @@
   X-Content-Type-Options: nosniff
 
 # Content-addressed JavaScript modules (Phase 2)
-# Pattern: /kms-worker.{hash}.js or /kms-{hash}.mjs
-/*.js
-  Content-Type: application/javascript; charset=utf-8
-
-  # No CORS needed (same-origin only via CSP)
-  Cross-Origin-Resource-Policy: same-origin
-
-  # Cache forever (content-addressed filename = immutable)
-  Cache-Control: public, max-age=31536000, immutable
-
-  # Standard security headers
-  X-Content-Type-Options: nosniff
-
+# Pattern: /kms-{hash}.mjs
 /*.mjs
   Content-Type: application/javascript; charset=utf-8
 

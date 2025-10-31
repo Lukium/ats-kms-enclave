@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "comment": "PLACEHOLDER - This will be replaced by real manifest in Phase 2",
+  "current": {
+    "version": "0.0.0-placeholder",
+    "artifact": "kms-PLACEHOLDER.mjs",
+    "sha384": "PLACEHOLDER_HASH_WILL_BE_REAL_SHA384_IN_PHASE2",
+    "sri": "sha384-PLACEHOLDER_HASH_WILL_BE_REAL_SHA384_IN_PHASE2",
+    "commit": "PLACEHOLDER_COMMIT_SHA",
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "build": {
+      "reproducible": false,
+      "environment": "placeholder"
+    }
+  },
+  "allowed": [],
+  "deprecated": [],
+  "warning": "This is a placeholder manifest for infrastructure testing only. Do not use in production."
+}

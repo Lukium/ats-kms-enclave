@@ -1,64 +1,116 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>KMS Enclave (Placeholder)</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Enclave</title>
+  <meta name="description" content="AllTheServices Key Management System Enclave">
+
+  <!-- Security Headers (CSP should be set via HTTP headers in production) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'none'; style-src 'unsafe-inline';">
+
   <style>
     body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 600px;
-      margin: 50px auto;
+      margin: 0;
       padding: 20px;
-      background: #f5f5f5;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
     }
-    .placeholder {
-      background: white;
-      border: 2px dashed #ccc;
-      border-radius: 8px;
+    .enclave-status {
+      max-width: 600px;
+      margin: 0 auto;
       padding: 30px;
-      text-align: center;
-    }
-    .status {
-      display: inline-block;
-      background: #fef3cd;
-      color: #856404;
-      padding: 5px 15px;
-      border-radius: 4px;
-      font-size: 14px;
-      margin-bottom: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      border: 1px solid #3a3a3a;
     }
     h1 {
       margin: 0 0 10px 0;
-      color: #333;
+      font-size: 24px;
+      color: #4CAF50;
     }
-    p {
-      color: #666;
-      line-height: 1.6;
+    .hash {
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      word-break: break-all;
+      color: #888;
+      margin: 10px 0;
     }
-    code {
-      background: #f5f5f5;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 14px;
+    .status {
+      color: #4CAF50;
+      font-weight: 600;
     }
   </style>
 </head>
 <body>
-  <div class="placeholder">
-    <div class="status">⚠️ Placeholder Mode</div>
-    <h1>KMS Enclave</h1>
-    <p>
-      This is a placeholder page for infrastructure testing.
-      The real KMS enclave module will ship in <strong>Phase 2</strong>.
-    </p>
-    <p>
-      <strong>Phase 1:</strong> Building core crypto operations (in progress)<br>
-      <strong>Phase 2:</strong> Reproducible builds + verification (upcoming)
-    </p>
-    <p style="margin-top: 30px; font-size: 12px; color: #999;">
-      Placeholder deployed: <code>placeholders/kms.html</code>
+  <div class="enclave-status">
+    <h1>🔒 KMS Enclave</h1>
+    <p><span class="status">Active</span> - Worker loaded and ready</p>
+    <div>
+      <strong>Worker Hash:</strong>
+      <div class="hash">885ea08b72573ee071a7f16eab5e73a1226848945011f03f67c2c24cdf822e5b</div>
+    </div>
+    <p style="font-size: 14px; color: #888; margin-top: 20px;">
+      This iframe runs in a sandboxed cross-origin context.
+      All cryptographic operations are isolated from the parent PWA.
     </p>
   </div>
+
+  <script type="module">
+    // Bootstrap: Load the KMS worker and establish parent communication
+    const worker = new Worker('./kms-worker.885ea08b.js', {
+      type: 'module',
+      name: 'kms-enclave-worker'
+    });
+
+    // Track worker readiness
+    let workerReady = false;
+
+    // Forward messages from parent to worker
+    window.addEventListener('message', (event) => {
+      // TODO: Add origin validation in production
+      // if (event.origin !== 'https://ats.run') return;
+
+      if (!workerReady) {
+        console.warn('[KMS Enclave] Worker not ready, queueing message');
+        // Could implement message queue here if needed
+        return;
+      }
+
+      console.log('[KMS Enclave] → Worker:', event.data.method || event.data.type);
+      worker.postMessage(event.data);
+    });
+
+    // Forward messages from worker to parent
+    worker.addEventListener('message', (event) => {
+      console.log('[KMS Enclave] ← Worker:', event.data);
+      window.parent.postMessage(event.data, '*'); // TODO: Specify target origin in production
+    });
+
+    // Handle worker errors
+    worker.addEventListener('error', (event) => {
+      console.error('[KMS Enclave] Worker error:', event);
+      window.parent.postMessage({
+        type: 'error',
+        error: 'Worker crashed: ' + event.message
+      }, '*');
+    });
+
+    // Mark worker as ready
+    worker.addEventListener('message', function readyHandler(event) {
+      if (event.data.type === 'ready') {
+        workerReady = true;
+        worker.removeEventListener('message', readyHandler);
+        console.log('[KMS Enclave] Worker ready');
+      }
+    }, { once: false });
+
+    // Signal to parent that iframe is loaded
+    window.parent.postMessage({ type: 'iframe-ready' }, '*');
+  </script>
 </body>
 </html>

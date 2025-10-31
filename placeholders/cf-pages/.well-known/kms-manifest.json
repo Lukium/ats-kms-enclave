@@ -1,19 +1,20 @@
 {
   "schema": 1,
-  "comment": "PLACEHOLDER - This will be replaced by real manifest in Phase 2",
   "current": {
-    "version": "0.0.0-placeholder",
-    "artifact": "kms-PLACEHOLDER.mjs",
-    "sha384": "PLACEHOLDER_HASH_WILL_BE_REAL_SHA384_IN_PHASE2",
-    "sri": "sha384-PLACEHOLDER_HASH_WILL_BE_REAL_SHA384_IN_PHASE2",
-    "commit": "PLACEHOLDER_COMMIT_SHA",
-    "timestamp": "1970-01-01T00:00:00.000Z",
+    "version": "2.0.0",
+    "artifact": "kms-worker.885ea08b.js",
+    "sha256": "885ea08b72573ee071a7f16eab5e73a1226848945011f03f67c2c24cdf822e5b",
+    "sri": "sha256-iF6gi3JXPuBxp/Fuq15zoSJoSJRQEfA/Z8LCTN+CLls=",
+    "timestamp": "2025-10-31T00:48:54.382Z",
     "build": {
-      "reproducible": false,
-      "environment": "placeholder"
+      "reproducible": true,
+      "environment": "production",
+      "SOURCE_DATE_EPOCH": "1609459200"
     }
   },
-  "allowed": [],
+  "allowed": [
+    "885ea08b72573ee071a7f16eab5e73a1226848945011f03f67c2c24cdf822e5b"
+  ],
   "deprecated": [],
-  "warning": "This is a placeholder manifest for infrastructure testing only. Do not use in production."
+  "comment": "Phase 2: Deterministic builds with content-addressed artifacts"
 }

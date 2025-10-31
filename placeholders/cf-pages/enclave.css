@@ -297,3 +297,48 @@ h1 {
 @keyframes kms-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Helper classes to avoid inline styles (CSP compliance) */
+.hidden {
+  display: none !important;
+}
+
+.kms-char-count {
+  margin: -0.5rem 0 0.5rem 0;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.kms-match-feedback {
+  margin: -0.5rem 0 0.5rem 0;
+  font-size: 0.75rem;
+}
+
+.kms-setup-success {
+  padding: 1rem;
+  background: rgba(72, 187, 120, 0.1);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+  border-radius: 6px;
+  color: #68d391;
+  font-size: 0.875rem;
+  margin-top: 1rem;
+}
+
+.kms-success-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kms-success-icon {
+  font-size: 1.5rem;
+}
+
+.kms-success-title {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.kms-success-message {
+  opacity: 0.9;
+}

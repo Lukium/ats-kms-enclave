@@ -414,6 +414,51 @@ h1 {
 @keyframes kms-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Helper classes to avoid inline styles (CSP compliance) */
+.hidden {
+  display: none !important;
+}
+
+.kms-char-count {
+  margin: -0.5rem 0 0.5rem 0;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.kms-match-feedback {
+  margin: -0.5rem 0 0.5rem 0;
+  font-size: 0.75rem;
+}
+
+.kms-setup-success {
+  padding: 1rem;
+  background: rgba(72, 187, 120, 0.1);
+  border: 1px solid rgba(72, 187, 120, 0.3);
+  border-radius: 6px;
+  color: #68d391;
+  font-size: 0.875rem;
+  margin-top: 1rem;
+}
+
+.kms-success-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kms-success-icon {
+  font-size: 1.5rem;
+}
+
+.kms-success-title {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.kms-success-message {
+  opacity: 0.9;
+}
 `;
 
   const cssPath = join(distDir, 'enclave/enclave.css');
@@ -494,7 +539,7 @@ function generateEnclaveHTML(workerHash: string): void {
   </div>
 
   <!-- Unlock Modal (shown in popup window for unlock) -->
-  <div id="unlock-modal" class="kms-modal" style="display: none;">
+  <div id="unlock-modal" class="kms-modal hidden">
     <div class="kms-modal-backdrop"></div>
     <div class="kms-modal-content">
       <div class="kms-modal-header">
@@ -534,10 +579,10 @@ function generateEnclaveHTML(workerHash: string): void {
         </div>
 
         <!-- Error Display -->
-        <div id="kms-modal-error" class="kms-modal-error" style="display: none;"></div>
+        <div id="kms-modal-error" class="kms-modal-error hidden"></div>
 
         <!-- Loading State -->
-        <div id="kms-modal-loading" class="kms-modal-loading" style="display: none;">
+        <div id="kms-modal-loading" class="kms-modal-loading hidden">
           <span class="kms-spinner"></span>
           <span>Unlocking...</span>
         </div>
@@ -546,7 +591,7 @@ function generateEnclaveHTML(workerHash: string): void {
   </div>
 
   <!-- Setup Modal (shown in popup window for setup) -->
-  <div id="setup-modal" class="kms-modal" style="display: none;">
+  <div id="setup-modal" class="kms-modal hidden">
     <div class="kms-modal-backdrop"></div>
     <div class="kms-modal-content">
       <div class="kms-modal-header">
@@ -579,7 +624,7 @@ function generateEnclaveHTML(workerHash: string): void {
             placeholder="Enter a strong passphrase (min 12 chars)"
             autocomplete="off"
           />
-          <div id="kms-passphrase-char-count" style="margin: -0.5rem 0 0.5rem 0; font-size: 0.75rem; color: #666;">
+          <div id="kms-passphrase-char-count" class="kms-char-count">
             0 / 12 characters
           </div>
           <label for="kms-setup-passphrase-confirm-input" class="kms-input-label">Confirm Passphrase</label>
@@ -590,7 +635,7 @@ function generateEnclaveHTML(workerHash: string): void {
             placeholder="Re-enter your passphrase"
             autocomplete="off"
           />
-          <div id="kms-passphrase-match-feedback" style="margin: -0.5rem 0 0.5rem 0; font-size: 0.75rem; display: none;">
+          <div id="kms-passphrase-match-feedback" class="kms-match-feedback hidden">
             <!-- Feedback will be inserted here dynamically -->
           </div>
           <button id="kms-setup-passphrase-btn" class="kms-auth-btn kms-secondary">
@@ -600,21 +645,21 @@ function generateEnclaveHTML(workerHash: string): void {
         </div>
 
         <!-- Error Display -->
-        <div id="kms-setup-error" class="kms-modal-error" style="display: none;"></div>
+        <div id="kms-setup-error" class="kms-modal-error hidden"></div>
 
         <!-- Loading State -->
-        <div id="kms-setup-loading" class="kms-modal-loading" style="display: none;">
+        <div id="kms-setup-loading" class="kms-modal-loading hidden">
           <span class="kms-spinner"></span>
           <span>Setting up...</span>
         </div>
 
         <!-- Success State -->
-        <div id="kms-setup-success" style="display: none; padding: 1rem; background: rgba(72, 187, 120, 0.1); border: 1px solid rgba(72, 187, 120, 0.3); border-radius: 6px; color: #68d391; font-size: 0.875rem; margin-top: 1rem;">
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-size: 1.5rem;">✅</span>
+        <div id="kms-setup-success" class="kms-setup-success hidden">
+          <div class="kms-success-content">
+            <span class="kms-success-icon">✅</span>
             <div>
-              <div style="font-weight: 600; margin-bottom: 0.25rem;">Setup Complete!</div>
-              <div style="opacity: 0.9;">You can now close this window and return to the main app.</div>
+              <div class="kms-success-title">Setup Complete!</div>
+              <div class="kms-success-message">You can now close this window and return to the main app.</div>
             </div>
           </div>
         </div>

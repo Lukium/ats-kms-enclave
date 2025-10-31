@@ -95,6 +95,13 @@ export class KMSClient {
       // hkdfSalt is available in URL but not used directly in popup (sent to iframe)
       this.isStatelessPopup = !!(this.transportPublicKey && this.transportKeyId);
 
+      console.log('[KMS Client] Popup detection:', {
+        url: window.location.href,
+        transportKey: this.transportPublicKey?.slice(0, 20) + '...',
+        keyId: this.transportKeyId,
+        isStatelessPopup: this.isStatelessPopup
+      });
+
       if (this.isStatelessPopup) {
         console.log('[KMS Client] Running in stateless popup mode');
       }

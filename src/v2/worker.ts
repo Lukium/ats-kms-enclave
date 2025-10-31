@@ -272,8 +272,7 @@ async function setupWithEncryptedCredentials(params: {
     throw new Error('Transport key not found or expired');
   }
 
-  try {
-    // Step 2: Import popup's ephemeral public key
+  // Step 2: Import popup's ephemeral public key
     const popupPublicKeyBytes = base64urlToArrayBuffer(params.ephemeralPublicKey);
     const popupPublicKey = await crypto.subtle.importKey(
       'raw',
@@ -383,14 +382,10 @@ async function setupWithEncryptedCredentials(params: {
       throw new Error(`Unknown method: ${String(exhaustive)}`);
     }
 
-    // Step 7: Delete ephemeral transport key (one-time use, no longer needed)
-    ephemeralTransportKeys.delete(params.transportKeyId);
+  // Step 7: Delete ephemeral transport key (one-time use, no longer needed)
+  ephemeralTransportKeys.delete(params.transportKeyId);
 
-    return result;
-  } catch (error) {
-    // Don't delete key on error (allow retry)
-    throw error;
-  }
+  return result;
 }
 
 // ============================================================================

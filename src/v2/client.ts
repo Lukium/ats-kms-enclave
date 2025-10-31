@@ -100,6 +100,7 @@ export class KMSClient {
       // hkdfSalt is available in URL but not used directly in popup (sent to iframe)
       this.isStatelessPopup = !!(this.transportPublicKey && this.transportKeyId);
 
+      /* eslint-disable no-console */
       console.log('[KMS Client] Popup detection:', {
         url: window.location.href,
         transportKey: this.transportPublicKey?.slice(0, 20) + '...',
@@ -112,6 +113,7 @@ export class KMSClient {
       if (this.isStatelessPopup) {
         console.log('[KMS Client] Running in stateless popup mode');
       }
+      /* eslint-enable no-console */
 
       // Setup parent window message handler FIRST (before Worker creation)
       // This ensures popup can receive kms:hello even if Worker init fails
@@ -334,7 +336,7 @@ export class KMSClient {
       /* eslint-enable @typescript-eslint/no-unsafe-assignment */
       return;
     }
-    /* eslint-enable @typescript-eslint/no-unsafe-assignment */
+     
 
     try {
       (targetWindow as Window).postMessage(data, this.parentOrigin);
@@ -1054,6 +1056,7 @@ export class KMSClient {
 
       // Check if stateless popup mode
       if (this.isStatelessPopup) {
+        /* eslint-disable no-console */
         // Use appSalt from URL parameters
         const appSalt = base64urlToArrayBuffer(this.appSalt!);
 
@@ -1715,6 +1718,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       // Listen for stateless popup credentials (Phase 2)
       const credentialsChannel = new BroadcastChannel('kms-setup-credentials');
       credentialsChannel.addEventListener('message', (event) => {
+        /* eslint-disable no-console, @typescript-eslint/no-unsafe-member-access */
         console.log('[KMS Client] Iframe received credentials from popup via BroadcastChannel');
         if (event.data?.type === 'kms:setup-credentials') {
           // Forward to parent PWA
@@ -1723,6 +1727,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             console.log('[KMS Client] Iframe forwarded credentials to parent');
           }
         }
+        /* eslint-enable no-console, @typescript-eslint/no-unsafe-member-access */
       });
 
       // Listen for legacy setup complete messages
@@ -1745,6 +1750,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       // Handle stateless popup credentials
       if (event.key === 'kms:setup-credentials' && event.newValue) {
         try {
+          /* eslint-disable no-console, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
           console.log('[KMS Client] Iframe received credentials from popup via localStorage');
           const data = JSON.parse(event.newValue);
           if (data?.type === 'kms:setup-credentials') {
@@ -1753,6 +1759,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
               window.parent.postMessage(data, parentOrigin);
               console.log('[KMS Client] Iframe forwarded credentials to parent');
             }
+          /* eslint-enable no-console, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
             // Clear the flag
             localStorage.removeItem('kms:setup-credentials');
           }

@@ -21,6 +21,9 @@ import type { RPCRequest, RPCResponse, AuthCredentials } from './types.js';
 import { formatError, getErrorMessage } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
 
+// Global constant injected at build time by esbuild
+declare const __WORKER_FILENAME__: string;
+
 /**
  * Configuration for KMSClient
  */
@@ -58,7 +61,8 @@ export class KMSClient {
    */
   constructor(config: KMSClientConfig) {
     this.parentOrigin = config.parentOrigin;
-    this.workerUrl = config.workerUrl ?? new URL('./worker.js', import.meta.url).href;
+    // Use injected worker filename from build (for production) or fallback to relative path (for dev)
+    this.workerUrl = config.workerUrl ?? (typeof __WORKER_FILENAME__ !== 'undefined' ? __WORKER_FILENAME__ : new URL('./worker.js', import.meta.url).href);
   }
 
   /**

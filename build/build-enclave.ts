@@ -184,64 +184,40 @@ h1 {
 }
 
 /**
- * Generate the client bootstrap script for the enclave
+ * Build the client script for the enclave
+ * Compiles src/v2/client.ts and injects the hashed worker filename
  */
-function generateEnclaveClient(workerFilename: string): void {
-  const client = `// Bootstrap: Load the KMS worker and establish parent communication
-const worker = new Worker('./${workerFilename}', {
-  type: 'module',
-  name: 'kms-enclave-worker'
-});
-
-// Track worker readiness
-let workerReady = false;
-
-// Forward messages from parent to worker
-window.addEventListener('message', (event) => {
-  // TODO: Add origin validation in production
-  // if (event.origin !== 'https://ats.run') return;
-
-  if (!workerReady) {
-    console.warn('[KMS Enclave] Worker not ready, queueing message');
-    // Could implement message queue here if needed
-    return;
-  }
-
-  console.log('[KMS Enclave] → Worker:', event.data.method || event.data.type);
-  worker.postMessage(event.data);
-});
-
-// Forward messages from worker to parent
-worker.addEventListener('message', (event) => {
-  console.log('[KMS Enclave] ← Worker:', event.data);
-  window.parent.postMessage(event.data, '*'); // TODO: Specify target origin in production
-});
-
-// Handle worker errors
-worker.addEventListener('error', (event) => {
-  console.error('[KMS Enclave] Worker error:', event);
-  window.parent.postMessage({
-    type: 'error',
-    error: 'Worker crashed: ' + event.message
-  }, '*');
-});
-
-// Mark worker as ready
-worker.addEventListener('message', function readyHandler(event) {
-  if (event.data.type === 'ready') {
-    workerReady = true;
-    worker.removeEventListener('message', readyHandler);
-    console.log('[KMS Enclave] Worker ready');
-  }
-}, { once: false });
-
-// Signal to parent that iframe is loaded
-window.parent.postMessage({ type: 'iframe-ready' }, '*');
-`;
+async function buildEnclaveClient(workerFilename: string): Promise<void> {
+  console.log('\n📦 Building KMS Enclave Client...');
 
   const clientPath = join(distDir, 'enclave/enclave-client.js');
-  writeFileSync(clientPath, client, 'utf-8');
-  console.log(`✅ Generated: ${clientPath}`);
+
+  await esbuild.build({
+    entryPoints: [join(srcDir, 'v2/client.ts')],
+    bundle: true,
+    outfile: clientPath,
+    format: 'esm',
+    target: 'es2022',
+    platform: 'browser',
+    minify: true,
+    sourcemap: false,
+    treeShaking: true,
+
+    // Inject the hashed worker filename at build time
+    define: {
+      '__WORKER_FILENAME__': JSON.stringify(`./${workerFilename}`),
+    },
+
+    // Determinism settings
+    logLevel: 'warning',
+    legalComments: 'none',
+    charset: 'utf8',
+
+    // External dependencies (none - we bundle everything)
+    external: [],
+  });
+
+  console.log(`✅ Built: ${clientPath}`);
 }
 
 /**
@@ -299,7 +275,7 @@ async function main() {
 
     // Generate CSS, client script, and HTML
     generateEnclaveCSS();
-    generateEnclaveClient(filename);
+    await buildEnclaveClient(filename);
     generateEnclaveHTML(hash);
 
     // Write build manifest

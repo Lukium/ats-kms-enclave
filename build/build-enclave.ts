@@ -131,10 +131,26 @@ function generateEnclaveCSS(): void {
   border: 1px solid #3a3a3a;
 }
 
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
 h1 {
-  margin: 0 0 10px 0;
+  margin: 0;
   font-size: 24px;
   color: #4CAF50;
+  font-weight: 600;
 }
 
 .hash {
@@ -237,13 +253,17 @@ function generateEnclaveHTML(workerHash: string): void {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KMS Enclave</title>
+  <title>AllTheServices KMS Enclave</title>
   <meta name="description" content="AllTheServices Key Management System Enclave">
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="enclave.css">
 </head>
 <body>
   <div class="enclave-status">
-    <h1>🔒 KMS Enclave</h1>
+    <div class="header">
+      <img src="logo.png" alt="AllTheServices" class="logo">
+      <h1>KMS Enclave</h1>
+    </div>
     <p><span class="status">Active</span> - Worker loaded and ready</p>
     <div>
       <strong>Worker Hash:</strong>

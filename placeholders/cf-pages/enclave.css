@@ -15,10 +15,26 @@ body {
   border: 1px solid #3a3a3a;
 }
 
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
 h1 {
-  margin: 0 0 10px 0;
+  margin: 0;
   font-size: 24px;
   color: #4CAF50;
+  font-weight: 600;
 }
 
 .hash {

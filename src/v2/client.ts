@@ -1318,7 +1318,7 @@ export class KMSClient {
           ...encrypted,
         };
 
-        // Send to parent - try multiple strategies since window.opener may be null for cross-origin
+        // Send to parent - try ALL strategies (not just one) for maximum reliability
         let sent = false;
 
         // Strategy 1: Try window.opener if available
@@ -1332,31 +1332,27 @@ export class KMSClient {
           }
         }
 
-        // Strategy 2: Use BroadcastChannel (works cross-origin within same site)
-        if (!sent) {
-          try {
-            console.log('[KMS Client] Sending encrypted credentials via BroadcastChannel');
-            const channel = new BroadcastChannel('kms-setup-credentials');
-            channel.postMessage(message);
-            channel.close();
-            sent = true;
-          } catch (err) {
-            console.warn('[KMS Client] Failed to send via BroadcastChannel:', err);
-          }
+        // Strategy 2: Use localStorage (most reliable for popup→iframe same-origin)
+        try {
+          console.log('[KMS Client] Sending encrypted credentials via localStorage');
+          localStorage.setItem('kms:setup-credentials', JSON.stringify({
+            ...message,
+            timestamp: Date.now()
+          }));
+          sent = true;
+        } catch (err) {
+          console.warn('[KMS Client] Failed to send via localStorage:', err);
         }
 
-        // Strategy 3: Use localStorage as fallback (cross-tab communication)
-        if (!sent) {
-          try {
-            console.log('[KMS Client] Sending encrypted credentials via localStorage');
-            localStorage.setItem('kms:setup-credentials', JSON.stringify({
-              ...message,
-              timestamp: Date.now()
-            }));
-            sent = true;
-          } catch (err) {
-            console.warn('[KMS Client] Failed to send via localStorage:', err);
-          }
+        // Strategy 3: Use BroadcastChannel (may not work popup→iframe)
+        try {
+          console.log('[KMS Client] Sending encrypted credentials via BroadcastChannel');
+          const channel = new BroadcastChannel('kms-setup-credentials');
+          channel.postMessage(message);
+          channel.close();
+          sent = true;
+        } catch (err) {
+          console.warn('[KMS Client] Failed to send via BroadcastChannel:', err);
         }
 
         if (sent) {
@@ -1739,6 +1735,35 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     } catch (err) {
       console.warn('[KMS Client] Failed to check localStorage for setup-complete:', err);
     }
+  }
+
+  // If iframe, poll localStorage for credentials from popup (in case storage event doesn't fire)
+  if (isIframe) {
+    console.log('[KMS Client] Iframe: Starting localStorage polling for popup credentials...');
+    const pollInterval = setInterval(() => {
+      try {
+        const stored = localStorage.getItem('kms:setup-credentials');
+        if (stored) {
+          const data = JSON.parse(stored);
+          if (data?.type === 'kms:setup-credentials' && data.timestamp && Date.now() - data.timestamp < 30000) {
+            console.log('[KMS Client] Iframe found credentials in localStorage (polling)!');
+            clearInterval(pollInterval);
+            // Forward to parent PWA
+            if (window.parent) {
+              window.parent.postMessage(data, parentOrigin);
+              console.log('[KMS Client] Iframe forwarded credentials to parent');
+            }
+            // Clear the flag
+            localStorage.removeItem('kms:setup-credentials');
+          }
+        }
+      } catch (err) {
+        // Ignore polling errors
+      }
+    }, 200); // Poll every 200ms
+
+    // Stop polling after 5 minutes
+    setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
   }
 
   // Export for debugging

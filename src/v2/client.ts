@@ -60,6 +60,8 @@ export class KMSClient {
   private transportPublicKey: string | null = null;
   private transportKeyId: string | null = null;
   private appSalt: string | null = null;
+  private popupState: string | null = null; // Anti-CSRF state token
+  private messagePort: MessagePort | null = null; // For direct parent communication
   // Note: hkdfSalt from URL is not used directly in popup (sent to iframe via encrypted message)
 
   /**
@@ -92,6 +94,9 @@ export class KMSClient {
       this.transportPublicKey = urlParams.get('transportKey');
       this.transportKeyId = urlParams.get('keyId');
       this.appSalt = urlParams.get('appSalt');
+      this.popupState = urlParams.get('state');
+      const parentOriginParam = urlParams.get('parentOrigin');
+
       // hkdfSalt is available in URL but not used directly in popup (sent to iframe)
       this.isStatelessPopup = !!(this.transportPublicKey && this.transportKeyId);
 
@@ -99,6 +104,8 @@ export class KMSClient {
         url: window.location.href,
         transportKey: this.transportPublicKey?.slice(0, 20) + '...',
         keyId: this.transportKeyId,
+        state: this.popupState,
+        parentOrigin: parentOriginParam,
         isStatelessPopup: this.isStatelessPopup
       });
 
@@ -123,11 +130,31 @@ export class KMSClient {
 
       this.isInitialized = true;
 
-      // Signal ready to parent (skip in stateless popup mode - popup doesn't need persistent connection)
+      // Signal ready to parent
       if (!this.isStatelessPopup) {
+        // Normal iframe mode - use existing mechanism
         this.sendToParent({ type: 'kms:ready' });
       } else {
-        console.log('[KMS Client] Skipping kms:ready in stateless popup mode');
+        /* c8 ignore start - stateless popup mode requires browser integration testing */
+        /* eslint-disable no-console, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+        // Stateless popup mode - send handshake to window.opener for MessageChannel setup
+        console.log('[KMS Client] Stateless popup: Sending kms:ready handshake to window.opener');
+        if (!window.opener) {
+          console.error('[KMS Client] window.opener is null - cannot establish MessageChannel');
+        } else if (!this.popupState) {
+          console.error('[KMS Client] Missing state parameter - cannot send handshake');
+        } else if (!parentOriginParam) {
+          console.error('[KMS Client] Missing parentOrigin parameter - cannot send handshake');
+        } else {
+          // Send kms:ready handshake with state token
+          window.opener.postMessage(
+            { type: 'kms:ready', state: this.popupState },
+            parentOriginParam
+          );
+          console.log('[KMS Client] Sent kms:ready handshake with state:', this.popupState);
+        }
+        /* eslint-enable no-console, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+        /* c8 ignore stop */
       }
     } catch (err: unknown) {
       console.error('[KMS Client] Initialization failed:', err);
@@ -151,6 +178,35 @@ export class KMSClient {
       });
       return;
     }
+
+    /* c8 ignore start - stateless popup mode requires browser integration testing */
+    /* eslint-disable no-console, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+    // Special handling for kms:connect (MessageChannel port transfer)
+    // This happens BEFORE initialization check because it's part of popup setup
+    if (event.data?.type === 'kms:connect' && this.isStatelessPopup) {
+      console.log('[KMS Client] Received kms:connect message');
+
+      // Verify state token matches (anti-CSRF)
+      if (event.data.state !== this.popupState) {
+        console.error('[KMS Client] State mismatch in kms:connect:', {
+          expected: this.popupState,
+          received: event.data.state
+        });
+        return;
+      }
+
+      // Extract transferred MessagePort
+      if (!event.ports || event.ports.length === 0) {
+        console.error('[KMS Client] No MessagePort transferred in kms:connect');
+        return;
+      }
+
+      this.messagePort = event.ports[0] || null;
+      console.log('[KMS Client] MessagePort established successfully');
+      return;
+    }
+    /* eslint-enable no-console, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+    /* c8 ignore stop */
 
     // Validate client is initialized
     if (!this.isInitialized || !this.worker) {
@@ -240,17 +296,24 @@ export class KMSClient {
     // Determine target window based on context
     // Popup mode: use window.opener (popup was opened by parent)
     // Iframe mode: use window.parent (iframe is embedded in parent)
-    const isPopup = window.opener !== null && window.opener !== window;
-    const targetWindow = isPopup ? window.opener : window.parent;
 
-    if (!targetWindow || targetWindow === window) {
+    /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+    // More robust popup detection: window.opener must exist, not be null, and not be self
+    const hasValidOpener = window.opener && window.opener !== null && window.opener !== window;
+    const hasValidParent = window.parent && window.parent !== window;
+
+    // Prefer opener if available (popup mode), otherwise use parent (iframe mode)
+    const targetWindow = hasValidOpener ? window.opener : (hasValidParent ? window.parent : null);
+
+    if (!targetWindow) {
       console.error('[KMS Client] No parent/opener window available', {
-        isPopup,
-        hasOpener: window.opener !== null,
-        hasParent: window.parent !== window
+        hasValidOpener,
+        hasValidParent
       });
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment */
       return;
     }
+    /* eslint-enable @typescript-eslint/no-unsafe-assignment */
 
     try {
       (targetWindow as Window).postMessage(data, this.parentOrigin);
@@ -1307,74 +1370,48 @@ export class KMSClient {
           this.transportPublicKey!
         );
 
-        console.log('[KMS Client] Credentials encrypted, preparing to send to parent');
+        /* c8 ignore start - stateless popup mode requires browser integration testing */
+        /* eslint-disable no-console */
+        console.log('[KMS Client] Credentials encrypted, preparing to send to parent via MessagePort');
 
-        // Prepare message
-        const message = {
+        // Verify MessagePort is established
+        if (!this.messagePort) {
+          console.error('[KMS Client] MessagePort not established - cannot send credentials');
+          this.hideSetupLoading();
+          this.showSetupError('Communication channel not ready. Please try again.');
+          return;
+        }
+
+        // Prepare credentials payload
+        const payload = {
           type: 'kms:setup-credentials',
-          method: 'passphrase',
-          transportKeyId: this.transportKeyId,
-          userId,
-          ...encrypted,
+          payload: {
+            method: 'passphrase',
+            transportKeyId: this.transportKeyId,
+            userId,
+            ...encrypted,
+          }
         };
 
-        // Send to parent - try ALL strategies (not just one) for maximum reliability
-        let sent = false;
-
-        // Strategy 1: Try window.opener if available
-        if (window.opener) {
-          try {
-            console.log('[KMS Client] Sending encrypted credentials via window.opener');
-            (window.opener as Window).postMessage(message, this.parentOrigin);
-            sent = true;
-          } catch (err) {
-            console.warn('[KMS Client] Failed to send via window.opener:', err);
-          }
-        }
-
-        // Strategy 2: Use localStorage (most reliable for popup→iframe same-origin)
+        // Send via MessagePort
         try {
-          const payload = {
-            ...message,
-            timestamp: Date.now()
-          };
-          console.log('[KMS Client] Sending encrypted credentials via localStorage:', {
-            hasType: !!payload.type,
-            type: payload.type,
-            keys: Object.keys(payload),
-            messageKeys: Object.keys(message)
-          });
-          localStorage.setItem('kms:setup-credentials', JSON.stringify(payload));
-          console.log('[KMS Client] Wrote to localStorage successfully');
-          sent = true;
-        } catch (err) {
-          console.warn('[KMS Client] Failed to send via localStorage:', err);
-        }
+          console.log('[KMS Client] Sending encrypted credentials via MessagePort');
+          this.messagePort.postMessage(payload);
+          console.log('[KMS Client] ✅ Credentials sent successfully via MessagePort');
 
-        // Strategy 3: Use BroadcastChannel (may not work popup→iframe)
-        try {
-          console.log('[KMS Client] Sending encrypted credentials via BroadcastChannel');
-          const channel = new BroadcastChannel('kms-setup-credentials');
-          channel.postMessage(message);
-          channel.close();
-          sent = true;
-        } catch (err) {
-          console.warn('[KMS Client] Failed to send via BroadcastChannel:', err);
-        }
-
-        if (sent) {
-          // Show success but DON'T close (for debugging)
+          // Show success and close popup after delay
           this.hideSetupLoading();
           this.showSetupSuccess();
-          console.log('[KMS Client] ✅ Credentials sent via all available channels. Popup staying open for debugging.');
-          // TODO: Re-enable auto-close after debugging
-          // setTimeout(() => window.close(), 2000);
-        } else {
-          console.error('[KMS Client] All communication strategies failed!');
+          console.log('[KMS Client] Closing popup in 2 seconds...');
+          setTimeout(() => window.close(), 2000);
+        } catch (err) {
+          console.error('[KMS Client] Failed to send via MessagePort:', err);
           this.hideSetupLoading();
-          this.showSetupError('Cannot communicate with parent window. Please try again.');
+          this.showSetupError('Failed to send credentials. Please try again.');
         }
+        /* eslint-enable no-console */
         return;
+        /* c8 ignore stop */
       }
 
       // Check if user already has enrollments (multi-enrollment scenario)
@@ -1746,40 +1783,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     }
   }
 
-  // If iframe, poll localStorage for credentials from popup (in case storage event doesn't fire)
-  if (isIframe) {
-    console.log('[KMS Client] Iframe: Starting localStorage polling for popup credentials...');
-    const pollInterval = setInterval(() => {
-      try {
-        const stored = localStorage.getItem('kms:setup-credentials');
-        if (stored) {
-          const data = JSON.parse(stored);
-          if (data?.type === 'kms:setup-credentials' && data.timestamp && Date.now() - data.timestamp < 30000) {
-            console.log('[KMS Client] Iframe found credentials in localStorage (polling)!', {
-              hasType: !!data.type,
-              type: data.type,
-              hasCredentials: !!data.encryptedCredentials,
-              keys: Object.keys(data)
-            });
-            clearInterval(pollInterval);
-            // Forward to parent PWA
-            if (window.parent) {
-              console.log('[KMS Client] Iframe forwarding to parent:', parentOrigin);
-              window.parent.postMessage(data, parentOrigin);
-              console.log('[KMS Client] Iframe forwarded credentials to parent');
-            }
-            // Clear the flag
-            localStorage.removeItem('kms:setup-credentials');
-          }
-        }
-      } catch (err) {
-        // Ignore polling errors
-      }
-    }, 200); // Poll every 200ms
-
-    // Stop polling after 5 minutes
-    setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
-  }
+  // Note: Removed localStorage polling - credentials are sent via MessageChannel
+  // from popup directly to parent (see handlePassphraseSetup in stateless mode)
 
   // Export for debugging
   (window as Window & { __kmsClient?: unknown }).__kmsClient = client;

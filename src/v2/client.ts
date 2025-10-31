@@ -1746,10 +1746,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (stored) {
           const data = JSON.parse(stored);
           if (data?.type === 'kms:setup-credentials' && data.timestamp && Date.now() - data.timestamp < 30000) {
-            console.log('[KMS Client] Iframe found credentials in localStorage (polling)!');
+            console.log('[KMS Client] Iframe found credentials in localStorage (polling)!', {
+              hasType: !!data.type,
+              type: data.type,
+              hasCredentials: !!data.encryptedCredentials,
+              keys: Object.keys(data)
+            });
             clearInterval(pollInterval);
             // Forward to parent PWA
             if (window.parent) {
+              console.log('[KMS Client] Iframe forwarding to parent:', parentOrigin);
               window.parent.postMessage(data, parentOrigin);
               console.log('[KMS Client] Iframe forwarded credentials to parent');
             }

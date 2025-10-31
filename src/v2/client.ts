@@ -1270,8 +1270,14 @@ export class KMSClient {
     try {
       const userId = 'demouser@ats.run';
 
+      console.log('[KMS Client] handlePassphraseSetup - isStatelessPopup:', this.isStatelessPopup, {
+        transportKey: this.transportPublicKey?.slice(0, 20) + '...',
+        keyId: this.transportKeyId
+      });
+
       // Check if stateless popup mode
       if (this.isStatelessPopup) {
+        console.log('[KMS Client] Entering stateless popup flow for passphrase setup');
         // Encrypt credentials
         const encrypted = await this.encryptCredentials(
           {

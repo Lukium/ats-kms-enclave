@@ -479,6 +479,9 @@ async function setupPassphrase(): Promise<void> {
     setupURL.searchParams.set('hkdfSalt', transportParams.hkdfSalt);
     setupURL.searchParams.set('parentOrigin', window.location.origin);
 
+    console.log('[Full Demo] Opening popup with URL:', setupURL.toString());
+    console.log('[Full Demo] URL length:', setupURL.toString().length);
+
     const setupWindow = window.open(
       setupURL.toString(),
       'kms-setup',

@@ -1309,26 +1309,63 @@ export class KMSClient {
 
         console.log('[KMS Client] Credentials encrypted, preparing to send to parent');
 
-        // Send to parent
-        if (window.opener) {
-          console.log('[KMS Client] Sending encrypted credentials to parent via window.opener');
-          (window.opener as Window).postMessage(
-            {
-              type: 'kms:setup-credentials',
-              method: 'passphrase',
-              transportKeyId: this.transportKeyId,
-              userId,
-              ...encrypted,
-            },
-            this.parentOrigin
-          );
+        // Prepare message
+        const message = {
+          type: 'kms:setup-credentials',
+          method: 'passphrase',
+          transportKeyId: this.transportKeyId,
+          userId,
+          ...encrypted,
+        };
 
+        // Send to parent - try multiple strategies since window.opener may be null for cross-origin
+        let sent = false;
+
+        // Strategy 1: Try window.opener if available
+        if (window.opener) {
+          try {
+            console.log('[KMS Client] Sending encrypted credentials via window.opener');
+            (window.opener as Window).postMessage(message, this.parentOrigin);
+            sent = true;
+          } catch (err) {
+            console.warn('[KMS Client] Failed to send via window.opener:', err);
+          }
+        }
+
+        // Strategy 2: Use BroadcastChannel (works cross-origin within same site)
+        if (!sent) {
+          try {
+            console.log('[KMS Client] Sending encrypted credentials via BroadcastChannel');
+            const channel = new BroadcastChannel('kms-setup-credentials');
+            channel.postMessage(message);
+            channel.close();
+            sent = true;
+          } catch (err) {
+            console.warn('[KMS Client] Failed to send via BroadcastChannel:', err);
+          }
+        }
+
+        // Strategy 3: Use localStorage as fallback (cross-tab communication)
+        if (!sent) {
+          try {
+            console.log('[KMS Client] Sending encrypted credentials via localStorage');
+            localStorage.setItem('kms:setup-credentials', JSON.stringify({
+              ...message,
+              timestamp: Date.now()
+            }));
+            sent = true;
+          } catch (err) {
+            console.warn('[KMS Client] Failed to send via localStorage:', err);
+          }
+        }
+
+        if (sent) {
           // Show success and close
           this.hideSetupLoading();
           this.showSetupSuccess();
           setTimeout(() => window.close(), 2000);
         } else {
-          console.error('[KMS Client] window.opener is null - cannot send credentials to parent!');
+          console.error('[KMS Client] All communication strategies failed!');
           this.hideSetupLoading();
           this.showSetupError('Cannot communicate with parent window. Please try again.');
         }

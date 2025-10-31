@@ -496,6 +496,7 @@ async function setupPassphrase(): Promise<void> {
     console.log('[Full Demo] Popup opened, waiting for credentials...');
 
     // Step 3: Wait for encrypted credentials from popup
+    // Support multiple communication channels since window.opener may not work cross-origin
     const credentials = await new Promise<{
       method: string;
       transportKeyId: string;
@@ -508,16 +509,79 @@ async function setupPassphrase(): Promise<void> {
         reject(new Error('Setup timeout (no credentials received)'));
       }, 5 * 60 * 1000); // 5 minute timeout
 
-      const handler = (event: MessageEvent): void => {
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        window.removeEventListener('message', postMessageHandler);
+        if (broadcastChannel) {
+          broadcastChannel.removeEventListener('message', broadcastHandler);
+          broadcastChannel.close();
+        }
+        window.removeEventListener('storage', storageHandler);
+      };
+
+      // Strategy 1: postMessage (window.opener)
+      const postMessageHandler = (event: MessageEvent): void => {
         if (event.origin !== KMS_ORIGIN) return;
         if (event.data?.type === 'kms:setup-credentials') {
-          clearTimeout(timeout);
-          window.removeEventListener('message', handler);
+          console.log('[Full Demo] Received credentials via postMessage');
+          cleanup();
           resolve(event.data);
         }
       };
+      window.addEventListener('message', postMessageHandler);
 
-      window.addEventListener('message', handler);
+      // Strategy 2: BroadcastChannel
+      let broadcastChannel: BroadcastChannel | null = null;
+      try {
+        broadcastChannel = new BroadcastChannel('kms-setup-credentials');
+        const broadcastHandler = (event: MessageEvent): void => {
+          if (event.data?.type === 'kms:setup-credentials') {
+            console.log('[Full Demo] Received credentials via BroadcastChannel');
+            cleanup();
+            resolve(event.data);
+          }
+        };
+        broadcastChannel.addEventListener('message', broadcastHandler);
+      } catch (err) {
+        console.warn('[Full Demo] BroadcastChannel not available:', err);
+      }
+
+      // Strategy 3: localStorage (cross-tab communication)
+      const storageHandler = (event: StorageEvent): void => {
+        if (event.key === 'kms:setup-credentials' && event.newValue) {
+          try {
+            const data = JSON.parse(event.newValue);
+            if (data?.type === 'kms:setup-credentials') {
+              console.log('[Full Demo] Received credentials via localStorage');
+              cleanup();
+              // Clear the flag
+              localStorage.removeItem('kms:setup-credentials');
+              resolve(data);
+            }
+          } catch (err) {
+            console.warn('[Full Demo] Failed to parse credentials from localStorage:', err);
+          }
+        }
+      };
+      window.addEventListener('storage', storageHandler);
+
+      // Also check localStorage on startup (in case we missed the event)
+      setTimeout(() => {
+        try {
+          const stored = localStorage.getItem('kms:setup-credentials');
+          if (stored) {
+            const data = JSON.parse(stored);
+            if (data?.type === 'kms:setup-credentials' && data.timestamp && Date.now() - data.timestamp < 10000) {
+              console.log('[Full Demo] Found credentials in localStorage (polling)');
+              cleanup();
+              localStorage.removeItem('kms:setup-credentials');
+              resolve(data);
+            }
+          }
+        } catch (err) {
+          // Ignore
+        }
+      }, 100);
     });
 
     console.log('[Full Demo] Received encrypted credentials, importing to iframe...');

@@ -1363,10 +1363,12 @@ export class KMSClient {
         }
 
         if (sent) {
-          // Show success and close
+          // Show success but DON'T close (for debugging)
           this.hideSetupLoading();
           this.showSetupSuccess();
-          setTimeout(() => window.close(), 2000);
+          console.log('[KMS Client] ✅ Credentials sent via all available channels. Popup staying open for debugging.');
+          // TODO: Re-enable auto-close after debugging
+          // setTimeout(() => window.close(), 2000);
         } else {
           console.error('[KMS Client] All communication strategies failed!');
           this.hideSetupLoading();

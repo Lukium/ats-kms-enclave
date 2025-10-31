@@ -101,6 +101,7 @@ export default tseslint.config(
       'build/**',
       'example/**',
       'tools/**',
+      'placeholders/**',
       '*.config.ts',
       '*.config.js',
       '**/*.d.ts',

@@ -967,13 +967,10 @@ export class KMSClient {
       localStorage.setItem('kms:appSalt', Array.from(appSalt).toString());
 
       // Notify parent window via postMessage
-      if (window.opener) {
-        (window.opener as Window).postMessage({
-          type: 'kms:setup-complete',
-          method: prfOutput ? 'passkey-prf' : 'passkey-gate',
-          result: response,
-        }, '*'); // Parent will validate origin
-      }
+      this.notifySetupComplete({
+        method: prfOutput ? 'passkey-prf' : 'passkey-gate',
+        result: response,
+      });
 
     } catch (err: unknown) {
       this.hideSetupLoading();
@@ -1085,13 +1082,10 @@ export class KMSClient {
       this.showSetupSuccess();
 
       // Notify parent window via postMessage
-      if (window.opener) {
-        (window.opener as Window).postMessage({
-          type: 'kms:setup-complete',
-          method: 'passphrase',
-          result: response,
-        }, '*'); // Parent will validate origin
-      }
+      this.notifySetupComplete({
+        method: 'passphrase',
+        result: response,
+      });
 
     } catch (err: unknown) {
       this.hideSetupLoading();
@@ -1158,6 +1152,50 @@ export class KMSClient {
     const successDiv = document.getElementById('kms-setup-success');
     if (successDiv) {
       successDiv.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Notify parent window that setup is complete
+   *
+   * Uses multiple strategies for cross-origin communication:
+   * 1. Direct postMessage to window.opener (if available)
+   * 2. LocalStorage flag for same-origin iframe coordination
+   * 3. BroadcastChannel for modern browser support
+   */
+  private notifySetupComplete(data: { method: string; result: unknown }): void {
+    const message = {
+      type: 'kms:setup-complete',
+      method: data.method,
+      result: data.result,
+    };
+
+    // Strategy 1: Direct postMessage if window.opener is available
+    if (window.opener) {
+      (window.opener as Window).postMessage(message, this.parentOrigin);
+      console.log('[KMS Client] Sent setup-complete via window.opener');
+    }
+
+    // Strategy 2: LocalStorage flag for same-origin iframe coordination
+    // This allows the iframe (on same origin) to detect setup completion
+    try {
+      localStorage.setItem('kms:setup-complete', JSON.stringify({
+        timestamp: Date.now(),
+        ...message,
+      }));
+      console.log('[KMS Client] Set setup-complete flag in localStorage');
+    } catch (err) {
+      console.warn('[KMS Client] Failed to set localStorage flag:', err);
+    }
+
+    // Strategy 3: BroadcastChannel for modern browsers (same-origin only)
+    try {
+      const channel = new BroadcastChannel('kms-setup');
+      channel.postMessage(message);
+      channel.close();
+      console.log('[KMS Client] Sent setup-complete via BroadcastChannel');
+    } catch (err) {
+      console.warn('[KMS Client] BroadcastChannel not available:', err);
     }
   }
 
@@ -1238,6 +1276,70 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', initFn);
   } else {
     initFn();
+  }
+
+  // If running in iframe, listen for setup completion signals from popup window
+  if (isIframe) {
+    // Listen for BroadcastChannel messages from setup popup
+    try {
+      const channel = new BroadcastChannel('kms-setup');
+      channel.addEventListener('message', (event) => {
+        if (event.data?.type === 'kms:setup-complete') {
+          console.log('[KMS Client] Received setup-complete via BroadcastChannel, forwarding to parent');
+          // Forward to parent PWA
+          if (window.parent) {
+            window.parent.postMessage(event.data, parentOrigin);
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('[KMS Client] BroadcastChannel not available for iframe:', err);
+    }
+
+    // Listen for localStorage changes from setup popup
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'kms:setup-complete' && event.newValue) {
+        try {
+          const message = JSON.parse(event.newValue);
+          console.log('[KMS Client] Received setup-complete via localStorage, forwarding to parent');
+          // Forward to parent PWA
+          if (window.parent) {
+            window.parent.postMessage({
+              type: message.type,
+              method: message.method,
+              result: message.result,
+            }, parentOrigin);
+          }
+          // Clear the flag
+          localStorage.removeItem('kms:setup-complete');
+        } catch (err) {
+          console.warn('[KMS Client] Failed to parse setup-complete from localStorage:', err);
+        }
+      }
+    });
+
+    // Also check localStorage on load in case we missed the event
+    try {
+      const stored = localStorage.getItem('kms:setup-complete');
+      if (stored) {
+        const message = JSON.parse(stored);
+        // Only forward if recent (within last 5 seconds)
+        if (Date.now() - message.timestamp < 5000) {
+          console.log('[KMS Client] Found recent setup-complete in localStorage, forwarding to parent');
+          if (window.parent) {
+            window.parent.postMessage({
+              type: message.type,
+              method: message.method,
+              result: message.result,
+            }, parentOrigin);
+          }
+        }
+        // Clear the flag
+        localStorage.removeItem('kms:setup-complete');
+      }
+    } catch (err) {
+      console.warn('[KMS Client] Failed to check localStorage for setup-complete:', err);
+    }
   }
 
   // Export for debugging

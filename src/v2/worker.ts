@@ -79,6 +79,7 @@ import {
   rawP256ToJwk,
   jwkThumbprintP256,
   arrayBufferToBase64url,
+  base64urlToArrayBuffer,
 } from './crypto-utils';
 import { getErrorMessage } from './error-utils';
 import * as validators from './rpc-validation';
@@ -102,6 +103,33 @@ import { loadRateLimitState } from './storage-types';
  * - Derived uniquely per lease (different salt)
  */
 const sessionKEKCache = new Map<string, CryptoKey>();
+
+// ============================================================================
+// Ephemeral Transport Keys (Setup Flow)
+// ============================================================================
+
+/**
+ * In-memory cache of ephemeral ECDH transport keys for stateless popup setup.
+ *
+ * Each setup flow generates a temporary ECDH keypair for encrypted credential
+ * transmission from popup to iframe KMS. The private key is stored here along
+ * with the two salts required for WebAuthn PRF setup.
+ *
+ * Security properties:
+ * - Private key never leaves iframe partition
+ * - Auto-cleanup after 10 minutes
+ * - One-time use (deleted after setupWithEncryptedCredentials)
+ * - Parent never sees plaintext credentials
+ */
+const ephemeralTransportKeys = new Map<
+  string,
+  {
+    privateKey: CryptoKey;
+    appSalt: Uint8Array;
+    hkdfSalt: Uint8Array;
+    createdAt: number;
+  }
+>();
 
 /**
  * Derive a SessionKEK from Master Secret and lease salt.
@@ -147,6 +175,225 @@ async function deriveSessionKEK(ms: Uint8Array<ArrayBuffer>, leaseSalt: Uint8Arr
 }
 
 // ============================================================================
+// Setup Transport Key Generation
+// ============================================================================
+
+/**
+ * Generate ephemeral ECDH transport key for stateless popup setup.
+ *
+ * This method is called by the iframe KMS when initiating a popup-based setup
+ * flow. It generates:
+ * 1. Ephemeral ECDH P-256 keypair (10-minute lifetime)
+ * 2. Two distinct salts for WebAuthn PRF setup (appSalt and hkdfSalt)
+ *
+ * The public key is sent to the popup (via parent proxy) for credential encryption.
+ * The private key stays in iframe partition for later decryption.
+ *
+ * @returns Transport parameters for popup setup
+ */
+async function generateSetupTransportKey(): Promise<{
+  publicKey: string; // base64url-encoded P-256 public key (raw format, 65 bytes)
+  keyId: string; // UUID v4
+  appSalt: string; // base64url-encoded 32 bytes (for PRF eval.first)
+  hkdfSalt: string; // base64url-encoded 32 bytes (for HKDF derivation)
+}> {
+  // Generate ephemeral ECDH keypair
+  const keypair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true, // extractable (need to export public key)
+    ['deriveBits']
+  );
+
+  // Export public key (raw format, 65 bytes uncompressed)
+  const publicKeyRaw = await crypto.subtle.exportKey('raw', keypair.publicKey);
+
+  // Generate unique key ID
+  const keyId = crypto.randomUUID();
+
+  // Generate two distinct salts for PRF (both are public)
+  const appSalt = crypto.getRandomValues(new Uint8Array(32));
+  const hkdfSalt = crypto.getRandomValues(new Uint8Array(32));
+
+  // Store private key in memory (Map<keyId, CryptoKey>)
+  ephemeralTransportKeys.set(keyId, {
+    privateKey: keypair.privateKey,
+    appSalt,
+    hkdfSalt,
+    createdAt: Date.now(),
+  });
+
+  // Auto-cleanup after 10 minutes
+  setTimeout(() => {
+    ephemeralTransportKeys.delete(keyId);
+  }, 10 * 60 * 1000);
+
+  return {
+    publicKey: arrayBufferToBase64url(publicKeyRaw),
+    keyId,
+    appSalt: arrayBufferToBase64url(appSalt.buffer),
+    hkdfSalt: arrayBufferToBase64url(hkdfSalt.buffer),
+  };
+}
+
+/**
+ * Setup using encrypted credentials from popup.
+ *
+ * FLOW:
+ * 1. Retrieve ephemeral private key by transportKeyId
+ * 2. Perform ECDH with popup's ephemeral public key
+ * 3. Derive AES-GCM decryption key via HKDF
+ * 4. Decrypt credentials
+ * 5. Call existing setup method (setupPassphrase, setupPasskeyPRF, etc.)
+ * 6. Delete ephemeral transport key (one-time use)
+ *
+ * This method completes the stateless popup setup flow. The popup encrypts
+ * credentials with a shared secret derived via ECDH, and this method decrypts
+ * them and forwards to the appropriate setup handler.
+ *
+ * @param params.method - Credential method ('passphrase', 'passkey-prf', 'passkey-gate')
+ * @param params.transportKeyId - Transport key identifier (from generateSetupTransportKey)
+ * @param params.ephemeralPublicKey - Popup's ephemeral public key (base64url, 65 bytes raw)
+ * @param params.iv - AES-GCM IV (base64url, 12 bytes)
+ * @param params.encryptedCredentials - Encrypted credential JSON (base64url)
+ * @returns Setup result from the underlying setup method
+ */
+async function setupWithEncryptedCredentials(params: {
+  method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+  transportKeyId: string;
+  ephemeralPublicKey: string;
+  iv: string;
+  encryptedCredentials: string;
+  userId: string;
+  requestId: string;
+}): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string }> {
+  // Step 1: Retrieve ephemeral transport key
+  const transport = ephemeralTransportKeys.get(params.transportKeyId);
+  if (!transport) {
+    throw new Error('Transport key not found or expired');
+  }
+
+  try {
+    // Step 2: Import popup's ephemeral public key
+    const popupPublicKeyBytes = base64urlToArrayBuffer(params.ephemeralPublicKey);
+    const popupPublicKey = await crypto.subtle.importKey(
+      'raw',
+      popupPublicKeyBytes,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      []
+    );
+
+    // Step 3: Derive shared secret (ECDH)
+    const sharedSecret = await crypto.subtle.deriveBits(
+      {
+        name: 'ECDH',
+        public: popupPublicKey,
+      },
+      transport.privateKey,
+      256 // 32 bytes
+    );
+
+    // Step 4: Derive AES-GCM key from shared secret (HKDF)
+    const sharedSecretKey = await crypto.subtle.importKey(
+      'raw',
+      sharedSecret,
+      'HKDF',
+      false,
+      ['deriveBits']
+    );
+
+    const aesKeyBits = await crypto.subtle.deriveBits(
+      {
+        name: 'HKDF',
+        salt: new Uint8Array(32), // Zero salt (shared secret already random)
+        info: new TextEncoder().encode('ATS/KMS/setup-transport/v2'),
+        hash: 'SHA-256',
+      },
+      sharedSecretKey,
+      256
+    );
+
+    const aesKey = await crypto.subtle.importKey(
+      'raw',
+      aesKeyBits,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+
+    // Step 5: Decrypt credentials
+    const iv = base64urlToArrayBuffer(params.iv);
+    const ciphertext = base64urlToArrayBuffer(params.encryptedCredentials);
+
+    const credentialsJSON = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv,
+        tagLength: 128,
+      },
+      aesKey,
+      ciphertext
+    );
+
+    const credentials = JSON.parse(new TextDecoder().decode(credentialsJSON)) as
+      | { passphrase: string }
+      | { credentialId: string; prfOutput: string; rpId?: string }
+      | { credentialId: string; rpId?: string };
+
+    // Step 6: Call existing setup methods based on credential type
+    let result: { success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string };
+
+    if (params.method === 'passphrase') {
+      // Call existing handleSetupPassphrase
+      const passphraseCredentials = credentials as { passphrase: string };
+      result = await handleSetupPassphrase(
+        {
+          userId: params.userId,
+          passphrase: passphraseCredentials.passphrase,
+        },
+        params.requestId
+      );
+    } else if (params.method === 'passkey-prf') {
+      // Call existing handleSetupPasskeyPRF with BOTH salts from transport key
+      const prfCredentials = credentials as { credentialId: string; prfOutput: string; rpId?: string };
+      result = await handleSetupPasskeyPRF(
+        {
+          userId: params.userId,
+          credentialId: base64urlToArrayBuffer(prfCredentials.credentialId),
+          prfOutput: base64urlToArrayBuffer(prfCredentials.prfOutput),
+          ...(prfCredentials.rpId !== undefined && { rpId: prfCredentials.rpId }),
+          appSalt: transport.appSalt,
+          hkdfSalt: transport.hkdfSalt,
+        },
+        params.requestId
+      );
+    } else if (params.method === 'passkey-gate') {
+      // Call existing handleSetupPasskeyGate
+      const gateCredentials = credentials as { credentialId: string; rpId?: string };
+      result = await handleSetupPasskeyGate(
+        {
+          userId: params.userId,
+          credentialId: base64urlToArrayBuffer(gateCredentials.credentialId),
+          ...(gateCredentials.rpId !== undefined && { rpId: gateCredentials.rpId }),
+        },
+        params.requestId
+      );
+    } else {
+      const exhaustive: never = params.method;
+      throw new Error(`Unknown method: ${String(exhaustive)}`);
+    }
+
+    // Step 7: Delete ephemeral transport key (one-time use, no longer needed)
+    ephemeralTransportKeys.delete(params.transportKeyId);
+
+    return result;
+  } catch (error) {
+    // Don't delete key on error (allow retry)
+    throw error;
+  }
+}
+
+// ============================================================================
 // Worker Message Listener
 // ============================================================================
 
@@ -187,6 +434,14 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
     switch (method) {
       // === Setup Operations ===
+      case 'generateSetupTransportKey':
+        result = await generateSetupTransportKey();
+        break;
+
+      case 'setupWithEncryptedCredentials':
+        result = await setupWithEncryptedCredentials(validators.validateSetupWithEncryptedCredentials(params));
+        break;
+
       case 'setupPassphrase':
         result = await handleSetupPassphrase(validators.validateSetupPassphrase(params), id);
         break;
@@ -393,10 +648,12 @@ async function handleSetupPasskeyPRF(
     prfOutput: ArrayBuffer;
     rpId?: string;
     existingMS?: Uint8Array;
+    appSalt?: Uint8Array;
+    hkdfSalt?: Uint8Array;
   },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string }> {
-  const { userId, credentialId, prfOutput, rpId = '', existingMS } = params;
+  const { userId, credentialId, prfOutput, rpId = '', existingMS, appSalt, hkdfSalt } = params;
 
   if (!credentialId || credentialId.byteLength === 0) {
     throw new Error('credentialId required');
@@ -406,7 +663,7 @@ async function handleSetupPasskeyPRF(
     throw new Error('prfOutput must be 32 bytes');
   }
 
-  const result = await setupPasskeyPRF(userId, credentialId, prfOutput, existingMS, rpId);
+  const result = await setupPasskeyPRF(userId, credentialId, prfOutput, existingMS, rpId, appSalt, hkdfSalt);
 
   if (!result.success) {
     throw new Error(result.error);

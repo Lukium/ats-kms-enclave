@@ -20,6 +20,7 @@
 import type { RPCRequest, RPCResponse, AuthCredentials } from './types.js';
 import { formatError, getErrorMessage } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
+import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils.js';
 
 // Global constant injected at build time by esbuild
 declare const __WORKER_FILENAME__: string;
@@ -809,6 +810,110 @@ export class KMSClient {
 
     passphraseConfirmInput.onkeydown = (e): void => {
       if (e.key === 'Enter') handleEnter();
+    };
+  }
+
+  /**
+   * Encrypt credentials with transport public key (popup mode).
+   *
+   * SECURITY:
+   * - Ephemeral ECDH keypair per encryption (one-time use)
+   * - Shared secret derived via ECDH
+   * - AES-GCM encryption with HKDF-derived key
+   * - Parent cannot decrypt (doesn't have iframe's private key)
+   *
+   * This method is used by stateless popup mode to encrypt credentials
+   * before sending them to the parent (which acts as a blind proxy).
+   *
+   * @param credentials - Raw credentials object (passphrase or PRF output)
+   * @param transportPublicKey - Iframe's ephemeral public key (base64url, 65 bytes)
+   * @returns Encrypted payload for parent to forward
+   */
+  // @ts-expect-error - Will be used in Step 5
+  private async encryptCredentials(
+    credentials: Record<string, unknown>,
+    transportPublicKey: string
+  ): Promise<{
+    ephemeralPublicKey: string;
+    iv: string;
+    encryptedCredentials: string;
+  }> {
+    // Step 1: Generate ephemeral keypair for this encryption
+    const ephemeralKeypair = await crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveBits']
+    );
+
+    // Step 2: Import iframe's transport public key
+    const iframePublicKeyBytes = base64urlToArrayBuffer(transportPublicKey);
+    const iframePublicKey = await crypto.subtle.importKey(
+      'raw',
+      iframePublicKeyBytes,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      []
+    );
+
+    // Step 3: Derive shared secret (ECDH)
+    const sharedSecret = await crypto.subtle.deriveBits(
+      {
+        name: 'ECDH',
+        public: iframePublicKey,
+      },
+      ephemeralKeypair.privateKey,
+      256
+    );
+
+    // Step 4: Derive AES-GCM key from shared secret (HKDF)
+    const sharedSecretKey = await crypto.subtle.importKey(
+      'raw',
+      sharedSecret,
+      'HKDF',
+      false,
+      ['deriveBits']
+    );
+
+    const aesKeyBits = await crypto.subtle.deriveBits(
+      {
+        name: 'HKDF',
+        salt: new Uint8Array(32), // Zero salt (shared secret already random)
+        info: new TextEncoder().encode('ATS/KMS/setup-transport/v2'),
+        hash: 'SHA-256',
+      },
+      sharedSecretKey,
+      256
+    );
+
+    const aesKey = await crypto.subtle.importKey(
+      'raw',
+      aesKeyBits,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+
+    // Step 5: Encrypt credentials
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plaintext = new TextEncoder().encode(JSON.stringify(credentials));
+
+    const ciphertext = await crypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv,
+        tagLength: 128,
+      },
+      aesKey,
+      plaintext
+    );
+
+    // Step 6: Export ephemeral public key
+    const ephemeralPublicKeyRaw = await crypto.subtle.exportKey('raw', ephemeralKeypair.publicKey);
+
+    return {
+      ephemeralPublicKey: arrayBufferToBase64url(ephemeralPublicKeyRaw),
+      iv: arrayBufferToBase64url(iv.buffer),
+      encryptedCredentials: arrayBufferToBase64url(ciphertext),
     };
   }
 

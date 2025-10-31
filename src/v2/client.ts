@@ -1649,8 +1649,22 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
     // Listen for BroadcastChannel messages from setup popup
     try {
-      const channel = new BroadcastChannel('kms-setup');
-      channel.addEventListener('message', (event) => {
+      // Listen for stateless popup credentials (Phase 2)
+      const credentialsChannel = new BroadcastChannel('kms-setup-credentials');
+      credentialsChannel.addEventListener('message', (event) => {
+        console.log('[KMS Client] Iframe received credentials from popup via BroadcastChannel');
+        if (event.data?.type === 'kms:setup-credentials') {
+          // Forward to parent PWA
+          if (window.parent) {
+            window.parent.postMessage(event.data, parentOrigin);
+            console.log('[KMS Client] Iframe forwarded credentials to parent');
+          }
+        }
+      });
+
+      // Listen for legacy setup complete messages
+      const setupChannel = new BroadcastChannel('kms-setup');
+      setupChannel.addEventListener('message', (event) => {
         const data = event.data as SetupCompleteMessage;
         if (data?.type === 'kms:setup-complete') {
           // Forward to parent PWA
@@ -1665,6 +1679,26 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
     // Listen for localStorage changes from setup popup
     window.addEventListener('storage', (event) => {
+      // Handle stateless popup credentials
+      if (event.key === 'kms:setup-credentials' && event.newValue) {
+        try {
+          console.log('[KMS Client] Iframe received credentials from popup via localStorage');
+          const data = JSON.parse(event.newValue);
+          if (data?.type === 'kms:setup-credentials') {
+            // Forward to parent PWA
+            if (window.parent) {
+              window.parent.postMessage(data, parentOrigin);
+              console.log('[KMS Client] Iframe forwarded credentials to parent');
+            }
+            // Clear the flag
+            localStorage.removeItem('kms:setup-credentials');
+          }
+        } catch (err) {
+          console.warn('[KMS Client] Failed to parse setup-credentials from localStorage:', err);
+        }
+      }
+
+      // Handle legacy setup complete messages
       if (event.key === 'kms:setup-complete' && event.newValue) {
         try {
           const message = JSON.parse(event.newValue) as SetupCompleteMessage;

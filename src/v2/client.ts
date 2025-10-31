@@ -1334,11 +1334,18 @@ export class KMSClient {
 
         // Strategy 2: Use localStorage (most reliable for popup→iframe same-origin)
         try {
-          console.log('[KMS Client] Sending encrypted credentials via localStorage');
-          localStorage.setItem('kms:setup-credentials', JSON.stringify({
+          const payload = {
             ...message,
             timestamp: Date.now()
-          }));
+          };
+          console.log('[KMS Client] Sending encrypted credentials via localStorage:', {
+            hasType: !!payload.type,
+            type: payload.type,
+            keys: Object.keys(payload),
+            messageKeys: Object.keys(message)
+          });
+          localStorage.setItem('kms:setup-credentials', JSON.stringify(payload));
+          console.log('[KMS Client] Wrote to localStorage successfully');
           sent = true;
         } catch (err) {
           console.warn('[KMS Client] Failed to send via localStorage:', err);

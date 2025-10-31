@@ -525,7 +525,9 @@ async function setupPassphrase(): Promise<void> {
           origin: event.origin,
           expectedOrigin: KMS_ORIGIN,
           type: event.data?.type,
-          hasCredentials: !!event.data?.encryptedCredentials
+          hasCredentials: !!event.data?.encryptedCredentials,
+          dataKeys: event.data ? Object.keys(event.data) : [],
+          fullData: event.data
         });
 
         if (event.origin !== KMS_ORIGIN) {
@@ -538,7 +540,7 @@ async function setupPassphrase(): Promise<void> {
           cleanup();
           resolve(event.data);
         } else {
-          console.log('[Full Demo] Ignoring message - wrong type');
+          console.log('[Full Demo] Ignoring message - wrong type, expected kms:setup-credentials');
         }
       };
       console.log('[Full Demo] Setting up postMessage listener...');

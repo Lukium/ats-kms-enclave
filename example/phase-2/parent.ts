@@ -521,6 +521,12 @@ async function setupPassphrase(): Promise<void> {
 
       // Strategy 1: postMessage (from iframe relay)
       const postMessageHandler = (event: MessageEvent): void => {
+        // Ignore RPC responses (have 'id' field, not 'type' field)
+        if (event.data?.id && !event.data?.type) {
+          // This is a normal RPC response, ignore it
+          return;
+        }
+
         console.log('[Full Demo] Received postMessage:', {
           origin: event.origin,
           expectedOrigin: KMS_ORIGIN,

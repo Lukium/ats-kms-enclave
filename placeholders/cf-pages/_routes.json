@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Bypass Cloudflare edge processing to prevent script injection that violates CSP",
+  "include": ["/*"],
+  "exclude": []
+}

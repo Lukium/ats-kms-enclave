@@ -211,7 +211,7 @@ export class KMSUser {
     try {
       // Create iframe
       this.iframe = document.createElement('iframe');
-      this.iframe.src = `${this.kmsOrigin}/kms.html?parentOrigin=${encodeURIComponent(window.location.origin)}`;
+      this.iframe.src = `${this.kmsOrigin}/?parentOrigin=${encodeURIComponent(window.location.origin)}`;
 
       // Style as full-page overlay (hidden by default)
       this.iframe.style.position = 'fixed';

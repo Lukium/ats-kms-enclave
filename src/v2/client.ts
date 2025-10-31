@@ -55,6 +55,13 @@ export class KMSClient {
   private isInitialized = false;
   private pendingUnlockRequest: RPCRequest | null = null;
 
+  // Stateless popup mode properties
+  private isStatelessPopup: boolean = false;
+  private transportPublicKey: string | null = null;
+  private transportKeyId: string | null = null;
+  private appSalt: string | null = null;
+  // Note: hkdfSalt from URL is not used directly in popup (sent to iframe via encrypted message)
+
   /**
    * Create a new KMS client bridge
    *
@@ -80,6 +87,18 @@ export class KMSClient {
     }
 
     try {
+      // Detect stateless popup mode from URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      this.transportPublicKey = urlParams.get('transportKey');
+      this.transportKeyId = urlParams.get('keyId');
+      this.appSalt = urlParams.get('appSalt');
+      // hkdfSalt is available in URL but not used directly in popup (sent to iframe)
+      this.isStatelessPopup = !!(this.transportPublicKey && this.transportKeyId);
+
+      if (this.isStatelessPopup) {
+        console.log('[KMS Client] Running in stateless popup mode');
+      }
+
       // Create Dedicated Worker
       this.worker = new Worker(this.workerUrl, {
         type: 'module',
@@ -829,7 +848,6 @@ export class KMSClient {
    * @param transportPublicKey - Iframe's ephemeral public key (base64url, 65 bytes)
    * @returns Encrypted payload for parent to forward
    */
-  // @ts-expect-error - Will be used in Step 5
   private async encryptCredentials(
     credentials: Record<string, unknown>,
     transportPublicKey: string
@@ -928,6 +946,136 @@ export class KMSClient {
     try {
       const userId = 'demouser@ats.run';
       const rpId = window.location.hostname; // kms.ats.run or localhost
+
+      // Check if stateless popup mode
+      if (this.isStatelessPopup) {
+        // Use appSalt from URL parameters
+        const appSalt = base64urlToArrayBuffer(this.appSalt!);
+
+        // Step 1: WebAuthn create ceremony with PRF extension
+        const credential = await navigator.credentials.create({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rp: { id: rpId, name: 'ATS KMS V2' },
+            user: {
+              id: new TextEncoder().encode(userId),
+              name: userId,
+              displayName: userId,
+            },
+            pubKeyCredParams: [
+              { type: 'public-key', alg: -7 }, // ES256
+              { type: 'public-key', alg: -257 }, // RS256
+            ],
+            authenticatorSelection: {
+              authenticatorAttachment: 'platform',
+              userVerification: 'required',
+              residentKey: 'required',
+            },
+            extensions: {
+              prf: {
+                eval: {
+                  first: appSalt as BufferSource,
+                },
+              },
+            },
+          },
+        }) as PublicKeyCredential;
+
+        if (!credential) {
+          throw new Error('No credential returned');
+        }
+
+        // Step 2: Check if PRF extension succeeded and if output is available
+        // NOTE: Modern platforms return { enabled: true, results: { first: ArrayBuffer } }
+        //       Legacy platforms return { enabled: true } (no results yet)
+        //       No PRF support returns { enabled: false } or undefined
+        const prfExt = getPRFResults(credential);
+        const prfEnabled = prfExt?.enabled === true;
+        let prfOutput = prfExt?.results?.first; // May be available immediately!
+
+        // Step 3: Determine if we need to call credentials.get() for PRF output
+        let detectedMethod: 'passkey-prf' | 'passkey-gate';
+
+        if (prfEnabled) {
+          // PRF is supported by authenticator
+
+          if (prfOutput) {
+            // Case A: Modern platform - PRF output available immediately! ✅
+            detectedMethod = 'passkey-prf';
+            console.log('[KMS Client] PRF output available from create() (modern platform)');
+          } else {
+            // Case B: Legacy platform - need to call get() for PRF output ⚠️
+            console.log('[KMS Client] PRF enabled but no output yet, calling get() (legacy platform)');
+
+            const assertion = await navigator.credentials.get({
+              publicKey: {
+                challenge: crypto.getRandomValues(new Uint8Array(32)),
+                timeout: 60000,
+                userVerification: 'required',
+                extensions: {
+                  prf: {
+                    eval: {
+                      first: appSalt as BufferSource,
+                    },
+                  },
+                },
+              },
+            }) as PublicKeyCredential;
+
+            const assertionPrfExt = getPRFResults(assertion);
+            prfOutput = assertionPrfExt?.results?.first;
+
+            if (prfOutput) {
+              detectedMethod = 'passkey-prf';
+              console.log('[KMS Client] PRF output obtained from get()');
+            } else {
+              // PRF enabled but still no output (shouldn't happen, but handle gracefully)
+              detectedMethod = 'passkey-gate';
+              console.warn('[KMS Client] PRF enabled but no output from get(), falling back to gate mode');
+            }
+          }
+        } else {
+          // Case C: PRF not supported - use gate mode
+          detectedMethod = 'passkey-gate';
+          console.log('[KMS Client] PRF not supported by authenticator, using gate mode');
+        }
+
+        // Step 4: Build credentials object based on detected method
+        const credentials: Record<string, unknown> = {
+          credentialId: arrayBufferToBase64url(credential.rawId),
+          rpId,
+        };
+
+        // Include prfOutput only if PRF mode
+        if (detectedMethod === 'passkey-prf' && prfOutput) {
+          credentials.prfOutput = arrayBufferToBase64url(prfOutput);
+        }
+
+        // NOTE: appSalt and hkdfSalt NOT included (iframe already has them)
+
+        // Step 5: Encrypt credentials
+        const encrypted = await this.encryptCredentials(credentials, this.transportPublicKey!);
+
+        // Step 6: Send to parent with detected method
+        if (window.opener) {
+          (window.opener as Window).postMessage(
+            {
+              type: 'kms:setup-credentials',
+              method: detectedMethod, // Critical: tells iframe which setup to use
+              transportKeyId: this.transportKeyId,
+              userId,
+              ...encrypted,
+            },
+            this.parentOrigin
+          );
+
+          // Show success and close
+          this.hideSetupLoading();
+          this.showSetupSuccess();
+          setTimeout(() => window.close(), 2000);
+        }
+        return;
+      }
 
       // Check if user already has enrollments (multi-enrollment scenario)
       const enrollments = await this.getEnrollments(userId);
@@ -1114,6 +1262,37 @@ export class KMSClient {
 
     try {
       const userId = 'demouser@ats.run';
+
+      // Check if stateless popup mode
+      if (this.isStatelessPopup) {
+        // Encrypt credentials
+        const encrypted = await this.encryptCredentials(
+          {
+            passphrase,
+          },
+          this.transportPublicKey!
+        );
+
+        // Send to parent
+        if (window.opener) {
+          (window.opener as Window).postMessage(
+            {
+              type: 'kms:setup-credentials',
+              method: 'passphrase',
+              transportKeyId: this.transportKeyId,
+              userId,
+              ...encrypted,
+            },
+            this.parentOrigin
+          );
+
+          // Show success and close
+          this.hideSetupLoading();
+          this.showSetupSuccess();
+          setTimeout(() => window.close(), 2000);
+        }
+        return;
+      }
 
       // Check if user already has enrollments (multi-enrollment scenario)
       const enrollments = await this.getEnrollments(userId);

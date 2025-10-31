@@ -470,22 +470,26 @@ async function setupPassphrase(): Promise<void> {
       publicKey: transportParams.publicKey.slice(0, 20) + '...'
     });
 
-    // Step 2: Open popup with transport parameters
+    // Step 2: Generate state for anti-CSRF handshake
+    const state = crypto.getRandomValues(new Uint32Array(4)).join('-');
+    console.log('[Full Demo] Generated handshake state:', state);
+
+    // Step 3: Open popup with transport parameters
     const setupURL = new URL(KMS_ORIGIN + '/');
     setupURL.searchParams.set('mode', 'setup');
+    setupURL.searchParams.set('state', state);
+    setupURL.searchParams.set('parentOrigin', window.location.origin);
     setupURL.searchParams.set('transportKey', transportParams.publicKey);
     setupURL.searchParams.set('keyId', transportParams.keyId);
     setupURL.searchParams.set('appSalt', transportParams.appSalt);
     setupURL.searchParams.set('hkdfSalt', transportParams.hkdfSalt);
-    setupURL.searchParams.set('parentOrigin', window.location.origin);
 
     console.log('[Full Demo] Opening popup with URL:', setupURL.toString());
-    console.log('[Full Demo] URL length:', setupURL.toString().length);
 
     const setupWindow = window.open(
       setupURL.toString(),
       'kms-setup',
-      'width=600,height=700,menubar=no,toolbar=no,location=no,status=no,opener'
+      'width=600,height=700,menubar=no,toolbar=no,location=no,status=no,resizable,scrollbars'
     );
 
     if (!setupWindow) {
@@ -493,10 +497,13 @@ async function setupPassphrase(): Promise<void> {
       return;
     }
 
-    console.log('[Full Demo] Popup opened, waiting for credentials...');
+    console.log('[Full Demo] Popup opened, setting up MessageChannel...');
 
-    // Step 3: Wait for encrypted credentials from popup
-    // Support multiple communication channels since window.opener may not work cross-origin
+    // Step 4: Create MessageChannel for direct communication
+    const channel = new MessageChannel();
+    const { port1, port2 } = channel;
+
+    // Step 5: Wait for encrypted credentials via MessageChannel
     const credentials = await new Promise<{
       method: string;
       transportKeyId: string;
@@ -511,99 +518,61 @@ async function setupPassphrase(): Promise<void> {
 
       const cleanup = (): void => {
         clearTimeout(timeout);
-        window.removeEventListener('message', postMessageHandler);
-        if (broadcastChannel) {
-          broadcastChannel.removeEventListener('message', broadcastHandler);
-          broadcastChannel.close();
-        }
-        window.removeEventListener('storage', storageHandler);
+        window.removeEventListener('message', onReady);
+        port1.close();
       };
 
-      // Strategy 1: postMessage (from iframe relay)
-      const postMessageHandler = (event: MessageEvent): void => {
-        // Ignore RPC responses (have 'id' field, not 'type' field)
-        if (event.data?.id && !event.data?.type) {
-          // This is a normal RPC response, ignore it
-          return;
-        }
+      // Listen on our port for credentials
+      port1.onmessage = (evt: MessageEvent) => {
+        const { type, payload } = evt.data || {};
+        console.log('[Full Demo] Received message on MessagePort:', { type, hasPayload: !!payload });
 
-        console.log('[Full Demo] Received postMessage:', {
-          origin: event.origin,
-          expectedOrigin: KMS_ORIGIN,
-          type: event.data?.type,
-          hasCredentials: !!event.data?.encryptedCredentials,
-          dataKeys: event.data ? Object.keys(event.data) : [],
-          fullData: event.data
-        });
-
-        if (event.origin !== KMS_ORIGIN) {
-          console.warn('[Full Demo] Ignoring message from wrong origin');
-          return;
-        }
-
-        if (event.data?.type === 'kms:setup-credentials') {
-          console.log('[Full Demo] ✅ Received credentials via postMessage from iframe!');
+        if (type === 'kms:setup-credentials') {
+          console.log('[Full Demo] ✅ Received credentials via MessageChannel!');
           cleanup();
-          resolve(event.data);
-        } else {
-          console.log('[Full Demo] Ignoring message - wrong type, expected kms:setup-credentials');
+          resolve(payload);
+        } else if (type === 'kms:error') {
+          console.error('[Full Demo] KMS error:', payload);
+          cleanup();
+          reject(new Error(payload));
         }
       };
-      console.log('[Full Demo] Setting up postMessage listener...');
-      window.addEventListener('message', postMessageHandler);
 
-      // Strategy 2: BroadcastChannel
-      let broadcastChannel: BroadcastChannel | null = null;
-      try {
-        broadcastChannel = new BroadcastChannel('kms-setup-credentials');
-        const broadcastHandler = (event: MessageEvent): void => {
-          if (event.data?.type === 'kms:setup-credentials') {
-            console.log('[Full Demo] Received credentials via BroadcastChannel');
-            cleanup();
-            resolve(event.data);
-          }
-        };
-        broadcastChannel.addEventListener('message', broadcastHandler);
-      } catch (err) {
-        console.warn('[Full Demo] BroadcastChannel not available:', err);
-      }
-
-      // Strategy 3: localStorage (cross-tab communication)
-      const storageHandler = (event: StorageEvent): void => {
-        if (event.key === 'kms:setup-credentials' && event.newValue) {
-          try {
-            const data = JSON.parse(event.newValue);
-            if (data?.type === 'kms:setup-credentials') {
-              console.log('[Full Demo] Received credentials via localStorage');
-              cleanup();
-              // Clear the flag
-              localStorage.removeItem('kms:setup-credentials');
-              resolve(data);
-            }
-          } catch (err) {
-            console.warn('[Full Demo] Failed to parse credentials from localStorage:', err);
-          }
+      // One-time "ready" handshake from popup -> parent
+      const onReady = (event: MessageEvent): void => {
+        if (event.origin !== KMS_ORIGIN) {
+          console.log('[Full Demo] Ignoring ready from wrong origin:', event.origin);
+          return;
         }
+        if (!event.data || event.data.type !== 'kms:ready') {
+          console.log('[Full Demo] Ignoring non-ready message:', event.data?.type);
+          return;
+        }
+        if (event.data.state !== state) {
+          console.warn('[Full Demo] State mismatch! Possible CSRF attempt');
+          return;
+        }
+
+        console.log('[Full Demo] ✅ Received kms:ready from popup, transferring MessagePort...');
+
+        // Transfer the port to the popup (targetOrigin is exact)
+        setupWindow.postMessage({ type: 'kms:connect', state }, KMS_ORIGIN, [port2]);
+
+        // Cleanup the window-level listener; we'll use the channel now
+        window.removeEventListener('message', onReady);
       };
-      window.addEventListener('storage', storageHandler);
 
-      // Also check localStorage on startup (in case we missed the event)
-      setTimeout(() => {
-        try {
-          const stored = localStorage.getItem('kms:setup-credentials');
-          if (stored) {
-            const data = JSON.parse(stored);
-            if (data?.type === 'kms:setup-credentials' && data.timestamp && Date.now() - data.timestamp < 10000) {
-              console.log('[Full Demo] Found credentials in localStorage (polling)');
-              cleanup();
-              localStorage.removeItem('kms:setup-credentials');
-              resolve(data);
-            }
-          }
-        } catch (err) {
-          // Ignore
+      console.log('[Full Demo] Waiting for kms:ready from popup...');
+      window.addEventListener('message', onReady);
+
+      // Optional: detect popup closure
+      const closeInterval = setInterval(() => {
+        if (setupWindow.closed) {
+          clearInterval(closeInterval);
+          cleanup();
+          reject(new Error('Popup was closed before completing setup'));
         }
-      }, 100);
+      }, 500);
     });
 
     console.log('[Full Demo] Received encrypted credentials, importing to iframe...');

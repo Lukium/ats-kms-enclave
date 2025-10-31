@@ -137,10 +137,10 @@ export class KMSClient {
       } else {
         /* c8 ignore start - stateless popup mode requires browser integration testing */
         /* eslint-disable no-console */
-        // Stateless popup mode - no handshake needed
-        // Parent will send kms:connect immediately with MessagePort
-        // (window.opener is blocked by cross-origin security anyway)
-        console.log('[KMS Client] Stateless popup: Waiting for kms:connect from parent...');
+        // Stateless popup mode - two-phase handshake
+        // Parent will send kms:hello (no port), we reply kms:ready
+        // Then parent sends kms:connect with MessagePort (transferred once)
+        console.log('[KMS Client] Stateless popup: Ready for two-phase handshake (hello → ready → connect)');
         /* eslint-enable no-console */
         /* c8 ignore stop */
       }

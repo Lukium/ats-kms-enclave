@@ -400,6 +400,8 @@ export type RPCMethod =
   | 'setupPasskey'
   | 'setupPasskeyPRF'
   | 'setupPasskeyGate'
+  | 'generateSetupTransportKey'
+  | 'setupWithEncryptedCredentials'
   | 'unlockWithPassphrase'
   | 'unlockWithPasskey'
   | 'addEnrollment'

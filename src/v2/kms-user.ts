@@ -743,6 +743,118 @@ export class KMSUser {
     });
   }
 
+  /**
+   * Generate ephemeral transport key for stateless popup setup.
+   *
+   * This method generates an ephemeral ECDH P-256 keypair and two distinct salts
+   * for secure credential transmission from popup to iframe. The popup uses these
+   * parameters to encrypt credentials before sending them to the parent (which acts
+   * as a blind proxy).
+   *
+   * **Security:**
+   * - Transport key is ephemeral (one-time use, 10-minute lifetime)
+   * - Parent cannot decrypt credentials (doesn't have iframe's private key)
+   * - Two distinct salts: appSalt (for WebAuthn PRF) and hkdfSalt (for HKDF derivation)
+   *
+   * **Usage:**
+   * 1. Call this method to get transport parameters
+   * 2. Open popup with parameters in URL
+   * 3. Popup encrypts credentials and sends to parent
+   * 4. Parent forwards encrypted credentials to iframe via {@link setupWithEncryptedCredentials}
+   *
+   * @returns Transport parameters for popup URL
+   *
+   * @example
+   * ```typescript
+   * // In parent PWA:
+   * const params = await kmsUser.generateSetupTransportKey();
+   * const setupURL = new URL('https://kms.ats.run/');
+   * setupURL.searchParams.set('mode', 'setup');
+   * setupURL.searchParams.set('transportKey', params.publicKey);
+   * setupURL.searchParams.set('keyId', params.keyId);
+   * setupURL.searchParams.set('appSalt', params.appSalt);
+   * setupURL.searchParams.set('hkdfSalt', params.hkdfSalt);
+   * setupURL.searchParams.set('parentOrigin', window.location.origin);
+   * const popup = window.open(setupURL.toString(), 'kms-setup', '...');
+   * ```
+   *
+   * @see {@link setupWithEncryptedCredentials} to import encrypted credentials
+   */
+  async generateSetupTransportKey(): Promise<{
+    publicKey: string;
+    keyId: string;
+    appSalt: string;
+    hkdfSalt: string;
+  }> {
+    return this.sendRequest<{
+      publicKey: string;
+      keyId: string;
+      appSalt: string;
+      hkdfSalt: string;
+    }>('generateSetupTransportKey', {});
+  }
+
+  /**
+   * Setup user authentication with encrypted credentials from stateless popup.
+   *
+   * This method decrypts credentials received from the popup (via parent proxy)
+   * and calls the appropriate setup method internally. The parent acts as a blind
+   * proxy - it cannot decrypt the credentials.
+   *
+   * **Security:**
+   * - Credentials encrypted with ephemeral ECDH (popup ↔ iframe)
+   * - Parent cannot decrypt (doesn't have iframe's private key)
+   * - Transport key is one-time use (deleted after decryption)
+   * - All cryptographic operations happen in iframe's isolated storage partition
+   *
+   * **Flow:**
+   * 1. Parent calls {@link generateSetupTransportKey}
+   * 2. Popup collects credentials and encrypts with transport key
+   * 3. Popup sends encrypted credentials to parent via postMessage
+   * 4. Parent forwards encrypted credentials to iframe (this method)
+   * 5. Iframe decrypts and processes credentials
+   *
+   * @param params - Encrypted credentials and metadata
+   * @param params.method - Authentication method detected by popup
+   * @param params.transportKeyId - ID of ephemeral transport key
+   * @param params.ephemeralPublicKey - Popup's ephemeral public key (base64url)
+   * @param params.iv - AES-GCM IV (base64url)
+   * @param params.encryptedCredentials - Encrypted credentials (base64url)
+   * @param params.userId - User ID (included in encrypted message for validation)
+   * @returns Setup result with enrollment ID and VAPID key info
+   *
+   * @throws {Error} If transport key not found or expired
+   * @throws {Error} If decryption fails
+   * @throws {Error} If underlying setup method fails
+   *
+   * @example
+   * ```typescript
+   * // In parent PWA after receiving encrypted credentials from popup:
+   * const result = await kmsUser.setupWithEncryptedCredentials({
+   *   method: 'passkey-prf',
+   *   transportKeyId: credentials.transportKeyId,
+   *   ephemeralPublicKey: credentials.ephemeralPublicKey,
+   *   iv: credentials.iv,
+   *   encryptedCredentials: credentials.encryptedCredentials,
+   *   userId: 'user@example.com'
+   * });
+   *
+   * console.log('Setup complete:', result.enrollmentId);
+   * ```
+   *
+   * @see {@link generateSetupTransportKey} to generate transport parameters
+   */
+  async setupWithEncryptedCredentials(params: {
+    method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+    transportKeyId: string;
+    ephemeralPublicKey: string;
+    iv: string;
+    encryptedCredentials: string;
+    userId: string;
+  }): Promise<SetupResult> {
+    return this.sendRequest<SetupResult>('setupWithEncryptedCredentials', params);
+  }
+
   // ========================================================================
   // Unlock Operations
   // ========================================================================

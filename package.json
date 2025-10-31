@@ -27,7 +27,8 @@
     "demo:build": "vite build --config example/vite.config.phase-0.ts",
     "demo:phase-0": "vite --config example/vite.config.phase-0.ts",
     "demo:phase-1:parent": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-parent.ts",
-    "demo:phase-1:kms": "lsof -ti:5174 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-kms.ts"
+    "demo:phase-1:kms": "lsof -ti:5174 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-kms.ts",
+    "demo:phase-2": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-2.ts"
   },
   "keywords": [
     "cryptography",

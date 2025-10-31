@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Phase 2 Demo - Production Enclave</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="demo-container">
+    <header class="demo-header">
+      <h1>🔐 KMS Phase 2 Demo</h1>
+      <p>Testing production enclave at <code>kms.ats.run</code></p>
+    </header>
+
+    <div class="two-pane-layout">
+      <!-- Left Pane: Operations & Artifacts -->
+      <div class="left-pane">
+        <h2>Operations & Artifacts</h2>
+        <div id="operations-content">
+          <button id="reset-demo-btn" class="reset-btn">🔄 Reset Demo</button>
+
+          <div class="operation-section">
+            <h3>Setup Authentication</h3>
+            <div id="setup-operation"></div>
+          </div>
+
+          <div class="operation-section">
+            <div id="lease-operation"></div>
+            <hr style="margin: 1.5rem 0; border: none; border-top: 2px solid #e2e8f0;">
+            <div id="lease-result"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Pane: VAPID Key Info & Audit Log -->
+      <div class="right-pane">
+        <h2>VAPID Key & Leases</h2>
+        <div id="vapid-info-section"></div>
+
+        <hr style="margin: 2rem 0; border: none; border-top: 2px solid #e2e8f0;">
+
+        <h2>Audit Log</h2>
+        <div id="audit-log">
+          <p class="loading">Loading audit log...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./parent.ts"></script>
+</body>
+</html>

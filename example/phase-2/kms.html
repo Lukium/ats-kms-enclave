@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KMS Enclave (Isolated)</title>
+  <style>
+    /* ============================================
+       KMS Modal Styles
+       ============================================ */
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    .kms-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: kms-modal-fade-in 0.2s ease-out;
+    }
+
+    @keyframes kms-modal-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .kms-modal-backdrop {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+    }
+
+    .kms-modal-content {
+      position: relative;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border: 1px solid #333;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      width: 90%;
+      max-width: 450px;
+      padding: 0;
+      animation: kms-modal-slide-up 0.3s ease-out;
+    }
+
+    @keyframes kms-modal-slide-up {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .kms-modal-header {
+      padding: 2rem 2rem 1rem 2rem;
+      border-bottom: 1px solid #333;
+    }
+
+    .kms-modal-header h3 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.5rem;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .kms-modal-subtitle {
+      margin: 0;
+      font-size: 0.875rem;
+      color: #888;
+    }
+
+    .kms-modal-body {
+      padding: 2rem;
+    }
+
+    .kms-auth-option {
+      margin-bottom: 1.5rem;
+    }
+
+    .kms-auth-btn {
+      width: 100%;
+      padding: 1rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    .kms-auth-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .kms-auth-btn:active {
+      transform: translateY(0);
+    }
+
+    .kms-auth-btn.kms-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+    }
+
+    .kms-auth-btn.kms-primary:hover {
+      background: linear-gradient(135deg, #7a8ff0 0%, #8a5bb2 100%);
+    }
+
+    .kms-auth-btn.kms-secondary {
+      background: #2d3748;
+      color: #fff;
+      border: 1px solid #4a5568;
+    }
+
+    .kms-auth-btn.kms-secondary:hover {
+      background: #3d4758;
+      border-color: #5a6578;
+    }
+
+    .kms-auth-icon {
+      font-size: 1.25rem;
+    }
+
+    .kms-auth-label {
+      font-size: 1rem;
+    }
+
+    .kms-auth-hint {
+      margin: 0.5rem 0 0 0;
+      font-size: 0.8rem;
+      color: #888;
+      text-align: center;
+    }
+
+    .kms-divider {
+      display: flex;
+      align-items: center;
+      text-align: center;
+      margin: 1.5rem 0;
+      color: #666;
+      font-size: 0.875rem;
+    }
+
+    .kms-divider::before,
+    .kms-divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid #333;
+    }
+
+    .kms-divider span {
+      padding: 0 1rem;
+    }
+
+    .kms-input-label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      color: #ccc;
+      font-weight: 500;
+    }
+
+    .kms-input {
+      width: 100%;
+      padding: 0.75rem;
+      background: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 1rem;
+      font-family: inherit;
+      margin-bottom: 1rem;
+      box-sizing: border-box;
+    }
+
+    .kms-input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .kms-input::placeholder {
+      color: #666;
+    }
+
+    .kms-modal-error {
+      padding: 1rem;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      color: #f87171;
+      font-size: 0.875rem;
+      margin-top: 1rem;
+    }
+
+    .kms-modal-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      padding: 1rem;
+      background: rgba(102, 126, 234, 0.1);
+      border: 1px solid rgba(102, 126, 234, 0.3);
+      border-radius: 6px;
+      color: #a5b4fc;
+      font-size: 0.875rem;
+      margin-top: 1rem;
+    }
+
+    .kms-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(165, 180, 252, 0.3);
+      border-top-color: #a5b4fc;
+      border-radius: 50%;
+      animation: kms-spin 0.8s linear infinite;
+    }
+
+    @keyframes kms-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Unlock Modal (hidden by default) -->
+  <div id="unlock-modal" class="kms-modal" style="display: none;">
+    <div class="kms-modal-backdrop"></div>
+    <div class="kms-modal-content">
+      <div class="kms-modal-header">
+        <h3>🔐 Unlock KMS</h3>
+        <p class="kms-modal-subtitle">Choose your unlock method</p>
+      </div>
+
+      <div class="kms-modal-body">
+        <!-- WebAuthn Option -->
+        <div class="kms-auth-option">
+          <button id="kms-webauthn-btn" class="kms-auth-btn kms-primary">
+            <span class="kms-auth-icon">🔑</span>
+            <span class="kms-auth-label">Use Passkey</span>
+          </button>
+          <p class="kms-auth-hint">Authenticate with your device biometrics</p>
+        </div>
+
+        <!-- Divider -->
+        <div class="kms-divider">
+          <span>or</span>
+        </div>
+
+        <!-- Passphrase Option -->
+        <div class="kms-auth-option">
+          <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
+          <input
+            type="password"
+            id="kms-passphrase-input"
+            class="kms-input"
+            placeholder="Enter your passphrase"
+            autocomplete="off"
+          />
+          <button id="kms-passphrase-btn" class="kms-auth-btn kms-secondary">
+            <span class="kms-auth-icon">🔐</span>
+            <span class="kms-auth-label">Unlock with Passphrase</span>
+          </button>
+        </div>
+
+        <!-- Error Display -->
+        <div id="kms-modal-error" class="kms-modal-error" style="display: none;"></div>
+
+        <!-- Loading State -->
+        <div id="kms-modal-loading" class="kms-modal-loading" style="display: none;">
+          <span class="kms-spinner"></span>
+          <span>Unlocking...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Setup Modal (hidden by default) -->
+  <div id="setup-modal" class="kms-modal" style="display: none;">
+    <div class="kms-modal-backdrop"></div>
+    <div class="kms-modal-content">
+      <div class="kms-modal-header">
+        <h3>🔐 Setup KMS Authentication</h3>
+        <p class="kms-modal-subtitle">Choose your authentication method</p>
+      </div>
+
+      <div class="kms-modal-body">
+        <!-- WebAuthn Setup Option -->
+        <div class="kms-auth-option">
+          <button id="kms-setup-webauthn-btn" class="kms-auth-btn kms-primary">
+            <span class="kms-auth-icon">🔑</span>
+            <span class="kms-auth-label">Setup Passkey</span>
+          </button>
+          <p class="kms-auth-hint">Register your device biometrics</p>
+        </div>
+
+        <!-- Divider -->
+        <div class="kms-divider">
+          <span>or</span>
+        </div>
+
+        <!-- Passphrase Setup Option -->
+        <div class="kms-auth-option">
+          <label for="kms-setup-passphrase-input" class="kms-input-label">Create Passphrase</label>
+          <input
+            type="password"
+            id="kms-setup-passphrase-input"
+            class="kms-input"
+            placeholder="Enter a strong passphrase (min 12 chars)"
+            autocomplete="off"
+          />
+          <div id="kms-passphrase-char-count" style="margin: -0.5rem 0 0.5rem 0; font-size: 0.75rem; color: #666;">
+            0 / 12 characters
+          </div>
+          <label for="kms-setup-passphrase-confirm-input" class="kms-input-label">Confirm Passphrase</label>
+          <input
+            type="password"
+            id="kms-setup-passphrase-confirm-input"
+            class="kms-input"
+            placeholder="Re-enter your passphrase"
+            autocomplete="off"
+          />
+          <div id="kms-passphrase-match-feedback" style="margin: -0.5rem 0 0.5rem 0; font-size: 0.75rem; display: none;">
+            <!-- Feedback will be inserted here dynamically -->
+          </div>
+          <button id="kms-setup-passphrase-btn" class="kms-auth-btn kms-secondary">
+            <span class="kms-auth-icon">🔐</span>
+            <span class="kms-auth-label">Setup with Passphrase</span>
+          </button>
+        </div>
+
+        <!-- Error Display -->
+        <div id="kms-setup-error" class="kms-modal-error" style="display: none;"></div>
+
+        <!-- Loading State -->
+        <div id="kms-setup-loading" class="kms-modal-loading" style="display: none;">
+          <span class="kms-spinner"></span>
+          <span>Setting up...</span>
+        </div>
+
+        <!-- Success State -->
+        <div id="kms-setup-success" style="display: none; padding: 1rem; background: rgba(72, 187, 120, 0.1); border: 1px solid rgba(72, 187, 120, 0.3); border-radius: 6px; color: #68d391; font-size: 0.875rem; margin-top: 1rem;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.5rem;">✅</span>
+            <div>
+              <div style="font-weight: 600; margin-bottom: 0.25rem;">Setup Complete!</div>
+              <div style="opacity: 0.9;">You can now close this window and return to the main app.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./kms.ts"></script>
+</body>
+</html>

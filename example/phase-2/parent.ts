@@ -485,7 +485,7 @@ async function setupPassphrase(): Promise<void> {
     const setupWindow = window.open(
       setupURL.toString(),
       'kms-setup',
-      'width=600,height=700,menubar=no,toolbar=no,location=no,status=no'
+      'width=600,height=700,menubar=no,toolbar=no,location=no,status=no,opener'
     );
 
     if (!setupWindow) {

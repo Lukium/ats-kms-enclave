@@ -169,10 +169,35 @@ export class KMSClient {
 
     /* c8 ignore start - stateless popup mode requires browser integration testing */
     /* eslint-disable no-console, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
-    // Special handling for kms:connect (MessageChannel port transfer)
-    // This happens BEFORE initialization check because it's part of popup setup
+    // Two-phase handshake for stateless popup mode
+    // Phase 1: Reply to portless "hello" with "ready"
+    if (event.data?.type === 'kms:hello' && this.isStatelessPopup) {
+      console.log('[KMS Client] Received kms:hello message');
+
+      // Verify state token matches (anti-CSRF)
+      if (event.data.state !== this.popupState) {
+        console.error('[KMS Client] State mismatch in kms:hello:', {
+          expected: this.popupState,
+          received: event.data.state
+        });
+        return;
+      }
+
+      // Reply "ready" on window channel (no port yet)
+      console.log('[KMS Client] Replying kms:ready to parent');
+      if (event.source) {
+        (event.source as WindowProxy).postMessage(
+          { type: 'kms:ready', state: this.popupState },
+          event.origin
+        );
+      }
+
+      return;
+    }
+
+    // Phase 2: Accept one-time MessagePort transfer
     if (event.data?.type === 'kms:connect' && this.isStatelessPopup) {
-      console.log('[KMS Client] Received kms:connect message');
+      console.log('[KMS Client] Received kms:connect message with port');
 
       // Verify state token matches (anti-CSRF)
       if (event.data.state !== this.popupState) {
@@ -183,7 +208,7 @@ export class KMSClient {
         return;
       }
 
-      // Extract transferred MessagePort
+      // Extract transferred MessagePort (should only happen once)
       if (!event.ports || event.ports.length === 0) {
         console.error('[KMS Client] No MessagePort transferred in kms:connect');
         return;
@@ -192,7 +217,7 @@ export class KMSClient {
       this.messagePort = event.ports[0] || null;
       console.log('[KMS Client] MessagePort established successfully');
 
-      // Signal to parent that connection is established (stops retry loop)
+      // Signal to parent that connection is established
       if (this.messagePort) {
         this.messagePort.postMessage({ type: 'kms:connected' });
         console.log('[KMS Client] Sent kms:connected confirmation to parent');

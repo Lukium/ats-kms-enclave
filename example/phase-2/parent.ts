@@ -497,14 +497,11 @@ async function setupPassphrase(): Promise<void> {
       return;
     }
 
-    console.log('[Full Demo] Popup opened, setting up MessageChannel...');
+    console.log('[Full Demo] Popup opened, setting up two-phase handshake...');
 
-    // Step 4: Create MessageChannel for direct communication
-    const channel = new MessageChannel();
-    const { port1, port2 } = channel;
-
-    // Step 5: Parent-initiated handshake - retry sending kms:connect until popup accepts
-    // This avoids the window.opener issue - parent CAN send to popup, popup replies via MessagePort
+    // Step 4: Two-phase handshake to avoid MessagePort reuse issue
+    // Phase 1: Send portless "hello" until popup replies "ready"
+    // Phase 2: Create MessageChannel and transfer port ONCE
     const credentials = await new Promise<{
       method: string;
       transportKeyId: string;
@@ -515,67 +512,94 @@ async function setupPassphrase(): Promise<void> {
     }>((resolve, reject) => {
       const maxMs = 15000; // 15 second handshake timeout
       const start = Date.now();
-      let connected = false;
-      let handshakeInterval: ReturnType<typeof setInterval> | null = null;
+      let helloInterval: ReturnType<typeof setInterval> | null = null;
+      let port1: MessagePort | null = null;
 
       const timeout = setTimeout(() => {
-        if (handshakeInterval) clearInterval(handshakeInterval);
+        if (helloInterval) clearInterval(helloInterval);
+        window.removeEventListener('message', onWindowMessage);
         reject(new Error('Setup timeout (no credentials received)'));
       }, 5 * 60 * 1000); // 5 minute overall timeout
 
       const cleanup = (): void => {
         clearTimeout(timeout);
-        if (handshakeInterval) clearInterval(handshakeInterval);
-        port1.close();
+        if (helloInterval) clearInterval(helloInterval);
+        window.removeEventListener('message', onWindowMessage);
+        if (port1) port1.close();
       };
 
-      // Listen on our port for messages from popup
-      port1.onmessage = (evt: MessageEvent) => {
-        const { type, payload } = evt.data || {};
-        console.log('[Full Demo] Received message on MessagePort:', { type, hasPayload: !!payload });
-
-        if (type === 'kms:connected') {
-          console.log('[Full Demo] ✅ Popup connected via MessageChannel!');
-          connected = true;
-          if (handshakeInterval) clearInterval(handshakeInterval);
-        } else if (type === 'kms:setup-credentials') {
-          console.log('[Full Demo] ✅ Received credentials via MessageChannel!');
-          cleanup();
-          resolve(payload);
-        } else if (type === 'kms:error') {
-          console.error('[Full Demo] KMS error:', payload);
-          cleanup();
-          reject(new Error(payload));
-        }
-      };
-
-      // Retry sending kms:connect until popup accepts it
-      console.log('[Full Demo] Starting handshake retry loop...');
-      handshakeInterval = setInterval(() => {
-        if (setupWindow.closed) {
-          clearInterval(handshakeInterval!);
-          cleanup();
-          reject(new Error('Popup was closed before completing setup'));
-          return;
-        }
-
-        if (connected) return; // Already connected, stop retrying
-
+      // Phase 1: Send portless "hello" until popup replies "ready"
+      console.log('[Full Demo] Phase 1: Sending kms:hello until popup replies...');
+      helloInterval = setInterval(() => {
         if (Date.now() - start > maxMs) {
-          clearInterval(handshakeInterval!);
+          if (helloInterval) clearInterval(helloInterval);
           cleanup();
-          reject(new Error('Handshake timeout - popup did not respond'));
+          reject(new Error('Handshake timeout - popup did not respond to hello'));
           return;
         }
 
-        // Try to deliver the channel port to the popup
         try {
-          console.log('[Full Demo] Attempting to send kms:connect to popup...');
-          setupWindow.postMessage({ type: 'kms:connect', state }, KMS_ORIGIN, [port2]);
+          setupWindow.postMessage(
+            { type: 'kms:hello', state, parent: window.location.origin },
+            KMS_ORIGIN
+            // NO PORT TRANSFER HERE
+          );
         } catch (err) {
-          console.warn('[Full Demo] Failed to send kms:connect (popup may not be ready yet):', err);
+          console.warn('[Full Demo] Failed to send kms:hello (popup may not be ready yet):', err);
         }
-      }, 250); // Retry every 250ms
+      }, 250);
+
+      // Phase 2: When popup replies "ready", create channel and transfer port ONCE
+      const onWindowMessage = (event: MessageEvent): void => {
+        if (event.origin !== KMS_ORIGIN) return;
+        const data = event.data || {};
+
+        if (data.type === 'kms:ready' && data.state === state) {
+          console.log('[Full Demo] Phase 2: Popup replied kms:ready, transferring port...');
+
+          // Stop hello loop
+          if (helloInterval) {
+            clearInterval(helloInterval);
+            helloInterval = null;
+          }
+          window.removeEventListener('message', onWindowMessage);
+
+          // Create fresh MessageChannel
+          const channel = new MessageChannel();
+          port1 = channel.port1;
+          const port2 = channel.port2;
+
+          // Listen on port for messages from popup
+          port1.onmessage = (evt: MessageEvent) => {
+            const { type, payload } = evt.data || {};
+            console.log('[Full Demo] Received message on MessagePort:', { type, hasPayload: !!payload });
+
+            if (type === 'kms:connected') {
+              console.log('[Full Demo] ✅ Popup connected via MessageChannel!');
+            } else if (type === 'kms:setup-credentials') {
+              console.log('[Full Demo] ✅ Received credentials via MessageChannel!');
+              cleanup();
+              resolve(payload);
+            } else if (type === 'kms:error') {
+              console.error('[Full Demo] KMS error:', payload);
+              cleanup();
+              reject(new Error(payload));
+            }
+          };
+
+          // Transfer port ONCE
+          try {
+            setupWindow.postMessage({ type: 'kms:connect', state }, KMS_ORIGIN, [port2]);
+            console.log('[Full Demo] Port transferred successfully');
+          } catch (err) {
+            console.error('[Full Demo] Port transfer failed:', err);
+            cleanup();
+            reject(new Error(`Port transfer failed: ${String(err)}`));
+          }
+        }
+      };
+
+      window.addEventListener('message', onWindowMessage);
     });
 
     console.log('[Full Demo] Received encrypted credentials, importing to iframe...');

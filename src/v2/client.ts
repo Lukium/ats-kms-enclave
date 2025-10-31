@@ -233,15 +233,25 @@ export class KMSClient {
    * @param data - Data to send
    */
   private sendToParent(data: RPCResponse | { type: string; [key: string]: unknown }): void {
-    if (!window.parent) {
-      console.error('[KMS Client] No parent window available');
+    // Determine target window based on context
+    // Popup mode: use window.opener (popup was opened by parent)
+    // Iframe mode: use window.parent (iframe is embedded in parent)
+    const isPopup = window.opener !== null && window.opener !== window;
+    const targetWindow = isPopup ? window.opener : window.parent;
+
+    if (!targetWindow || targetWindow === window) {
+      console.error('[KMS Client] No parent/opener window available', {
+        isPopup,
+        hasOpener: window.opener !== null,
+        hasParent: window.parent !== window
+      });
       return;
     }
 
     try {
-      window.parent.postMessage(data, this.parentOrigin);
+      (targetWindow as Window).postMessage(data, this.parentOrigin);
     } catch (err: unknown) {
-      console.error('[KMS Client] Failed to send message to parent:', err);
+      console.error('[KMS Client] Failed to send message to parent/opener:', err);
     }
   }
 

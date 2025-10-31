@@ -113,6 +113,10 @@ export class KMSClient {
         console.log('[KMS Client] Running in stateless popup mode');
       }
 
+      // Setup parent window message handler FIRST (before Worker creation)
+      // This ensures popup can receive kms:hello even if Worker init fails
+      window.addEventListener('message', this.handleParentMessage.bind(this));
+
       // Create Dedicated Worker
       this.worker = new Worker(this.workerUrl, {
         type: 'module',
@@ -124,9 +128,6 @@ export class KMSClient {
 
       // Setup Worker error handler
       this.worker.addEventListener('error', this.handleWorkerError.bind(this));
-
-      // Setup parent window message handler
-      window.addEventListener('message', this.handleParentMessage.bind(this));
 
       this.isInitialized = true;
 

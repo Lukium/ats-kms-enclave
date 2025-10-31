@@ -25,7 +25,9 @@
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
 
   # Cross-Origin Policies - Enable SharedArrayBuffer and isolate context
-  Cross-Origin-Opener-Policy: same-origin
+  # Note: Using same-origin-allow-popups to allow parent→popup postMessage
+  # (stateless popup mode requires cross-origin messaging from parent PWA)
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Resource-Policy: same-origin
 

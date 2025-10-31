@@ -227,7 +227,7 @@ describe('KMSUser initialization', () => {
 
     const iframe = env.getCurrentIframe();
     expect(iframe).toBeDefined();
-    expect(iframe?.src).toContain('https://kms.ats.run/kms.html');
+    expect(iframe?.src).toContain('https://kms.ats.run/?parentOrigin=');
     expect(iframe?.src).toContain('parentOrigin=');
     expect(iframe?.sandbox.add).toHaveBeenCalledWith('allow-scripts', 'allow-same-origin');
     expect(iframe?.allow).toContain('publickey-credentials');

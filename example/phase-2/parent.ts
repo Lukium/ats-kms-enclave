@@ -519,15 +519,29 @@ async function setupPassphrase(): Promise<void> {
         window.removeEventListener('storage', storageHandler);
       };
 
-      // Strategy 1: postMessage (window.opener)
+      // Strategy 1: postMessage (from iframe relay)
       const postMessageHandler = (event: MessageEvent): void => {
-        if (event.origin !== KMS_ORIGIN) return;
+        console.log('[Full Demo] Received postMessage:', {
+          origin: event.origin,
+          expectedOrigin: KMS_ORIGIN,
+          type: event.data?.type,
+          hasCredentials: !!event.data?.encryptedCredentials
+        });
+
+        if (event.origin !== KMS_ORIGIN) {
+          console.warn('[Full Demo] Ignoring message from wrong origin');
+          return;
+        }
+
         if (event.data?.type === 'kms:setup-credentials') {
-          console.log('[Full Demo] Received credentials via postMessage');
+          console.log('[Full Demo] ✅ Received credentials via postMessage from iframe!');
           cleanup();
           resolve(event.data);
+        } else {
+          console.log('[Full Demo] Ignoring message - wrong type');
         }
       };
+      console.log('[Full Demo] Setting up postMessage listener...');
       window.addEventListener('message', postMessageHandler);
 
       // Strategy 2: BroadcastChannel

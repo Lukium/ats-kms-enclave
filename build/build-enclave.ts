@@ -111,9 +111,125 @@ async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string;
 }
 
 /**
+ * Generate the CSS file for the enclave
+ */
+function generateEnclaveCSS(): void {
+  const css = `body {
+  margin: 0;
+  padding: 20px;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+.enclave-status {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 30px;
+  background: #2a2a2a;
+  border-radius: 8px;
+  border: 1px solid #3a3a3a;
+}
+
+h1 {
+  margin: 0 0 10px 0;
+  font-size: 24px;
+  color: #4CAF50;
+}
+
+.hash {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  background: #1a1a1a;
+  padding: 10px;
+  border-radius: 4px;
+  word-break: break-all;
+  color: #888;
+  margin: 10px 0;
+}
+
+.status {
+  color: #4CAF50;
+  font-weight: 600;
+}
+
+.description {
+  font-size: 14px;
+  color: #888;
+  margin-top: 20px;
+}
+`;
+
+  const cssPath = join(distDir, 'enclave/enclave.css');
+  writeFileSync(cssPath, css, 'utf-8');
+  console.log(`✅ Generated: ${cssPath}`);
+}
+
+/**
+ * Generate the client bootstrap script for the enclave
+ */
+function generateEnclaveClient(workerFilename: string): void {
+  const client = `// Bootstrap: Load the KMS worker and establish parent communication
+const worker = new Worker('./${workerFilename}', {
+  type: 'module',
+  name: 'kms-enclave-worker'
+});
+
+// Track worker readiness
+let workerReady = false;
+
+// Forward messages from parent to worker
+window.addEventListener('message', (event) => {
+  // TODO: Add origin validation in production
+  // if (event.origin !== 'https://ats.run') return;
+
+  if (!workerReady) {
+    console.warn('[KMS Enclave] Worker not ready, queueing message');
+    // Could implement message queue here if needed
+    return;
+  }
+
+  console.log('[KMS Enclave] → Worker:', event.data.method || event.data.type);
+  worker.postMessage(event.data);
+});
+
+// Forward messages from worker to parent
+worker.addEventListener('message', (event) => {
+  console.log('[KMS Enclave] ← Worker:', event.data);
+  window.parent.postMessage(event.data, '*'); // TODO: Specify target origin in production
+});
+
+// Handle worker errors
+worker.addEventListener('error', (event) => {
+  console.error('[KMS Enclave] Worker error:', event);
+  window.parent.postMessage({
+    type: 'error',
+    error: 'Worker crashed: ' + event.message
+  }, '*');
+});
+
+// Mark worker as ready
+worker.addEventListener('message', function readyHandler(event) {
+  if (event.data.type === 'ready') {
+    workerReady = true;
+    worker.removeEventListener('message', readyHandler);
+    console.log('[KMS Enclave] Worker ready');
+  }
+}, { once: false });
+
+// Signal to parent that iframe is loaded
+window.parent.postMessage({ type: 'iframe-ready' }, '*');
+`;
+
+  const clientPath = join(distDir, 'enclave/enclave-client.js');
+  writeFileSync(clientPath, client, 'utf-8');
+  console.log(`✅ Generated: ${clientPath}`);
+}
+
+/**
  * Generate the HTML wrapper for the enclave
  */
-function generateEnclaveHTML(workerHash: string, workerFilename: string): void {
+function generateEnclaveHTML(workerHash: string): void {
   console.log('\n📝 Generating KMS Enclave HTML...');
 
   const html = `<!DOCTYPE html>
@@ -123,46 +239,7 @@ function generateEnclaveHTML(workerHash: string, workerFilename: string): void {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KMS Enclave</title>
   <meta name="description" content="AllTheServices Key Management System Enclave">
-
-  <!-- Security Headers (CSP should be set via HTTP headers in production) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'none'; style-src 'unsafe-inline';">
-
-  <style>
-    body {
-      margin: 0;
-      padding: 20px;
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #1a1a1a;
-      color: #e0e0e0;
-    }
-    .enclave-status {
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 30px;
-      background: #2a2a2a;
-      border-radius: 8px;
-      border: 1px solid #3a3a3a;
-    }
-    h1 {
-      margin: 0 0 10px 0;
-      font-size: 24px;
-      color: #4CAF50;
-    }
-    .hash {
-      font-family: 'Monaco', 'Menlo', monospace;
-      font-size: 12px;
-      background: #1a1a1a;
-      padding: 10px;
-      border-radius: 4px;
-      word-break: break-all;
-      color: #888;
-      margin: 10px 0;
-    }
-    .status {
-      color: #4CAF50;
-      font-weight: 600;
-    }
-  </style>
+  <link rel="stylesheet" href="enclave.css">
 </head>
 <body>
   <div class="enclave-status">
@@ -172,64 +249,12 @@ function generateEnclaveHTML(workerHash: string, workerFilename: string): void {
       <strong>Worker Hash:</strong>
       <div class="hash">${workerHash}</div>
     </div>
-    <p style="font-size: 14px; color: #888; margin-top: 20px;">
+    <p class="description">
       This iframe runs in a sandboxed cross-origin context.
       All cryptographic operations are isolated from the parent PWA.
     </p>
   </div>
-
-  <script type="module">
-    // Bootstrap: Load the KMS worker and establish parent communication
-    const worker = new Worker('./${workerFilename}', {
-      type: 'module',
-      name: 'kms-enclave-worker'
-    });
-
-    // Track worker readiness
-    let workerReady = false;
-
-    // Forward messages from parent to worker
-    window.addEventListener('message', (event) => {
-      // TODO: Add origin validation in production
-      // if (event.origin !== 'https://ats.run') return;
-
-      if (!workerReady) {
-        console.warn('[KMS Enclave] Worker not ready, queueing message');
-        // Could implement message queue here if needed
-        return;
-      }
-
-      console.log('[KMS Enclave] → Worker:', event.data.method || event.data.type);
-      worker.postMessage(event.data);
-    });
-
-    // Forward messages from worker to parent
-    worker.addEventListener('message', (event) => {
-      console.log('[KMS Enclave] ← Worker:', event.data);
-      window.parent.postMessage(event.data, '*'); // TODO: Specify target origin in production
-    });
-
-    // Handle worker errors
-    worker.addEventListener('error', (event) => {
-      console.error('[KMS Enclave] Worker error:', event);
-      window.parent.postMessage({
-        type: 'error',
-        error: 'Worker crashed: ' + event.message
-      }, '*');
-    });
-
-    // Mark worker as ready
-    worker.addEventListener('message', function readyHandler(event) {
-      if (event.data.type === 'ready') {
-        workerReady = true;
-        worker.removeEventListener('message', readyHandler);
-        console.log('[KMS Enclave] Worker ready');
-      }
-    }, { once: false });
-
-    // Signal to parent that iframe is loaded
-    window.parent.postMessage({ type: 'iframe-ready' }, '*');
-  </script>
+  <script type="module" src="enclave-client.js"></script>
 </body>
 </html>`;
 
@@ -250,8 +275,10 @@ async function main() {
     // Build the worker bundle
     const { hash, filename } = await buildEnclaveWorker();
 
-    // Generate HTML wrapper with worker hash and filename embedded
-    generateEnclaveHTML(hash, filename);
+    // Generate CSS, client script, and HTML
+    generateEnclaveCSS();
+    generateEnclaveClient(filename);
+    generateEnclaveHTML(hash);
 
     // Write build manifest
     const manifest = {
@@ -288,6 +315,16 @@ async function main() {
     const cfWorkerPath = join(cfPagesDir, filename);
     writeFileSync(cfWorkerPath, readFileSync(join(distDir, `enclave/${filename}`)));
     console.log(`  ✅ ${cfWorkerPath}`);
+
+    // Copy CSS file
+    const cfCssPath = join(cfPagesDir, 'enclave.css');
+    writeFileSync(cfCssPath, readFileSync(join(distDir, 'enclave/enclave.css')));
+    console.log(`  ✅ ${cfCssPath}`);
+
+    // Copy client JS file
+    const cfClientPath = join(cfPagesDir, 'enclave-client.js');
+    writeFileSync(cfClientPath, readFileSync(join(distDir, 'enclave/enclave-client.js')));
+    console.log(`  ✅ ${cfClientPath}`);
 
     // Copy index.html
     const cfHtmlPath = join(cfPagesDir, 'index.html');

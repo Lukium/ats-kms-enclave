@@ -46,7 +46,7 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-31 01:06:37 UTC*
+*Last updated: 2025-10-31 01:11:42 UTC*
 
 **Test Results:**
 - Test Files: 9 passed (9)
@@ -57,8 +57,8 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ```
 File                    │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-All files               │ 8627    │   85.37│    83.30 │   85.58│   85.37 │
- v2/audit.ts            │ 614     │   99.18│    96.15 │     100│   99.18 │ 5 lines
+All files               │ 8627    │   85.37│    83.33 │   85.58│   85.37 │
+ v2/audit.ts            │ 614     │   99.18│    96.22 │     100│   99.18 │ 5 lines
  v2/client.ts           │ 1237    │   36.77│    74.41 │   66.66│   36.77 │ 600 lines
  v2/crypto-utils.ts     │ 415     │   95.65│    95.45 │   94.44│   95.65 │ 18 lines
  v2/error-utils.ts      │ 95      │     100│      100 │     100│     100 │ 

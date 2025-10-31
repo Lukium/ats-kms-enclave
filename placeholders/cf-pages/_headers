@@ -85,3 +85,16 @@
 
   # Standard security headers
   X-Content-Type-Options: nosniff
+
+# Static CSS files
+/*.css
+  Content-Type: text/css; charset=utf-8
+
+  # No CORS needed (same-origin only via CSP)
+  Cross-Origin-Resource-Policy: same-origin
+
+  # Cache for 5 minutes (can be updated without content addressing)
+  Cache-Control: public, max-age=300
+
+  # Standard security headers
+  X-Content-Type-Options: nosniff

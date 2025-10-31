@@ -123,8 +123,12 @@ export class KMSClient {
 
       this.isInitialized = true;
 
-      // Signal ready to parent
-      this.sendToParent({ type: 'kms:ready' });
+      // Signal ready to parent (skip in stateless popup mode - popup doesn't need persistent connection)
+      if (!this.isStatelessPopup) {
+        this.sendToParent({ type: 'kms:ready' });
+      } else {
+        console.log('[KMS Client] Skipping kms:ready in stateless popup mode');
+      }
     } catch (err: unknown) {
       console.error('[KMS Client] Initialization failed:', err);
       throw new Error(formatError('Failed to initialize KMS client', err));
@@ -1288,6 +1292,13 @@ export class KMSClient {
       // Check if stateless popup mode
       if (this.isStatelessPopup) {
         console.log('[KMS Client] Entering stateless popup flow for passphrase setup');
+
+        console.log('[KMS Client] window.opener check:', {
+          hasOpener: !!window.opener,
+          openerIsWindow: window.opener === window,
+          parentOrigin: this.parentOrigin
+        });
+
         // Encrypt credentials
         const encrypted = await this.encryptCredentials(
           {
@@ -1296,8 +1307,11 @@ export class KMSClient {
           this.transportPublicKey!
         );
 
+        console.log('[KMS Client] Credentials encrypted, preparing to send to parent');
+
         // Send to parent
         if (window.opener) {
+          console.log('[KMS Client] Sending encrypted credentials to parent via window.opener');
           (window.opener as Window).postMessage(
             {
               type: 'kms:setup-credentials',
@@ -1313,6 +1327,10 @@ export class KMSClient {
           this.hideSetupLoading();
           this.showSetupSuccess();
           setTimeout(() => window.close(), 2000);
+        } else {
+          console.error('[KMS Client] window.opener is null - cannot send credentials to parent!');
+          this.hideSetupLoading();
+          this.showSetupError('Cannot communicate with parent window. Please try again.');
         }
         return;
       }

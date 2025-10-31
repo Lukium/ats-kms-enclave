@@ -21,11 +21,6 @@ export default defineConfig({
     outDir: 'dist-parent',
     emptyOutDir: true,
   },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './phase-2/src'),
-    },
-  },
   server: {
     port: 5173,
     strictPort: true,

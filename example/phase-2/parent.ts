@@ -5,8 +5,8 @@
  * Embeds KMS iframe from https://kms.ats.run (cross-origin isolated)
  */
 
-import { KMSUser, type StatusResult } from './src/kms-user';
-import type { AuditEntryV2 } from './src/types';
+import { KMSUser, type StatusResult } from '../../src/v2/kms-user';
+import type { AuditEntryV2 } from '../../src/v2/types';
 import {
   registerServiceWorker,
   subscribeToPush,

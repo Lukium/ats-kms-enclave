@@ -314,6 +314,37 @@ h1 {
   font-size: 0.75rem;
 }
 
+/* Color state classes for dynamic feedback */
+.success {
+  color: #48d391 !important;
+}
+
+.error {
+  color: #ef4444 !important;
+}
+
+/* Multi-enrollment unlock instructions (dynamically created) */
+.multi-enrollment-instructions {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(102, 126, 234, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 6px;
+}
+
+.multi-enrollment-title {
+  margin: 0 0 0.5rem 0;
+  color: #a5b4fc;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.multi-enrollment-description {
+  margin: 0;
+  color: #888;
+  font-size: 0.8rem;
+}
+
 .kms-setup-success {
   padding: 1rem;
   background: rgba(72, 187, 120, 0.1);

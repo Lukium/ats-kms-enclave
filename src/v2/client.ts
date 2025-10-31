@@ -294,7 +294,7 @@ export class KMSClient {
     }
 
     // Show modal
-    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
 
     // Setup WebAuthn button handler
     webauthnBtn.onclick = (): Promise<void> => this.handleWebAuthnUnlock();
@@ -500,7 +500,7 @@ export class KMSClient {
     const errorDiv = document.getElementById('kms-modal-error');
     if (errorDiv) {
       errorDiv.textContent = message;
-      errorDiv.style.display = 'block';
+      errorDiv.classList.remove('hidden');
     }
   }
 
@@ -510,7 +510,7 @@ export class KMSClient {
   private hideError(): void {
     const errorDiv = document.getElementById('kms-modal-error');
     if (errorDiv) {
-      errorDiv.style.display = 'none';
+      errorDiv.classList.add('hidden');
     }
   }
 
@@ -520,7 +520,7 @@ export class KMSClient {
   private showLoading(): void {
     const loadingDiv = document.getElementById('kms-modal-loading');
     if (loadingDiv) {
-      loadingDiv.style.display = 'flex';
+      loadingDiv.classList.remove('hidden');
     }
   }
 
@@ -530,7 +530,7 @@ export class KMSClient {
   private hideLoading(): void {
     const loadingDiv = document.getElementById('kms-modal-loading');
     if (loadingDiv) {
-      loadingDiv.style.display = 'none';
+      loadingDiv.classList.add('hidden');
     }
   }
 
@@ -540,7 +540,7 @@ export class KMSClient {
   private hideModal(): void {
     const modal = document.getElementById('unlock-modal');
     if (modal) {
-      modal.style.display = 'none';
+      modal.classList.add('hidden');
     }
 
     // Clear passphrase input
@@ -572,17 +572,17 @@ export class KMSClient {
     if (setupModalBody) {
       // Hide setup options, show unlock instructions
       const setupOptions = setupModalBody.querySelectorAll('.kms-auth-option, .kms-divider');
-      setupOptions.forEach(el => ((el as HTMLElement).style.display = 'none'));
+      setupOptions.forEach(el => ((el as HTMLElement).classList.add('hidden')));
 
       // Create unlock instructions
       const unlockInstructions = document.createElement('div');
       unlockInstructions.id = 'multi-enrollment-unlock';
-      unlockInstructions.style.cssText = 'margin-bottom: 1.5rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border: 1px solid rgba(102, 126, 234, 0.3); border-radius: 6px;';
+      unlockInstructions.className = 'multi-enrollment-instructions';
       unlockInstructions.innerHTML = `
-        <p style="margin: 0 0 0.5rem 0; color: #a5b4fc; font-size: 0.875rem; font-weight: 600;">
+        <p class="multi-enrollment-title">
           🔒 Multi-Enrollment Authentication Required
         </p>
-        <p style="margin: 0; color: #888; font-size: 0.8rem;">
+        <p class="multi-enrollment-description">
           You already have an authentication method set up. Please authenticate with your existing method to add a new one.
         </p>
       `;
@@ -639,7 +639,7 @@ export class KMSClient {
 
         // Restore setup options
         const setupOptions = setupModalBody?.querySelectorAll('.kms-auth-option, .kms-divider');
-        setupOptions?.forEach(el => ((el as HTMLElement).style.display = ''));
+        setupOptions?.forEach(el => ((el as HTMLElement).classList.remove('hidden')));
       };
 
       // Handle passphrase unlock
@@ -756,18 +756,20 @@ export class KMSClient {
 
       // Only show feedback if user has typed in confirmation field
       if (confirm.length === 0) {
-        matchFeedback.style.display = 'none';
+        matchFeedback.classList.add('hidden');
         return;
       }
 
-      matchFeedback.style.display = 'block';
+      matchFeedback.classList.remove('hidden');
 
       if (passphrase === confirm) {
         matchFeedback.textContent = '✓ Passphrases match';
-        matchFeedback.style.color = '#48d391'; // green
+        matchFeedback.classList.remove('error');
+        matchFeedback.classList.add('success');
       } else {
         matchFeedback.textContent = '✗ Passphrases do not match';
-        matchFeedback.style.color = '#ef4444'; // red
+        matchFeedback.classList.remove('success');
+        matchFeedback.classList.add('error');
       }
     };
 
@@ -777,9 +779,11 @@ export class KMSClient {
       if (charCount) {
         charCount.textContent = `${length} / ${minLength} characters`;
         if (length < minLength) {
-          charCount.style.color = '#ef4444'; // red
+          charCount.classList.remove('success');
+          charCount.classList.add('error');
         } else {
-          charCount.style.color = '#48d391'; // green
+          charCount.classList.remove('error');
+          charCount.classList.add('success');
         }
       }
       updateMatchFeedback();
@@ -1103,7 +1107,7 @@ export class KMSClient {
     const errorDiv = document.getElementById('kms-setup-error');
     if (errorDiv) {
       errorDiv.textContent = message;
-      errorDiv.style.display = 'block';
+      errorDiv.classList.remove('hidden');
     }
   }
 
@@ -1113,7 +1117,7 @@ export class KMSClient {
   private hideSetupError(): void {
     const errorDiv = document.getElementById('kms-setup-error');
     if (errorDiv) {
-      errorDiv.style.display = 'none';
+      errorDiv.classList.add('hidden');
     }
   }
 
@@ -1123,7 +1127,7 @@ export class KMSClient {
   private showSetupLoading(): void {
     const loadingDiv = document.getElementById('kms-setup-loading');
     if (loadingDiv) {
-      loadingDiv.style.display = 'flex';
+      loadingDiv.classList.remove('hidden');
     }
   }
 
@@ -1133,7 +1137,7 @@ export class KMSClient {
   private hideSetupLoading(): void {
     const loadingDiv = document.getElementById('kms-setup-loading');
     if (loadingDiv) {
-      loadingDiv.style.display = 'none';
+      loadingDiv.classList.add('hidden');
     }
   }
 
@@ -1143,7 +1147,7 @@ export class KMSClient {
   private showSetupSuccess(): void {
     const successDiv = document.getElementById('kms-setup-success');
     if (successDiv) {
-      successDiv.style.display = 'block';
+      successDiv.classList.remove('hidden');
     }
   }
 
@@ -1153,7 +1157,7 @@ export class KMSClient {
   private hideSetupSuccess(): void {
     const successDiv = document.getElementById('kms-setup-success');
     if (successDiv) {
-      successDiv.style.display = 'none';
+      successDiv.classList.add('hidden');
     }
   }
 
@@ -1222,7 +1226,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         client.setupSetupModalHandlers();
         const setupModal = document.getElementById('setup-modal');
         if (setupModal) {
-          setupModal.style.display = 'flex';
+          setupModal.classList.remove('hidden');
         }
       }, 100);
     }

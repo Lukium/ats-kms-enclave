@@ -1230,6 +1230,166 @@ describe('issueVAPIDJWT', () => {
 });
 
 // ============================================================================
+// issueVAPIDJWTs (Batch) Tests
+// ============================================================================
+
+describe('issueVAPIDJWTs', () => {
+  let passphrase: string;
+  let leaseId: string;
+  let kid: string;
+
+  beforeEach(async () => {
+    // Setup KMS with passphrase
+    passphrase = 'batch-jwt-passphrase-123';
+    const setupResponse = await handleMessage(
+      createRequest('setupPassphrase', {
+        userId: 'test@example.com',
+        passphrase,
+      })
+    );
+    kid = getResult<{ vapidKid: string }>(setupResponse).vapidKid;
+
+    // Set push subscription (required for JWT issuance)
+    await handleMessage(
+      createRequest('setPushSubscription', {
+        subscription: {
+          endpoint: 'https://fcm.googleapis.com/fcm/send/batch-jwt-test',
+          expirationTime: null,
+          keys: { p256dh: 'test-p256dh', auth: 'test-auth' },
+          eid: 'ep-batch-test',
+          createdAt: Date.now(),
+        },
+      })
+    );
+
+    // Create a lease
+    const leaseResponse = await handleMessage(
+      createRequest('createLease', {
+        userId: 'test-user',
+        subs: [],
+        ttlHours: 12,
+        credentials: createPassphraseCredentials(passphrase),
+      })
+    );
+    leaseId = getResult<{ leaseId: string }>(leaseResponse).leaseId;
+  });
+
+  it('should issue multiple JWTs with staggered expirations', async () => {
+    const request = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 3,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+
+    const response = await handleMessage(request);
+    expect(response.error).toBeUndefined();
+
+    const result = getResult<Array<{ jwt: string; jti: string; exp: number }>>(response);
+    expect(result).toHaveLength(3);
+
+    // Verify all JWTs are present
+    for (const item of result) {
+      expect(item.jwt).toBeDefined();
+      expect(item.jti).toBeDefined();
+      expect(item.exp).toBeGreaterThan(Date.now() / 1000);
+    }
+
+    // Verify expirations are staggered (each should be ~9 minutes apart)
+    expect(result[1]!.exp).toBeGreaterThan(result[0]!.exp);
+    expect(result[2]!.exp).toBeGreaterThan(result[1]!.exp);
+
+    // Check stagger interval is approximately 540 seconds (9 minutes = 60% of 15 min TTL)
+    const stagger1 = result[1]!.exp - result[0]!.exp;
+    const stagger2 = result[2]!.exp - result[1]!.exp;
+    expect(stagger1).toBeGreaterThan(500);
+    expect(stagger1).toBeLessThan(600);
+    expect(stagger2).toBeGreaterThan(500);
+    expect(stagger2).toBeLessThan(600);
+  });
+
+  it('should validate count is between 1 and 10', async () => {
+    // Test count = 0 (invalid)
+    const request0 = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 0,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+    const response0 = await handleMessage(request0);
+    expect(response0.error).toBeDefined();
+    expect(response0.error).toContain('count must be an integer between 1 and 10');
+
+    // Test count = 11 (invalid)
+    const request11 = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 11,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+    const response11 = await handleMessage(request11);
+    expect(response11.error).toBeDefined();
+    expect(response11.error).toContain('count must be an integer between 1 and 10');
+
+    // Test count = 1 (valid)
+    const request1 = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 1,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+    const response1 = await handleMessage(request1);
+    expect(response1.error).toBeUndefined();
+    expect(getResult<Array<any>>(response1)).toHaveLength(1);
+
+    // Test count = 10 (valid)
+    const request10 = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 10,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+    const response10 = await handleMessage(request10);
+    expect(response10.error).toBeUndefined();
+    expect(getResult<Array<any>>(response10)).toHaveLength(10);
+  });
+
+  it('should issue single JWT when count=1', async () => {
+    const request = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 1,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+
+    const response = await handleMessage(request);
+    expect(response.error).toBeUndefined();
+
+    const result = getResult<Array<{ jwt: string; jti: string; exp: number }>>(response);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.jwt).toBeDefined();
+    expect(result[0]!.jti).toBeDefined();
+  });
+
+  it('should work with autoExtend leases', async () => {
+    const request = createRequest('issueVAPIDJWTs', {
+      leaseId,
+      kid,
+      count: 2,
+      credentials: createPassphraseCredentials(passphrase),
+    });
+
+    const response = await handleMessage(request);
+    expect(response.error).toBeUndefined();
+
+    const result = getResult<Array<{ jwt: string }>>(response);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.jwt).toBeDefined();
+    expect(result[1]!.jwt).toBeDefined();
+  });
+});
+
+// ============================================================================
 // Status/Query Operations Tests
 // ============================================================================
 
@@ -1664,5 +1824,414 @@ describe('worker integration', () => {
     // Both should generate valid keys
     expect(getResult<{ kid: string }>(vapidWithPassphrase).kid).toBeDefined();
     expect(getResult<{ kid: string }>(vapidWithPRF).kid).toBeDefined();
+  });
+});
+
+// ============================================================================
+// setupWithEncryptedCredentials Tests (Internal Function Coverage)
+// ============================================================================
+
+describe('setupWithEncryptedCredentials - ECDH encryption flow', () => {
+  /**
+   * Helper to simulate the popup's encryption process using ECDH.
+   * This mirrors what the actual popup does when encrypting credentials.
+   */
+  async function encryptCredentials(
+    transportPublicKey: string,
+    credentials: object
+  ): Promise<{
+    ephemeralPublicKey: string;
+    iv: string;
+    encryptedCredentials: string;
+  }> {
+    // Import iframe's transport public key
+    const transportPubKeyBytes = base64urlToArrayBuffer(transportPublicKey);
+    const transportPubKey = await crypto.subtle.importKey(
+      'raw',
+      transportPubKeyBytes,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      []
+    );
+
+    // Generate popup's ephemeral keypair
+    const ephemeralKeypair = await crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveBits']
+    );
+
+    // Export popup's public key (raw format, 65 bytes)
+    const ephemeralPubKeyRaw = await crypto.subtle.exportKey('raw', ephemeralKeypair.publicKey);
+
+    // Perform ECDH to derive shared secret
+    const sharedSecret = await crypto.subtle.deriveBits(
+      {
+        name: 'ECDH',
+        public: transportPubKey,
+      },
+      ephemeralKeypair.privateKey,
+      256
+    );
+
+    // Derive AES-GCM key from shared secret (HKDF)
+    const sharedSecretKey = await crypto.subtle.importKey('raw', sharedSecret, 'HKDF', false, ['deriveBits']);
+
+    const aesKeyBits = await crypto.subtle.deriveBits(
+      {
+        name: 'HKDF',
+        salt: new Uint8Array(32), // Zero salt (shared secret already random)
+        info: new TextEncoder().encode('ATS/KMS/setup-transport/v2'),
+        hash: 'SHA-256',
+      },
+      sharedSecretKey,
+      256
+    );
+
+    const aesKey = await crypto.subtle.importKey('raw', aesKeyBits, { name: 'AES-GCM', length: 256 }, false, [
+      'encrypt',
+    ]);
+
+    // Encrypt credentials
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const credentialsJSON = new TextEncoder().encode(JSON.stringify(credentials));
+
+    const ciphertext = await crypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv,
+        tagLength: 128,
+      },
+      aesKey,
+      credentialsJSON
+    );
+
+    return {
+      ephemeralPublicKey: arrayBufferToBase64url(ephemeralPubKeyRaw),
+      iv: arrayBufferToBase64url(iv.buffer),
+      encryptedCredentials: arrayBufferToBase64url(ciphertext),
+    };
+  }
+
+  /**
+   * Helper to call generateSetupTransportKey via handleSetupWithPopup.
+   * This is a workaround since generateSetupTransportKey is not exposed as an RPC method anymore.
+   */
+  async function getTransportKey(): Promise<{
+    publicKey: string;
+    keyId: string;
+    appSalt: string;
+    hkdfSalt: string;
+  }> {
+    // Start setupWithPopup which generates transport key internally
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+
+    // Intercept postMessage to capture transport params
+    let transportParams: any = null;
+    const originalPostMessage = (self as any).postMessage;
+    (self as any).postMessage = vi.fn((data: any) => {
+      if (data.type === 'worker:setup-with-popup') {
+        transportParams = {
+          publicKey: data.transportKey,
+          keyId: data.transportKeyId,
+          appSalt: data.appSalt,
+          hkdfSalt: data.hkdfSalt,
+        };
+      }
+      originalPostMessage.call(self, data);
+    });
+
+    const responsePromise = handleMessage(request);
+
+    // Wait for worker to send setup-with-popup message
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Cancel the setup by sending an error
+    const errorEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-error',
+        requestId: request.id,
+        reason: 'Cancelled for transport key extraction',
+      },
+    });
+    self.dispatchEvent(errorEvent);
+
+    // Wait for response to complete (will error, but that's expected)
+    await responsePromise.catch(() => {});
+
+    // Restore postMessage
+    (self as any).postMessage = originalPostMessage;
+
+    if (!transportParams) {
+      throw new Error('Failed to extract transport params from setupWithPopup');
+    }
+
+    return transportParams;
+  }
+
+  /**
+   * Helper to import base64url functions from crypto-utils.
+   */
+  function arrayBufferToBase64url(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+    const b64 = btoa(binary);
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+
+  function base64urlToArrayBuffer(base64url: string): ArrayBuffer {
+    let b64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4;
+    if (pad) b64 += '='.repeat(4 - pad);
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  it('should decrypt and setup with passphrase credentials', async () => {
+    // Step 1: Get transport key from iframe
+    const transportParams = await getTransportKey();
+    expect(transportParams.publicKey).toBeDefined();
+    expect(transportParams.keyId).toBeDefined();
+
+    // Step 2: Encrypt passphrase credentials (simulate popup behavior)
+    const passphrase = 'test-encrypted-passphrase-123';
+    const encryptedData = await encryptCredentials(transportParams.publicKey, { passphrase });
+
+    // Step 3: Call setupWithPopup and complete the flow
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+    const responsePromise = handleMessage(request);
+
+    // Wait for worker to be ready
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Simulate encrypted credentials from popup (correct message format)
+    const credentialsEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-credentials',
+        requestId: request.id,
+        credentials: {
+          method: 'passphrase',
+          transportKeyId: transportParams.keyId,
+          userId: 'test@example.com',
+          ephemeralPublicKey: encryptedData.ephemeralPublicKey,
+          iv: encryptedData.iv,
+          encryptedCredentials: encryptedData.encryptedCredentials,
+        },
+      },
+    });
+    self.dispatchEvent(credentialsEvent);
+
+    // Wait for response
+    const response = await responsePromise;
+
+    // Verify setup succeeded with correct response structure
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    const result = getResult<{ success: boolean; vapidKid: string; enrollmentId: string; vapidPublicKey: string }>(response);
+    expect(result.success).toBe(true);
+    expect(result.vapidKid).toBeDefined();
+    expect(result.vapidPublicKey).toBeDefined();
+    expect(result.enrollmentId).toContain('enrollment:passphrase:v2');
+  });
+
+  it('should decrypt and setup with passkey-prf credentials', async () => {
+    // Step 1: Get transport key
+    const transportParams = await getTransportKey();
+
+    // Step 2: Generate PRF output (simulate WebAuthn)
+    const credentialId = crypto.getRandomValues(new Uint8Array(16)).buffer;
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
+
+    // Step 3: Encrypt PRF credentials
+    const encryptedData = await encryptCredentials(transportParams.publicKey, {
+      credentialId: arrayBufferToBase64url(credentialId),
+      prfOutput: arrayBufferToBase64url(prfOutput),
+      rpId: 'localhost',
+    });
+
+    // Step 4: Complete setupWithPopup flow
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+    const responsePromise = handleMessage(request);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const credentialsEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-credentials',
+        requestId: request.id,
+        credentials: {
+          method: 'passkey-prf',
+          transportKeyId: transportParams.keyId,
+          userId: 'test@example.com',
+          ephemeralPublicKey: encryptedData.ephemeralPublicKey,
+          iv: encryptedData.iv,
+          encryptedCredentials: encryptedData.encryptedCredentials,
+        },
+      },
+    });
+    self.dispatchEvent(credentialsEvent);
+
+    const response = await responsePromise;
+
+    // Verify setup succeeded with correct response structure
+    expect(response.error).toBeUndefined();
+    const result = getResult<{ success: boolean; vapidKid: string; enrollmentId: string; vapidPublicKey: string }>(response);
+    expect(result.success).toBe(true);
+    expect(result.vapidKid).toBeDefined();
+    expect(result.vapidPublicKey).toBeDefined();
+    expect(result.enrollmentId).toContain('enrollment:passkey-prf:v2');
+  });
+
+  it('should decrypt and setup with passkey-gate credentials', async () => {
+    // Step 1: Get transport key
+    const transportParams = await getTransportKey();
+
+    // Step 2: Generate credential ID
+    const credentialId = crypto.getRandomValues(new Uint8Array(16)).buffer;
+
+    // Step 3: Encrypt gate credentials
+    const encryptedData = await encryptCredentials(transportParams.publicKey, {
+      credentialId: arrayBufferToBase64url(credentialId),
+      rpId: 'localhost',
+    });
+
+    // Step 4: Complete setupWithPopup flow
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+    const responsePromise = handleMessage(request);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const credentialsEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-credentials',
+        requestId: request.id,
+        credentials: {
+          method: 'passkey-gate',
+          transportKeyId: transportParams.keyId,
+          userId: 'test@example.com',
+          ephemeralPublicKey: encryptedData.ephemeralPublicKey,
+          iv: encryptedData.iv,
+          encryptedCredentials: encryptedData.encryptedCredentials,
+        },
+      },
+    });
+    self.dispatchEvent(credentialsEvent);
+
+    const response = await responsePromise;
+
+    // Verify setup succeeded
+    expect(response.error).toBeUndefined();
+    const result = getResult<{ success: boolean; vapidKid: string; enrollmentId: string }>(response);
+    expect(result.success).toBe(true);
+    expect(result.enrollmentId).toContain('enrollment:passkey-gate:v2');
+
+    // Verify enrollment exists
+    const enrollmentsResponse = await handleMessage(
+      createRequest('getEnrollments', { userId: 'test@example.com' })
+    );
+    const enrollments = getResult<{ enrollments: string[] }>(enrollmentsResponse);
+    expect(enrollments.enrollments).toContain(result.enrollmentId);
+  });
+
+  it('should throw on expired/missing transport key', async () => {
+    // Try to use a non-existent transport key
+    const fakeKeyId = crypto.randomUUID();
+    const fakeEphemeralPublicKey = arrayBufferToBase64url(crypto.getRandomValues(new Uint8Array(65)).buffer);
+    const fakeIv = arrayBufferToBase64url(crypto.getRandomValues(new Uint8Array(12)).buffer);
+    const fakeEncrypted = arrayBufferToBase64url(crypto.getRandomValues(new Uint8Array(64)).buffer);
+
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+    const responsePromise = handleMessage(request);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const credentialsEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-credentials',
+        requestId: request.id,
+        credentials: {
+          method: 'passphrase',
+          transportKeyId: fakeKeyId,
+          userId: 'test@example.com',
+          ephemeralPublicKey: fakeEphemeralPublicKey,
+          iv: fakeIv,
+          encryptedCredentials: fakeEncrypted,
+        },
+      },
+    });
+    self.dispatchEvent(credentialsEvent);
+
+    const response = await responsePromise;
+
+    // Should fail with transport key not found error
+    expect(response.error).toBeDefined();
+    expect(response.error).toContain('Transport key not found or expired');
+  });
+
+  it('should delete transport key after successful use', async () => {
+    // Step 1: Get transport key
+    const transportParams = await getTransportKey();
+
+    // Step 2: Use it successfully
+    const passphrase = 'test-one-time-use-123';
+    const encryptedData = await encryptCredentials(transportParams.publicKey, { passphrase });
+
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+    const responsePromise = handleMessage(request);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const credentialsEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-credentials',
+        requestId: request.id,
+        credentials: {
+          method: 'passphrase',
+          transportKeyId: transportParams.keyId,
+          userId: 'test@example.com',
+          ephemeralPublicKey: encryptedData.ephemeralPublicKey,
+          iv: encryptedData.iv,
+          encryptedCredentials: encryptedData.encryptedCredentials,
+        },
+      },
+    });
+    self.dispatchEvent(credentialsEvent);
+
+    const response = await responsePromise;
+    expect(response.error).toBeUndefined();
+
+    // Step 3: Try to use the same transport key again (should fail)
+    const encryptedData2 = await encryptCredentials(transportParams.publicKey, { passphrase: 'another-pass-456' });
+
+    const request2 = createRequest('setupWithPopup', { userId: 'test2@example.com' });
+    const responsePromise2 = handleMessage(request2);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const credentialsEvent2 = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-credentials',
+        requestId: request2.id,
+        credentials: {
+          method: 'passphrase',
+          transportKeyId: transportParams.keyId, // Same key ID
+          userId: 'test2@example.com',
+          ephemeralPublicKey: encryptedData2.ephemeralPublicKey,
+          iv: encryptedData2.iv,
+          encryptedCredentials: encryptedData2.encryptedCredentials,
+        },
+      },
+    });
+    self.dispatchEvent(credentialsEvent2);
+
+    const response2 = await responsePromise2;
+
+    // Should fail because transport key was deleted after first use
+    expect(response2.error).toBeDefined();
+    expect(response2.error).toContain('Transport key not found or expired');
   });
 });

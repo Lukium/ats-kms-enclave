@@ -18,8 +18,8 @@
   # - img-src 'self': Only load images from same origin (logo, favicon)
   # - connect-src 'self': Only fetch from same origin (for self-verification)
   # - worker-src 'self': Allow dedicated worker from same origin
-  # - frame-ancestors: Allow alpha (dev), beta (staging), production, and localhost
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services http://localhost:5173; form-action 'none'
+  # - frame-ancestors: Allow alpha (dev), beta (staging), production, phase2-demo, and localhost
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'
 
   # Permissions Policy - Disable unnecessary browser features
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()

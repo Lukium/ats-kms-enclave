@@ -400,8 +400,7 @@ export type RPCMethod =
   | 'setupPasskey'
   | 'setupPasskeyPRF'
   | 'setupPasskeyGate'
-  | 'generateSetupTransportKey'
-  | 'setupWithEncryptedCredentials'
+  // Legacy methods removed: generateSetupTransportKey, setupWithEncryptedCredentials
   | 'setupWithPopup'
   | 'unlockWithPassphrase'
   | 'unlockWithPasskey'

@@ -240,37 +240,8 @@ export function validateSetupPasskeyPRF(params: unknown): {
   };
 }
 
-export function validateSetupWithEncryptedCredentials(params: unknown): {
-  method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
-  transportKeyId: string;
-  ephemeralPublicKey: string;
-  iv: string;
-  encryptedCredentials: string;
-  userId: string;
-  requestId: string;
-} {
-  const p = validateParamsObject('setupWithEncryptedCredentials', params);
-
-  const method = validateString('setupWithEncryptedCredentials', 'method', p.method);
-  if (method !== 'passphrase' && method !== 'passkey-prf' && method !== 'passkey-gate') {
-    throw new RPCValidationError(
-      'setupWithEncryptedCredentials',
-      'method',
-      'passphrase | passkey-prf | passkey-gate',
-      method
-    );
-  }
-
-  return {
-    method,
-    transportKeyId: validateString('setupWithEncryptedCredentials', 'transportKeyId', p.transportKeyId),
-    ephemeralPublicKey: validateString('setupWithEncryptedCredentials', 'ephemeralPublicKey', p.ephemeralPublicKey),
-    iv: validateString('setupWithEncryptedCredentials', 'iv', p.iv),
-    encryptedCredentials: validateString('setupWithEncryptedCredentials', 'encryptedCredentials', p.encryptedCredentials),
-    userId: validateString('setupWithEncryptedCredentials', 'userId', p.userId),
-    requestId: validateString('setupWithEncryptedCredentials', 'requestId', p.requestId),
-  };
-}
+// Legacy validator removed: validateSetupWithEncryptedCredentials
+// This is now an internal function used only by setupWithPopup
 
 export function validateSetupWithPopup(params: unknown): {
   userId: string;

@@ -591,13 +591,8 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
     switch (method) {
       // === Setup Operations ===
-      case 'generateSetupTransportKey':
-        result = await generateSetupTransportKey();
-        break;
-
-      case 'setupWithEncryptedCredentials':
-        result = await setupWithEncryptedCredentials(validators.validateSetupWithEncryptedCredentials(params));
-        break;
+      // Legacy RPC methods removed: generateSetupTransportKey, setupWithEncryptedCredentials
+      // These are now internal functions used by setupWithPopup
 
       case 'setupWithPopup':
         result = await handleSetupWithPopup(validators.validateSetupWithPopup(params), id);

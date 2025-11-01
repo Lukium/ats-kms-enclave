@@ -174,7 +174,127 @@ If you need to rollback, verify these still work:
 - Old `setupWithEncryptedCredentials` will be kept as deprecated method
 - Migration can be gradual
 
+## Implementation Complete - New Safe Point
+
+### Commit: 1773041 - Implementation Successful ✅
+
+**Full Hash:** `1773041ad1bde8845b34b55331514bd5e191bb6f`
+**Short Hash:** `1773041`
+**Date:** 2025-11-01 07:06:57 -0400
+**Author:** Lukium
+
+**Commit Message:**
+```
+fix: Complete setupWithPopup flow with UI updates and testing improvements
+```
+
+### Implementation Status: COMPLETE
+
+The KMS-only popup credential flow (Option A+) has been successfully implemented and tested.
+
+**What Was Implemented:**
+- ✅ setupWithPopup RPC method (worker, client, kms-user)
+- ✅ MessageChannel-based iframe ↔ popup communication
+- ✅ Parent-mediated MessagePort transfer
+- ✅ Transport keys stay in iframe (never sent to parent)
+- ✅ Minimal popup URL (no sensitive params)
+- ✅ Encrypted credential exchange via MessagePort
+- ✅ Page auto-reload after successful setup
+- ✅ Testing improvements (5-minute timeout, no auto-close)
+- ✅ All 409 tests passing
+
+**Security Improvements Achieved:**
+- ✅ Parent never sees transport keys
+- ✅ Parent never handles encrypted credentials
+- ✅ Popup URL contains no cryptographic material
+- ✅ Direct MessageChannel communication between iframe and popup
+- ✅ Parent only acts as window opener and port broker
+
+**Architecture:**
+```
+┌─────────┐                 ┌────────┐                 ┌───────┐
+│ Parent  │                 │ Iframe │                 │ Popup │
+│  PWA    │                 │  KMS   │                 │  KMS  │
+└─────────┘                 └────────┘                 └───────┘
+     │                           │                          │
+     │  RPC: setupWithPopup      │                          │
+     ├──────────────────────────>│                          │
+     │                           │                          │
+     │  kms:request-popup        │                          │
+     │◄──────────────────────────┤                          │
+     │                           │                          │
+     │  window.open(minimal URL) │                          │
+     ├──────────────────────────>│  (creates MessageChannel)
+     │                           │                          │
+     │  MessagePort transfer     │                          │
+     │  port1 → iframe          │                          │
+     │  port2 → popup           │                          │
+     │                           │  transport params        │
+     │                           │─────────────────────────>│
+     │                           │                          │
+     │                           │  encrypted credentials   │
+     │                           │◄─────────────────────────┤
+     │                           │                          │
+     │  setupComplete + reload   │                          │
+     │◄──────────────────────────┤                          │
+```
+
+**Key Commits in Implementation:**
+1. `c097148` - feat: Complete KMS-only popup credential flow (Option A+)
+2. `1276397` - feat: Add UI for KMS-only popup flow in parent demo
+3. `7b86d26` - fix: Enable popup-to-iframe communication via parent forwarding
+4. `bcf1ddb` - test: Add comprehensive tests for setupWithPopup flow
+5. `3a74dde` - fix: Use MessageChannel for iframe-popup communication
+6. `1773041` - fix: Complete setupWithPopup flow with UI updates
+
+**Files Modified:**
+- `src/v2/types.ts` - Added setupWithPopup RPC method
+- `src/v2/rpc-validation.ts` - Added validation
+- `src/v2/kms-user.ts` - Added setupWithPopup() method + 5min timeout
+- `src/v2/worker.ts` - Added handleSetupWithPopup() handler
+- `src/v2/client.ts` - Added MessagePort handling, disabled auto-close
+- `example/phase-2/parent.ts` - Added popup request handler + page reload
+- `tests/v2/worker.test.ts` - Added 3 setupWithPopup tests
+- `tests/v2/client.test.ts` - Added 5 setupWithPopup tests
+
+**Test Results:**
+- All 409 tests passing ✅
+- Coverage: worker.ts at 81.08%, overall 78.9%
+- TypeScript: No errors ✅
+- ESLint: No errors ✅
+
+**Browser Testing:**
+- ✅ MessageChannel connection established
+- ✅ Credentials flow from popup → iframe
+- ✅ Master key stored in IndexedDB
+- ✅ Page reloads with full interface
+- ✅ VAPID keys generated and displayed
+
+### How to Use This Safe Point
+
+If future changes break the setupWithPopup flow, revert to this commit:
+
+```bash
+# Option 1: Hard reset (WARNING: Loses uncommitted changes)
+git reset --hard 1773041
+
+# Option 2: Create new branch from this point
+git checkout -b fix-from-working-popup 1773041
+
+# Option 3: Revert specific files
+git checkout 1773041 -- <file-path>
+```
+
+## Original Safe Point (Before Implementation)
+
+**Full Hash:** `97078fe8bf3da21671729a3d53f1a209732139eb`
+**Short Hash:** `97078fe`
+**Date:** 2025-11-01 05:26:32 -0400
+
+This was the safe point before starting implementation. Implementation is now complete and working.
+
 ## Created
 
 **Date:** 2025-11-01
 **Purpose:** Safe rollback point before implementing KMS-only popup flow
+**Updated:** 2025-11-01 07:07:00 - Implementation complete ✅

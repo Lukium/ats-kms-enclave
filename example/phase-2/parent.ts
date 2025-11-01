@@ -474,6 +474,10 @@ async function setupPassphrase(): Promise<void> {
     const state = crypto.getRandomValues(new Uint32Array(4)).join('-');
     console.log('[Full Demo] Generated handshake state:', state);
 
+    // Step 2.5: Generate requestId for audit logging
+    const requestId = crypto.randomUUID();
+    console.log('[Full Demo] Generated requestId for audit:', requestId);
+
     // Step 3: Open popup with transport parameters
     const setupURL = new URL(KMS_ORIGIN + '/');
     setupURL.searchParams.set('mode', 'setup');
@@ -483,6 +487,7 @@ async function setupPassphrase(): Promise<void> {
     setupURL.searchParams.set('keyId', transportParams.keyId);
     setupURL.searchParams.set('appSalt', transportParams.appSalt);
     setupURL.searchParams.set('hkdfSalt', transportParams.hkdfSalt);
+    setupURL.searchParams.set('requestId', requestId);
 
     console.log('[Full Demo] Opening popup with URL:', setupURL.toString());
 
@@ -612,7 +617,8 @@ async function setupPassphrase(): Promise<void> {
       ephemeralPublicKey: credentials.ephemeralPublicKey,
       iv: credentials.iv,
       encryptedCredentials: credentials.encryptedCredentials,
-      userId: credentials.userId
+      userId: credentials.userId,
+      requestId: requestId
     });
 
     console.log('[Full Demo] Setup completed successfully:', result);

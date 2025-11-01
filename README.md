@@ -46,7 +46,7 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-10-31 23:23:26 UTC*
+*Last updated: 2025-11-01 00:05:01 UTC*
 
 **Test Results:**
 - Test Files: 9 passed (9)
@@ -57,12 +57,12 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ```
 File                    │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-All files               │ 9636    │   80.07│    81.61 │   83.05│   80.07 │
- v2/audit.ts            │ 614     │   99.18│    96.22 │     100│   99.18 │ 5 lines
+All files               │ 9640    │   80.07│    81.59 │   83.05│   80.07 │
+ v2/audit.ts            │ 614     │   99.18│    96.15 │     100│   99.18 │ 5 lines
  v2/client.ts           │ 1821    │   33.16│    63.49 │   62.85│   33.16 │ 951 lines
  v2/crypto-utils.ts     │ 415     │   95.65│    95.45 │   94.44│   95.65 │ 18 lines
  v2/error-utils.ts      │ 95      │     100│      100 │     100│     100 │ 
- v2/kms-user.ts         │ 2002    │   92.10│    70.90 │   61.76│   92.10 │ 158 lines
+ v2/kms-user.ts         │ 2006    │   92.06│    70.90 │   61.76│   92.06 │ 159 lines
  v2/rpc-validation.ts   │ 663     │   89.27│    86.61 │   92.10│   89.27 │ 71 lines
  v2/storage-types.ts    │ 50      │   87.75│    50.00 │     100│   87.75 │ 6 lines
  v2/storage.ts          │ 649     │   93.95│    88.60 │   97.72│   93.95 │ 37 lines

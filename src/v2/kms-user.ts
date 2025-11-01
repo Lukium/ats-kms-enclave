@@ -181,7 +181,7 @@ export class KMSUser {
    */
   constructor(config: KMSUserConfig) {
     this.kmsOrigin = config.kmsOrigin;
-    this.defaultTimeout = config.defaultTimeout ?? 10000;
+    this.defaultTimeout = config.defaultTimeout ?? 300000; // 5 minutes for testing
 
     if (config.autoInit && typeof window !== 'undefined') {
       this.init().catch((err) => {

@@ -635,17 +635,23 @@ async function setupWithPopupKMSOnly(): Promise<void> {
 
     console.log('[Full Demo] Setup complete via KMS-only popup!', result);
 
-    setupOperationEl.innerHTML = `
-      <div class="success-message">
-        <p>✅ <strong>Setup complete!</strong></p>
-        <p>Enrollment ID: <code>${result.enrollmentId}</code></p>
-        <p>VAPID Key: <code>${result.vapidKid}</code></p>
-      </div>
-    `;
+    // Check setup status to reload the entire interface
+    const isSetup = await kmsUser.isSetup();
+    console.log('[Full Demo] Setup status after setupWithPopup:', isSetup);
 
-    // Reload status and audit log
-    await loadKMSStatus();
-    await loadAuditLog();
+    // Reload the page to show the full interface
+    if (isSetup) {
+      window.location.reload();
+    } else {
+      setupOperationEl.innerHTML = `
+        <div class="success-message">
+          <p>✅ <strong>Setup complete!</strong></p>
+          <p>Enrollment ID: <code>${result.enrollmentId}</code></p>
+          <p>VAPID Key: <code>${result.vapidKid}</code></p>
+        </div>
+      `;
+      await loadAuditLog();
+    }
   } catch (error) {
     console.error('[Full Demo] Setup with KMS-only popup failed:', error);
     setupOperationEl.innerHTML = `

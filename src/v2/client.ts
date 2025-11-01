@@ -1445,10 +1445,10 @@ export class KMSClient {
             ...encrypted,
           });
 
-          // Show success and close
+          // Show success (keep window open for testing)
           this.hideSetupLoading();
           this.showSetupSuccess();
-          setTimeout(() => window.close(), 2000);
+          // setTimeout(() => window.close(), 2000); // Disabled for testing
         } else if (window.opener) {
           // Legacy stateless popup flow: send via window.opener to parent
           console.log('[KMS Client] Sending credentials via window.opener to parent');
@@ -1463,10 +1463,10 @@ export class KMSClient {
             this.parentOrigin
           );
 
-          // Show success and close
+          // Show success (keep window open for testing)
           this.hideSetupLoading();
           this.showSetupSuccess();
-          setTimeout(() => window.close(), 2000);
+          // setTimeout(() => window.close(), 2000); // Disabled for testing
         }
         return;
       }
@@ -1699,10 +1699,10 @@ export class KMSClient {
             ...encrypted,
           });
 
-          // Show success and close
+          // Show success (keep window open for testing)
           this.hideSetupLoading();
           this.showSetupSuccess();
-          setTimeout(() => window.close(), 2000);
+          // setTimeout(() => window.close(), 2000); // Disabled for testing
         } else if (window.opener) {
           // Legacy stateless popup flow: send via window.opener to parent
           console.log('[KMS Client] Sending credentials via window.opener to parent');
@@ -1717,10 +1717,10 @@ export class KMSClient {
             this.parentOrigin
           );
 
-          // Show success and close
+          // Show success (keep window open for testing)
           this.hideSetupLoading();
           this.showSetupSuccess();
-          setTimeout(() => window.close(), 2000);
+          // setTimeout(() => window.close(), 2000); // Disabled for testing
         } else {
           console.error('[KMS Client] No communication channel available');
           this.hideSetupLoading();

@@ -12,7 +12,7 @@
  * Tests verify correct routing, policy enforcement, audit logging, and error handling.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { handleMessage } from '@/v2/worker';
 import type { RPCRequest, AuthCredentials, VAPIDPayload } from '@/v2/types';
@@ -1465,7 +1465,7 @@ describe('setupWithPopup', () => {
 
     // Verify worker sent setup-with-popup message to client
     const setupMessage = postMessageSpy.mock.calls.find(
-      call => call[0]?.type === 'worker:setup-with-popup'
+      (call: unknown[]) => (call[0] as { type?: string })?.type === 'worker:setup-with-popup'
     );
 
     expect(setupMessage).toBeDefined();
@@ -1520,7 +1520,7 @@ describe('setupWithPopup', () => {
 
     // Verify worker sent setup-with-popup message to client
     const setupMessage = postMessageSpy.mock.calls.find(
-      call => call[0]?.type === 'worker:setup-with-popup'
+      (call: unknown[]) => (call[0] as { type?: string })?.type === 'worker:setup-with-popup'
     );
     expect(setupMessage).toBeDefined();
 

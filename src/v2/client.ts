@@ -256,8 +256,9 @@ export class KMSClient {
     }
 
     if (eventData?.type === 'kms:popup-ready') {
-      // Popup is ready - this is handled in handleSetupWithPopup's promise
-      // No need to forward, the promise listener will catch it
+      // Popup is ready - parent sends this with MessagePort
+      // This is handled in handleSetupWithPopup's promise listener
+      // Don't forward to worker, just let the promise handler receive it
       return;
     }
 
@@ -448,32 +449,34 @@ export class KMSClient {
         this.parentOrigin
       );
 
-      // Step 2: Wait for popup ready signal and capture popup window reference
-      // The popup will send 'kms:popup-ready' and we'll get its window reference
-      const popupWindowPromise = new Promise<Window>((resolve, reject) => {
+      // Step 2: Wait for popup ready signal and MessagePort from parent
+      // Parent creates MessageChannel and sends one port to iframe, one to popup
+      const popupPortPromise = new Promise<MessagePort>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Popup ready timeout'));
         }, 30000); // 30 second timeout
 
         const handlePopupReady = (event: MessageEvent): void => {
-          // Popup is same-origin (kms.ats.run), so we can receive direct messages
-          const data = event.data as { type?: string };
-          if (data?.type === 'kms:popup-ready' && event.source) {
-            clearTimeout(timeout);
-            window.removeEventListener('message', handlePopupReady);
-            resolve(event.source as Window);
+          // Parent forwards popup-ready and transfers MessagePort
+          const data = event.data as { type?: string; requestId?: string };
+          if (data?.type === 'kms:popup-ready' && data.requestId === params.requestId) {
+            // MessagePort is in event.ports[0]
+            if (event.ports && event.ports.length > 0 && event.ports[0]) {
+              clearTimeout(timeout);
+              window.removeEventListener('message', handlePopupReady);
+              resolve(event.ports[0]);
+            } else {
+              clearTimeout(timeout);
+              window.removeEventListener('message', handlePopupReady);
+              reject(new Error('No MessagePort received with popup-ready'));
+            }
           }
         };
 
         window.addEventListener('message', handlePopupReady);
       });
 
-      const popupWindow = await popupWindowPromise;
-
-      // Step 3: Establish MessageChannel with popup
-      const channel = new MessageChannel();
-      const port1 = channel.port1;
-      const port2 = channel.port2;
+      const port1 = await popupPortPromise;
 
       // Step 4: Send transport parameters to popup via MessagePort
       // Wait for popup to receive the channel and respond
@@ -524,19 +527,16 @@ export class KMSClient {
         };
       });
 
-      // Send connection message with transport params to popup
-      popupWindow.postMessage(
-        {
-          type: 'kms:connect',
-          transportKey: params.transportKey,
-          transportKeyId: params.transportKeyId,
-          appSalt: params.appSalt,
-          hkdfSalt: params.hkdfSalt,
-          userId: params.userId,
-        },
-        window.origin,
-        [port2] // Transfer port2 to popup
-      );
+      // Step 3: Send transport params to popup via MessagePort
+      // Parent already transferred port2 to popup, so we communicate via port1
+      port1.postMessage({
+        type: 'kms:connect',
+        transportKey: params.transportKey,
+        transportKeyId: params.transportKeyId,
+        appSalt: params.appSalt,
+        hkdfSalt: params.hkdfSalt,
+        userId: params.userId,
+      });
 
       // Step 5: Wait for encrypted credentials from popup
       const credentials = await credentialsPromise;
@@ -2001,48 +2001,69 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
           /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
         }
 
-        // Listen for kms:connect message with MessagePort
+        // Step 1: Listen for kms:connect-port from parent (cross-origin)
+        // Parent creates MessageChannel and transfers one port to popup
         window.addEventListener('message', (event: MessageEvent) => {
-          if (event.origin !== window.location.origin) return;
-
           const data = event.data as {
             type?: string;
-            transportKey?: string;
-            transportKeyId?: string;
-            appSalt?: string;
-            hkdfSalt?: string;
-            userId?: string;
+            requestId?: string;
           };
 
-          if (data?.type === 'kms:connect' && event.ports && event.ports[0]) {
+          // Accept kms:connect-port from parent (parentOrigin)
+          if (data?.type === 'kms:connect-port' && event.origin === popupParentOrigin) {
             /* eslint-disable no-console */
-            console.log('[KMS Client] Popup received kms:connect with MessagePort');
+            console.log('[KMS Client] Popup received kms:connect-port from parent');
             /* eslint-enable no-console */
 
-            // Store transport params and port for credential sending
-            // Using type assertion to access private properties in auto-init code
-            /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
-            (client as any).transportPublicKey = data.transportKey!;
-            (client as any).transportKeyId = data.transportKeyId!;
-            (client as any).appSalt = data.appSalt!;
-            (client as any).hkdfSalt = data.hkdfSalt!;
-            (client as any).isStatelessPopup = true;
+            if (!event.ports || !event.ports[0]) {
+              console.error('[KMS Client] No MessagePort received with kms:connect-port');
+              return;
+            }
 
-            // Store the MessagePort for sending credentials later
-            (client as any).credentialPort = event.ports[0];
+            const port = event.ports[0];
 
-            // Confirm connection
-            event.ports[0].postMessage({ type: 'popup:connected' });
-            /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
+            // Step 2: Listen for kms:connect message on MessagePort (from iframe)
+            port.onmessage = (portEvent: MessageEvent): void => {
+              const portData = portEvent.data as {
+                type?: string;
+                transportKey?: string;
+                transportKeyId?: string;
+                appSalt?: string;
+                hkdfSalt?: string;
+                userId?: string;
+              };
 
-            // Show setup modal
-            setTimeout(() => {
-              client.setupSetupModalHandlers();
-              const setupModal = document.getElementById('setup-modal');
-              if (setupModal) {
-                setupModal.classList.remove('hidden');
+              if (portData?.type === 'kms:connect') {
+                /* eslint-disable no-console */
+                console.log('[KMS Client] Popup received kms:connect via MessagePort');
+                /* eslint-enable no-console */
+
+                // Store transport params and port for credential sending
+                // Using type assertion to access private properties in auto-init code
+                /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
+                (client as any).transportPublicKey = portData.transportKey!;
+                (client as any).transportKeyId = portData.transportKeyId!;
+                (client as any).appSalt = portData.appSalt!;
+                (client as any).hkdfSalt = portData.hkdfSalt!;
+                (client as any).isStatelessPopup = true;
+
+                // Store the MessagePort for sending credentials later
+                (client as any).credentialPort = port;
+
+                // Confirm connection
+                port.postMessage({ type: 'popup:connected' });
+                /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
+
+                // Show setup modal
+                setTimeout(() => {
+                  client.setupSetupModalHandlers();
+                  const setupModal = document.getElementById('setup-modal');
+                  if (setupModal) {
+                    setupModal.classList.remove('hidden');
+                  }
+                }, 100);
               }
-            }, 100);
+            };
           }
         });
       } else {

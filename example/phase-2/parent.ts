@@ -32,6 +32,10 @@ const resetDemoBtn = document.getElementById('reset-demo-btn')! as HTMLButtonEle
 const setupOperationEl = document.getElementById('setup-operation')!;
 const leaseOperationEl = document.getElementById('lease-operation')!;
 
+// Track active popup window for setupWithPopup flow
+let activePopupWindow: Window | null = null;
+let activePopupRequestId: string | null = null;
+
 /**
  * Display audit log entries
  */
@@ -189,6 +193,11 @@ function handlePopupRequest(event: MessageEvent): void {
 
       // Popup opened successfully
       console.log('[Full Demo] Popup opened successfully');
+
+      // Store popup reference for later MessageChannel creation
+      activePopupWindow = popup;
+      activePopupRequestId = requestId;
+
       // Send message back to iframe (source of the request)
       if (event.source && event.source instanceof Window) {
         event.source.postMessage(
@@ -232,13 +241,56 @@ async function handleSetupComplete(event: MessageEvent): Promise<void> {
     return;
   }
 
-  // Forward popup-ready signal from popup to iframe
+  // Handle popup-ready signal and establish MessageChannel between iframe and popup
   if (event.data?.type === 'kms:popup-ready') {
-    console.log('[Full Demo] Received kms:popup-ready from popup, forwarding to iframe...');
-    const iframe = document.querySelector('iframe');
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage(event.data, KMS_ORIGIN);
+    console.log('[Full Demo] Received kms:popup-ready from popup, establishing MessageChannel...');
+
+    // Verify we have the popup window reference
+    if (!activePopupWindow || !activePopupRequestId) {
+      console.error('[Full Demo] No active popup window reference');
+      return;
     }
+
+    // Get iframe reference
+    const iframe = document.querySelector('iframe');
+    if (!iframe || !iframe.contentWindow) {
+      console.error('[Full Demo] No iframe found');
+      return;
+    }
+
+    // Create MessageChannel to connect iframe and popup directly
+    const channel = new MessageChannel();
+
+    console.log('[Full Demo] Sending popup window reference and port to iframe...');
+
+    // Send one port to the iframe along with popup-ready signal
+    iframe.contentWindow.postMessage(
+      {
+        type: 'kms:popup-ready',
+        requestId: activePopupRequestId,
+      },
+      KMS_ORIGIN,
+      [channel.port1] // Transfer port1 to iframe
+    );
+
+    console.log('[Full Demo] Sending port to popup...');
+
+    // Send the other port to the popup
+    activePopupWindow.postMessage(
+      {
+        type: 'kms:connect-port',
+        requestId: activePopupRequestId,
+      },
+      KMS_ORIGIN,
+      [channel.port2] // Transfer port2 to popup
+    );
+
+    console.log('[Full Demo] MessageChannel established between iframe and popup');
+
+    // Clean up references
+    activePopupWindow = null;
+    activePopupRequestId = null;
+
     return;
   }
 

@@ -402,6 +402,7 @@ export type RPCMethod =
   | 'setupPasskeyGate'
   | 'generateSetupTransportKey'
   | 'setupWithEncryptedCredentials'
+  | 'setupWithPopup'
   | 'unlockWithPassphrase'
   | 'unlockWithPasskey'
   | 'addEnrollment'

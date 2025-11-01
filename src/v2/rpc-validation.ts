@@ -272,6 +272,16 @@ export function validateSetupWithEncryptedCredentials(params: unknown): {
   };
 }
 
+export function validateSetupWithPopup(params: unknown): {
+  userId: string;
+} {
+  const p = validateParamsObject('setupWithPopup', params);
+
+  return {
+    userId: validateString('setupWithPopup', 'userId', p.userId),
+  };
+}
+
 export function validateSetupPasskeyGate(params: unknown): {
   userId: string;
   credentialId: ArrayBuffer;

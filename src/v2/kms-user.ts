@@ -859,6 +859,62 @@ export class KMSUser {
     return this.sendRequest<SetupResult>('setupWithEncryptedCredentials', params);
   }
 
+  /**
+   * Setup user authentication via popup (iframe-managed flow).
+   *
+   * This method allows the iframe KMS to directly manage popup communication.
+   * Parent only assists with window.open() - all cryptographic operations
+   * and credential exchange bypass the parent entirely.
+   *
+   * **Security Benefits:**
+   * - Parent never sees transport parameters
+   * - Parent never receives encrypted credentials
+   * - Direct same-origin communication between iframe and popup
+   * - Reduced attack surface (parent out of credential path)
+   *
+   * **Flow:**
+   * 1. Parent calls this method (RPC to iframe)
+   * 2. Iframe requests parent to open popup (kms:request-popup)
+   * 3. Parent opens popup with minimal URL and notifies iframe (kms:popup-opened)
+   * 4. Popup signals ready to iframe (kms:popup-ready, same-origin)
+   * 5. Iframe establishes MessageChannel with popup (kms:connect + transport params)
+   * 6. Popup collects and encrypts credentials
+   * 7. Popup sends credentials to iframe directly (via MessagePort)
+   * 8. Iframe processes setup and returns result to parent
+   *
+   * **Parent Visibility:**
+   * - Parent only sees minimal popup URL: `https://kms.ats.run/?mode=setup`
+   * - Parent does NOT see: transport keys, salts, credentials, setup method
+   *
+   * **Comparison with setupWithEncryptedCredentials:**
+   * - Old: Parent mediates all communication (parent ↔ popup ↔ iframe)
+   * - New: Direct communication (popup ↔ iframe), parent only opens window
+   *
+   * @category Setup Operations
+   *
+   * @param params.userId - User ID to setup authentication for
+   * @returns Setup result with enrollment ID and VAPID key info
+   *
+   * @throws {Error} If popup is blocked by browser
+   * @throws {Error} If popup never responds (timeout)
+   * @throws {Error} If credential collection fails in popup
+   * @throws {Error} If setup processing fails in iframe
+   *
+   * @example
+   * ```typescript
+   * // In parent PWA:
+   * const result = await kmsUser.setupWithPopup({
+   *   userId: 'user@example.com'
+   * });
+   * console.log('Setup complete:', result.enrollmentId);
+   * ```
+   */
+  async setupWithPopup(params: {
+    userId: string;
+  }): Promise<SetupResult> {
+    return this.sendRequest<SetupResult>('setupWithPopup', params);
+  }
+
   // ========================================================================
   // Unlock Operations
   // ========================================================================

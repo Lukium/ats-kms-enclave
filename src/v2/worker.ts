@@ -132,6 +132,27 @@ const ephemeralTransportKeys = new Map<
 >();
 
 /**
+ * Pending popup requests from worker to parent (via client).
+ *
+ * When worker needs parent to open popup, it sends message to client,
+ * which forwards to parent. Parent responds, client forwards back to worker.
+ *
+ * Map structure:
+ * - Key: requestId (UUID)
+ * - Value: { resolve, reject, timeout }
+ *
+ * Auto-cleanup on timeout (30 seconds)
+ */
+const pendingPopupRequests = new Map<
+  string,
+  {
+    resolve: (value: void) => void;
+    reject: (reason: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
+
+/**
  * Derive a SessionKEK from Master Secret and lease salt.
  *
  * Uses HKDF-SHA256 with:
@@ -388,15 +409,110 @@ async function setupWithEncryptedCredentials(params: {
   return result;
 }
 
+/**
+ * Setup with popup (iframe-managed flow).
+ *
+ * This handler orchestrates the entire popup setup flow without parent involvement:
+ * 1. Generate transport key (stays in iframe)
+ * 2. Request parent to open popup (via client.ts → parent)
+ * 3. Wait for popup to signal ready (same-origin postMessage)
+ * 4. Establish MessageChannel with popup
+ * 5. Send transport params to popup (via MessageChannel)
+ * 6. Receive encrypted credentials from popup
+ * 7. Decrypt and process credentials
+ *
+ * @param params.userId - User ID
+ * @param requestId - Request ID for audit logging
+ * @returns Setup result
+ */
+async function handleSetupWithPopup(
+  params: { userId: string },
+  requestId: string
+): Promise<{
+  success: true;
+  enrollmentId: string;
+  vapidPublicKey: string;
+  vapidKid: string;
+}> {
+  // Step 1: Generate transport key (stays in iframe, never sent to parent)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const transport = await generateSetupTransportKey();
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const userId = params.userId; // Will be used in Step 10 when implementing credential exchange
+
+  // Step 2: Request parent to open popup with minimal URL
+  const popupURL = new URL('https://kms.ats.run/');
+  popupURL.searchParams.set('mode', 'setup');
+  // Note: No transport params in URL!
+
+  // Step 2.1: Request client (main thread) to ask parent to open popup
+  // Worker cannot directly postMessage to parent (cross-origin), so we route through client
+  const popupRequestPromise = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Popup request timeout - parent did not respond'));
+    }, 30000); // 30 second timeout
+
+    // Store resolver for when client sends back response
+    pendingPopupRequests.set(requestId, { resolve, reject, timeout });
+
+    // Send request to client (main thread)
+    self.postMessage({
+      type: 'worker:request-popup-from-parent',
+      url: popupURL.toString(),
+      requestId: requestId,
+    });
+  });
+
+  // Wait for parent to open popup
+  await popupRequestPromise;
+
+  // Steps 3-7: Establish MessageChannel, exchange credentials, decrypt, process
+  // TODO: Will implement after client-side forwarding is working
+  throw new Error('handleSetupWithPopup: Popup opened, but credential exchange not yet implemented');
+}
+
 // ============================================================================
 // Worker Message Listener
 // ============================================================================
 
 /**
- * Main worker message handler. Receives RPC requests from client,
+ * Main worker message handler. Receives RPC requests and internal messages from client,
  * processes them, and sends back responses.
  */
 self.addEventListener('message', (event: MessageEvent) => {
+  const message = event.data as RPCRequest | { type: string; requestId?: string; reason?: string };
+
+  // Handle internal messages from client (not RPC requests)
+  if ('type' in message && message.type === 'worker:popup-opened') {
+    // Client successfully forwarded popup request to parent, and parent opened popup
+    const requestId = message.requestId;
+    if (requestId) {
+      const pending = pendingPopupRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingPopupRequests.delete(requestId);
+        pending.resolve();
+      }
+    }
+    return;
+  }
+
+  if ('type' in message && message.type === 'worker:popup-blocked') {
+    // Parent was unable to open popup (blocked by browser)
+    const requestId = message.requestId;
+    if (requestId) {
+      const pending = pendingPopupRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingPopupRequests.delete(requestId);
+        pending.reject(new Error(message.reason || 'Popup was blocked'));
+      }
+    }
+    return;
+  }
+
+  // Handle RPC requests
   void (async (): Promise<void> => {
     const request = event.data as RPCRequest;
     const response = await handleMessage(request);
@@ -435,6 +551,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'setupWithEncryptedCredentials':
         result = await setupWithEncryptedCredentials(validators.validateSetupWithEncryptedCredentials(params));
+        break;
+
+      case 'setupWithPopup':
+        result = await handleSetupWithPopup(validators.validateSetupWithPopup(params), id);
         break;
 
       case 'setupPassphrase':

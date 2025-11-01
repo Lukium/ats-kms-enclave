@@ -231,6 +231,30 @@ export class KMSClient {
     /* eslint-enable no-console, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
     /* c8 ignore stop */
 
+    // Handle popup responses from parent
+    const eventData = event.data as { type?: string; requestId?: string; reason?: string };
+    if (eventData?.type === 'kms:popup-opened') {
+      // Parent successfully opened popup - forward to worker
+      const requestId = eventData.requestId;
+      this.worker?.postMessage({
+        type: 'worker:popup-opened',
+        requestId,
+      });
+      return;
+    }
+
+    if (eventData?.type === 'kms:popup-blocked') {
+      // Parent was unable to open popup - forward to worker
+      const requestId = eventData.requestId;
+      const reason = eventData.reason || 'Popup was blocked';
+      this.worker?.postMessage({
+        type: 'worker:popup-blocked',
+        requestId,
+        reason,
+      });
+      return;
+    }
+
     // Validate client is initialized
     if (!this.isInitialized || !this.worker) {
       console.error('[KMS Client] Received message before initialization');
@@ -279,15 +303,81 @@ export class KMSClient {
    * Handle messages from Worker
    *
    * Forwards Worker responses to parent window.
+   * Intercepts special internal messages (like popup requests) and handles them
+   * in the client before forwarding to parent.
    *
    * @param event - Message event from Worker
    */
   private handleWorkerMessage(event: MessageEvent): void {
     try {
       const data = event.data as RPCResponse | { type: string; [key: string]: unknown };
+
+      // Intercept popup request from worker
+      if ('type' in data && data.type === 'worker:request-popup-from-parent') {
+        this.handleWorkerPopupRequest(
+          data.url as string,
+          data.requestId as string
+        );
+        return;
+      }
+
+      // Forward all other messages to parent
       this.sendToParent(data);
     } catch (err: unknown) {
       console.error('[KMS Client] Failed to forward message to parent:', err);
+    }
+  }
+
+  /**
+   * Handle worker request to ask parent to open popup.
+   *
+   * Worker cannot directly communicate with parent (cross-origin in iframe mode),
+   * so we forward the request from worker → client → parent.
+   *
+   * @param url - Popup URL
+   * @param requestId - Request ID for correlation
+   */
+  private handleWorkerPopupRequest(url: string, requestId: string): void {
+    if (!this.parentOrigin) {
+      // Notify worker that request failed
+      this.worker?.postMessage({
+        type: 'worker:popup-blocked',
+        requestId,
+        reason: 'Parent origin not configured',
+      });
+      return;
+    }
+
+    // Forward request to parent
+    const targetWindow = window.parent && window.parent !== window ? window.parent : null;
+    if (!targetWindow) {
+      this.worker?.postMessage({
+        type: 'worker:popup-blocked',
+        requestId,
+        reason: 'No parent window available',
+      });
+      return;
+    }
+
+    try {
+      targetWindow.postMessage(
+        {
+          type: 'kms:request-popup',
+          url,
+          requestId,
+        },
+        this.parentOrigin
+      );
+
+      // Parent will respond with kms:popup-opened or kms:popup-blocked
+      // which handleParentMessage will receive and forward to worker
+    } catch (err: unknown) {
+      console.error('[KMS Client] Failed to send popup request to parent:', err);
+      this.worker?.postMessage({
+        type: 'worker:popup-blocked',
+        requestId,
+        reason: err instanceof Error ? err.message : 'Unknown error',
+      });
     }
   }
 

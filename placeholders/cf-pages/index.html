@@ -52,8 +52,8 @@
 
         <!-- Passphrase Option -->
         <div class="kms-auth-option">
-          <form id="kms-unlock-form" onsubmit="return false;">
-            <input type="text" name="username" autocomplete="username" style="display:none" value="kms-user" readonly />
+          <form id="kms-unlock-form">
+            <input type="text" name="username" autocomplete="username" class="kms-hidden-username" value="kms-user" readonly />
             <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
             <input
               type="password"
@@ -108,8 +108,8 @@
 
         <!-- Passphrase Setup Option -->
         <div class="kms-auth-option">
-          <form id="kms-setup-form" onsubmit="return false;">
-            <input type="text" name="username" autocomplete="username" style="display:none" value="kms-user" readonly />
+          <form id="kms-setup-form">
+            <input type="text" name="username" autocomplete="username" class="kms-hidden-username" value="kms-user" readonly />
             <label for="kms-setup-passphrase-input" class="kms-input-label">Create Passphrase</label>
             <input
               type="password"

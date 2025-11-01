@@ -5,7 +5,7 @@
     "artifact": "kms-worker.1c0afa3e.js",
     "sha256": "1c0afa3e7055c34bbdc7a822479068783b33a773cedcf4439b62584df3876c7c",
     "sri": "sha256-HAr6PnBVw0u9x6giR5BoeDszp3PO3PRDm2JYTfOHbHw=",
-    "timestamp": "2025-11-01T11:45:15.878Z",
+    "timestamp": "2025-11-01T11:51:11.272Z",
     "build": {
       "reproducible": true,
       "environment": "production",

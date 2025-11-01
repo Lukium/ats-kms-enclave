@@ -272,6 +272,14 @@ h1 {
   padding: 0;
 }
 
+/* Hidden username field for password managers */
+.kms-hidden-username {
+  display: none !important;
+  visibility: hidden;
+  position: absolute;
+  left: -9999px;
+}
+
 .kms-auth-btn {
   width: 100%;
   padding: 1rem;
@@ -600,8 +608,8 @@ function generateEnclaveHTML(workerHash: string): void {
 
         <!-- Passphrase Option -->
         <div class="kms-auth-option">
-          <form id="kms-unlock-form" onsubmit="return false;">
-            <input type="text" name="username" autocomplete="username" style="display:none" value="kms-user" readonly />
+          <form id="kms-unlock-form">
+            <input type="text" name="username" autocomplete="username" class="kms-hidden-username" value="kms-user" readonly />
             <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
             <input
               type="password"
@@ -656,8 +664,8 @@ function generateEnclaveHTML(workerHash: string): void {
 
         <!-- Passphrase Setup Option -->
         <div class="kms-auth-option">
-          <form id="kms-setup-form" onsubmit="return false;">
-            <input type="text" name="username" autocomplete="username" style="display:none" value="kms-user" readonly />
+          <form id="kms-setup-form">
+            <input type="text" name="username" autocomplete="username" class="kms-hidden-username" value="kms-user" readonly />
             <label for="kms-setup-passphrase-input" class="kms-input-label">Create Passphrase</label>
             <input
               type="password"

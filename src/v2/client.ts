@@ -2085,6 +2085,46 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     initFn();
   }
 
+  // Prevent form submission on password forms (CSP-compliant)
+  // This replaces inline onsubmit handlers which violate CSP
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      const unlockForm = document.getElementById('kms-unlock-form');
+      const setupForm = document.getElementById('kms-setup-form');
+
+      if (unlockForm) {
+        unlockForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          return false;
+        });
+      }
+
+      if (setupForm) {
+        setupForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          return false;
+        });
+      }
+    });
+  } else {
+    const unlockForm = document.getElementById('kms-unlock-form');
+    const setupForm = document.getElementById('kms-setup-form');
+
+    if (unlockForm) {
+      unlockForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        return false;
+      });
+    }
+
+    if (setupForm) {
+      setupForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        return false;
+      });
+    }
+  }
+
   // If running in iframe, listen for setup completion signals from popup window
   if (isIframe) {
     // Define the setup message type for type safety

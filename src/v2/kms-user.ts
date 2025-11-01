@@ -326,6 +326,14 @@ export class KMSUser {
       return;
     }
 
+    // Handle show-iframe request (from unlock modal)
+    if (data?.type === 'kms:show-iframe') {
+      if (this.iframe) {
+        this.iframe.style.display = 'block';
+      }
+      return;
+    }
+
     // Handle RPC response
     const response = event.data as RPCResponse;
     if (!response.id) {
@@ -819,10 +827,9 @@ export class KMSUser {
    * @see {@link removeEnrollment} to remove a method
    */
   async addEnrollmentWithPopup(userId: string): Promise<SetupResult> {
-    // ALWAYS show iframe for WebAuthn unlock modal (will be shown after popup)
-    if (this.iframe) {
-      this.iframe.style.display = 'block';
-    }
+    // DON'T show iframe yet - let worker control when unlock modal appears
+    // Worker will send worker:request-unlock message when ready
+    // Client will then show the unlock modal (which makes iframe visible)
 
     try {
       const result = await this.sendRequest<SetupResult>('addEnrollmentWithPopup', {

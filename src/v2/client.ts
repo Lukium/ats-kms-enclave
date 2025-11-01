@@ -585,6 +585,11 @@ export class KMSClient {
       // Store requestId for when credentials are collected
       this.pendingUnlockRequestId = params.requestId;
 
+      // Tell parent to show iframe (so unlock modal is visible)
+      this.sendToParent({
+        type: 'kms:show-iframe',
+      });
+
       // Create a dummy RPC request to trigger unlock modal
       // The unlock modal expects pendingUnlockRequest to have userId in params
       // Using 'getEnrollments' as a placeholder method (doesn't matter for this flow)

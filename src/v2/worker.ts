@@ -160,6 +160,24 @@ const pendingPopupRequests = new Map<
 >();
 
 /**
+ * Pending unlock requests (addEnrollmentWithPopup flow).
+ * Maps requestId to promise resolver for unlock credentials.
+ *
+ * - Key: requestId (UUID)
+ * - Value: { resolve, reject, timeout }
+ *
+ * Auto-cleanup on timeout (5 minutes)
+ */
+const pendingUnlockRequests = new Map<
+  string,
+  {
+    resolve: (value: AuthCredentials) => void;
+    reject: (reason: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
+
+/**
  * Derive a SessionKEK from Master Secret and lease salt.
  *
  * Uses HKDF-SHA256 with:
@@ -553,6 +571,35 @@ self.addEventListener('message', (event: MessageEvent) => {
         clearTimeout(pending.timeout);
         pendingPopupRequests.delete(requestId);
         pending.reject(new Error(message.reason || 'Popup setup failed'));
+      }
+    }
+    return;
+  }
+
+  if ('type' in message && message.type === 'worker:unlock-credentials') {
+    // Client completed unlock modal and is sending back credentials
+    const requestId = message.requestId;
+    const credentials = (message as { credentials?: AuthCredentials }).credentials;
+    if (requestId && credentials) {
+      const pending = pendingUnlockRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingUnlockRequests.delete(requestId);
+        pending.resolve(credentials);
+      }
+    }
+    return;
+  }
+
+  if ('type' in message && message.type === 'worker:unlock-error') {
+    // Client encountered error during unlock modal
+    const requestId = message.requestId;
+    if (requestId) {
+      const pending = pendingUnlockRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingUnlockRequests.delete(requestId);
+        pending.reject(new Error(message.reason || 'Unlock failed'));
       }
     }
     return;
@@ -1294,9 +1341,29 @@ async function handleAddEnrollmentWithPopup(
   ephemeralTransportKeys.delete(newCredentialsEncrypted.transportKeyId);
   console.log('[Worker] Step 3: New credentials decrypted ✓');
 
-  // Step 4: Now show unlock modal to get EXISTING credentials
+  // Step 4: Now request unlock modal to get EXISTING credentials
   console.log('[Worker] Step 4: Requesting unlock with existing credentials...');
-  const unlockCredentials = await requestUnlock(userId);
+  const unlockCredentials = await new Promise<AuthCredentials>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.error('[Worker] Unlock timeout after 5 minutes');
+      reject(new Error('Unlock modal timeout'));
+    }, 300000); // 5 minute timeout
+
+    // Store resolver
+    pendingUnlockRequests.set(requestId, {
+      resolve,
+      reject,
+      timeout
+    });
+
+    // Send message to client to show unlock modal
+    self.postMessage({
+      type: 'worker:request-unlock',
+      requestId,
+      userId,
+    });
+    console.log('[Worker] Unlock modal request sent, waiting for credentials...');
+  });
   console.log('[Worker] Step 4: Unlock credentials received ✓');
 
   // Step 5: Unlock with existing credentials to get MS

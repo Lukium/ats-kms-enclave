@@ -54,6 +54,7 @@ export class KMSClient {
   private workerUrl: string;
   private isInitialized = false;
   private pendingUnlockRequest: RPCRequest | null = null;
+  private pendingUnlockRequestId: string | null = null; // For addEnrollmentWithPopup unlock flow
 
   // Stateless popup mode properties
   private isStatelessPopup: boolean = false;
@@ -333,6 +334,15 @@ export class KMSClient {
         return;
       }
 
+      // Intercept unlock request from worker (for addEnrollmentWithPopup)
+      if ('type' in data && data.type === 'worker:request-unlock') {
+        void this.handleUnlockRequest({
+          requestId: data.requestId as string,
+          userId: data.userId as string,
+        });
+        return;
+      }
+
       // Intercept popup request from worker
       if ('type' in data && data.type === 'worker:request-popup-from-parent') {
         this.handleWorkerPopupRequest(
@@ -551,6 +561,45 @@ export class KMSClient {
       console.error('[KMS Client] Setup with popup failed:', err);
       this.worker?.postMessage({
         type: 'worker:popup-error',
+        requestId: params.requestId,
+        reason: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Handle unlock request from worker (for addEnrollmentWithPopup)
+   *
+   * Worker requests unlock modal to get existing credentials AFTER popup completes.
+   * This ensures sequential flow: popup first, then unlock.
+   *
+   * @param params - Parameters from worker unlock request
+   */
+  private async handleUnlockRequest(params: {
+    requestId: string;
+    userId: string;
+  }): Promise<void> {
+    try {
+      console.log('[KMS Client] Unlock request received from worker:', params);
+
+      // Store requestId for when credentials are collected
+      this.pendingUnlockRequestId = params.requestId;
+
+      // Create a dummy RPC request to trigger unlock modal
+      // The unlock modal expects pendingUnlockRequest to have userId in params
+      // Using 'getEnrollments' as a placeholder method (doesn't matter for this flow)
+      this.pendingUnlockRequest = {
+        id: params.requestId,
+        method: 'getEnrollments',
+        params: { userId: params.userId },
+      };
+
+      // Show unlock modal - this will collect credentials via WebAuthn or passphrase
+      this.showUnlockModal(this.pendingUnlockRequest);
+    } catch (err: unknown) {
+      console.error('[KMS Client] Unlock request failed:', err);
+      this.worker?.postMessage({
+        type: 'worker:unlock-error',
         requestId: params.requestId,
         reason: err instanceof Error ? err.message : 'Unknown error',
       });
@@ -788,18 +837,37 @@ export class KMSClient {
       }
 
 
-      // Add credentials to the request params
-      const requestWithCredentials: RPCRequest = {
-        ...this.pendingUnlockRequest,
-        params: {
-          ...(this.pendingUnlockRequest.params as Record<string, unknown>),
+      // Check if this is for addEnrollmentWithPopup unlock flow
+      if (this.pendingUnlockRequestId) {
+        // Send credentials directly to worker for addEnrollmentWithPopup
+        this.worker?.postMessage({
+          type: 'worker:unlock-credentials',
+          requestId: this.pendingUnlockRequestId,
           credentials,
-        },
-      };
+        });
 
-      // Send to worker and setup response listener
-      this.setupUnlockResponseListener(requestWithCredentials);
-      this.worker?.postMessage(requestWithCredentials);
+        // Clear state
+        this.pendingUnlockRequestId = null;
+        this.pendingUnlockRequest = null;
+
+        // Hide modal
+        this.hideModal();
+        this.hideLoading();
+      } else {
+        // Normal unlock flow for RPC methods
+        // Add credentials to the request params
+        const requestWithCredentials: RPCRequest = {
+          ...this.pendingUnlockRequest,
+          params: {
+            ...(this.pendingUnlockRequest.params as Record<string, unknown>),
+            credentials,
+          },
+        };
+
+        // Send to worker and setup response listener
+        this.setupUnlockResponseListener(requestWithCredentials);
+        this.worker?.postMessage(requestWithCredentials);
+      }
     } catch (err: unknown) {
       this.hideLoading();
       this.showError(`WebAuthn failed: ${getErrorMessage(err)}`);
@@ -834,18 +902,37 @@ export class KMSClient {
         throw new Error('userId not found in request params');
       }
 
-      // Add credentials to the request params (include userId)
-      const requestWithCredentials: RPCRequest = {
-        ...this.pendingUnlockRequest,
-        params: {
-          ...(this.pendingUnlockRequest.params as Record<string, unknown>),
+      // Check if this is for addEnrollmentWithPopup unlock flow
+      if (this.pendingUnlockRequestId) {
+        // Send credentials directly to worker for addEnrollmentWithPopup
+        this.worker?.postMessage({
+          type: 'worker:unlock-credentials',
+          requestId: this.pendingUnlockRequestId,
           credentials: { method: 'passphrase', passphrase, userId },
-        },
-      };
+        });
 
-      // Send to worker and setup response listener
-      this.setupUnlockResponseListener(requestWithCredentials);
-      this.worker?.postMessage(requestWithCredentials);
+        // Clear state
+        this.pendingUnlockRequestId = null;
+        this.pendingUnlockRequest = null;
+
+        // Hide modal
+        this.hideModal();
+        this.hideLoading();
+      } else {
+        // Normal unlock flow for RPC methods
+        // Add credentials to the request params (include userId)
+        const requestWithCredentials: RPCRequest = {
+          ...this.pendingUnlockRequest,
+          params: {
+            ...(this.pendingUnlockRequest.params as Record<string, unknown>),
+            credentials: { method: 'passphrase', passphrase, userId },
+          },
+        };
+
+        // Send to worker and setup response listener
+        this.setupUnlockResponseListener(requestWithCredentials);
+        this.worker?.postMessage(requestWithCredentials);
+      }
     } catch (err: unknown) {
       console.error('[KMS Client] Passphrase unlock failed:', err);
       this.hideLoading();

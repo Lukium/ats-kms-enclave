@@ -232,6 +232,16 @@ async function handleSetupComplete(event: MessageEvent): Promise<void> {
     return;
   }
 
+  // Forward popup-ready signal from popup to iframe
+  if (event.data?.type === 'kms:popup-ready') {
+    console.log('[Full Demo] Received kms:popup-ready from popup, forwarding to iframe...');
+    const iframe = document.querySelector('iframe');
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(event.data, KMS_ORIGIN);
+    }
+    return;
+  }
+
   // Check message type
   if (event.data?.type === 'kms:setup-complete') {
     console.log('[Full Demo] Setup complete notification received:', event.data);

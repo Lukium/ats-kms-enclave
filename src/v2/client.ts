@@ -428,11 +428,15 @@ export class KMSClient {
         throw new Error('No parent window available');
       }
 
+      // Add parentOrigin to popup URL so popup knows where to send ready signal
+      const popupURL = new URL(params.popupURL);
+      popupURL.searchParams.set('parentOrigin', this.parentOrigin);
+
       // Ask parent to open popup
       targetWindow.postMessage(
         {
           type: 'kms:request-popup',
-          url: params.popupURL,
+          url: popupURL.toString(),
           requestId: params.requestId,
         },
         this.parentOrigin
@@ -1975,16 +1979,18 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
       if (!hasTransportParams) {
         // KMS-only popup flow: no transport params in URL
-        // Signal ready to iframe and wait for MessageChannel
+        // Signal ready to parent (which will forward to iframe)
         /* eslint-disable-next-line no-console */
-        console.log('[KMS Client] Popup in KMS-only mode, signaling ready to iframe...');
+        console.log('[KMS Client] Popup in KMS-only mode, signaling ready to parent...');
 
-        // Send ready signal to iframe (same origin: kms.ats.run)
+        // Send ready signal to parent (who will forward to iframe)
+        // Parent origin is in URL params
+        const popupParentOrigin = params.get('parentOrigin') ?? 'http://localhost:5173';
         if (window.opener) {
           /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
           window.opener.postMessage(
             { type: 'kms:popup-ready' },
-            window.location.origin
+            popupParentOrigin
           );
           /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
         }

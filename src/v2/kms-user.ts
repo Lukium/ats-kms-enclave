@@ -733,14 +733,114 @@ export class KMSUser {
     userId: string,
     credentials: AuthCredentials
   ): Promise<SetupResult> {
-    return this.sendRequest<SetupResult>('addEnrollment', {
-      userId,
-      credentials,
-    });
+    // ALWAYS show iframe for authentication (same pattern as createLease)
+    // For passkey-gate, iframe needs to be visible to show WebAuthn prompt
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
+
+    try {
+      const result = await this.sendRequest<SetupResult>('addEnrollment', {
+        userId,
+        credentials,
+      });
+      // Hide iframe on success
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      // Hide iframe on error
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
   }
 
   // Legacy methods generateSetupTransportKey() and setupWithEncryptedCredentials() removed.
   // Use setupWithPopup() instead for secure KMS-only popup flow.
+
+  /**
+   * Add additional authentication method using popup flow (reversed order).
+   * Opens popup FIRST to collect new credentials, then unlocks with existing.
+   * This method preserves the user gesture for popup opening.
+   *
+   * Multi-enrollment enables:
+   * - Multiple authentication methods for same Master Secret
+   * - Add passkey after initial passphrase setup
+   * - Add additional passkey on new device
+   *
+   * **Required**: KMS must already be set up (see {@link isSetup})
+   *
+   * **Flow**:
+   * 1. Opens popup to collect NEW authentication credentials (user gesture preserved)
+   * 2. Shows unlock modal to collect EXISTING credentials
+   * 3. Unlocks with existing credentials to get Master Secret
+   * 4. Re-wraps Master Secret with new KEK from popup
+   * 5. Returns enrollment ID
+   *
+   * **Popup Window**: The method opens a popup window (`kms.ats.run`) for credential
+   * collection. The popup must not be blocked by the browser. Call this method
+   * directly from a user gesture (button click) to ensure popup success.
+   *
+   * @param userId - User identifier (must match existing setup)
+   *
+   * @returns Promise resolving to setup result
+   * @returns {SetupResult} result
+   * @returns {boolean} result.success - Always true if no error
+   * @returns {string} result.enrollmentId - New enrollment identifier
+   *
+   * @throws {Error} Popup was blocked by browser
+   * @throws {Error} Authentication failed with existing credentials
+   * @throws {Error} Method already enrolled
+   * @throws {Error} KMS not initialized
+   *
+   * @example
+   * ```typescript
+   * // Add passkey after initial passphrase setup
+   * async function addPasskey() {
+   *   try {
+   *     const result = await kmsUser.addEnrollmentWithPopup('user@example.com');
+   *     console.log('Added enrollment:', result.enrollmentId);
+   *   } catch (error) {
+   *     if (error.message.includes('blocked')) {
+   *       alert('Please allow popups for this site');
+   *     }
+   *   }
+   * }
+   *
+   * // Call from button click to preserve user gesture
+   * button.addEventListener('click', addPasskey);
+   * ```
+   *
+   * @see {@link addEnrollment} for credential-first flow (may be blocked)
+   * @see {@link getEnrollments} to list all enrolled methods
+   * @see {@link removeEnrollment} to remove a method
+   */
+  async addEnrollmentWithPopup(userId: string): Promise<SetupResult> {
+    // ALWAYS show iframe for WebAuthn unlock modal (will be shown after popup)
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
+
+    try {
+      const result = await this.sendRequest<SetupResult>('addEnrollmentWithPopup', {
+        userId,
+      });
+      // Hide iframe on success
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      // Hide iframe on error
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
+  }
 
   /**
    * Setup user authentication via popup (iframe-managed flow).

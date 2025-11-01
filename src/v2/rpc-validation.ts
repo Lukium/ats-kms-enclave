@@ -282,6 +282,16 @@ export function validateAddEnrollment(params: unknown): {
   };
 }
 
+export function validateAddEnrollmentWithPopup(params: unknown): {
+  userId: string;
+} {
+  const p = validateParamsObject('addEnrollmentWithPopup', params);
+
+  return {
+    userId: validateString('addEnrollmentWithPopup', 'userId', p.userId),
+  };
+}
+
 export function validateGenerateVAPID(params: unknown): {
   credentials: AuthCredentials;
 } {

@@ -614,6 +614,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleAddEnrollment(validators.validateAddEnrollment(params), id);
         break;
 
+      case 'addEnrollmentWithPopup':
+        result = await handleAddEnrollmentWithPopup(validators.validateAddEnrollmentWithPopup(params), id);
+        break;
+
       // === VAPID Operations ===
       case 'generateVAPID':
         result = await handleGenerateVAPID(validators.validateGenerateVAPID(params), id);
@@ -1151,6 +1155,204 @@ async function handleAddEnrollment(
     details: { method, action: 'add-enrollment' },
   });
 
+  return { success: true, enrollmentId: `enrollment:${method}:v2` };
+}
+
+/**
+ * Add additional enrollment method with popup flow (reversed order).
+ * Opens popup FIRST to collect new credentials (preserves user gesture),
+ * then shows unlock modal to get existing credentials.
+ * Enables multi-enrollment (same MS, multiple auth methods).
+ */
+async function handleAddEnrollmentWithPopup(
+  params: {
+    userId: string;
+  },
+  requestId: string
+): Promise<{ success: true; enrollmentId: string }> {
+  const { userId } = params;
+
+  console.log('[Worker] handleAddEnrollmentWithPopup START:', { userId, requestId });
+
+  // Step 1: Generate transport key (stays in iframe, never sent to parent)
+  console.log('[Worker] Step 1: Generating transport key...');
+  const transport = await generateSetupTransportKey();
+  console.log('[Worker] Step 1: Transport key generated ✓');
+
+  // Step 2: Request popup to collect NEW credentials (user gesture preserved)
+  const popupURL = new URL('https://kms.ats.run/');
+  popupURL.searchParams.set('mode', 'setup');
+
+  console.log('[Worker] Step 2: Sending worker:setup-with-popup message to parent...');
+  const newCredentialsEncrypted = await new Promise<{
+    method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+    transportKeyId: string;
+    userId: string;
+    ephemeralPublicKey: string;
+    iv: string;
+    encryptedCredentials: string;
+  }>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.error('[Worker] Popup timeout after 5 minutes');
+      reject(new Error('Add enrollment popup timeout'));
+    }, 300000); // 5 minute timeout
+
+    // Store resolver
+    pendingPopupRequests.set(requestId, {
+      resolve,
+      reject,
+      timeout
+    });
+
+    // Send request to client (main thread) with all info needed
+    console.log('[Worker] Posting message with requestId:', requestId);
+    self.postMessage({
+      type: 'worker:setup-with-popup',
+      requestId,
+      userId,
+      popupURL: popupURL.toString(),
+      transportKey: transport.publicKey,
+      transportKeyId: transport.keyId,
+      appSalt: transport.appSalt,
+      hkdfSalt: transport.hkdfSalt,
+    });
+    console.log('[Worker] Message posted, waiting for popup response...');
+  });
+  console.log('[Worker] Step 2: New credentials received from popup ✓');
+
+  // Step 3: Decrypt new credentials
+  console.log('[Worker] Step 3: Decrypting new credentials...');
+  const transportKey = ephemeralTransportKeys.get(newCredentialsEncrypted.transportKeyId);
+  if (!transportKey) {
+    throw new Error('Transport key not found or expired');
+  }
+
+  const popupPublicKeyBytes = base64urlToArrayBuffer(newCredentialsEncrypted.ephemeralPublicKey);
+  const popupPublicKey = await crypto.subtle.importKey(
+    'raw',
+    popupPublicKeyBytes,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+
+  const sharedSecret = await crypto.subtle.deriveBits(
+    {
+      name: 'ECDH',
+      public: popupPublicKey,
+    },
+    transportKey.privateKey,
+    256
+  );
+
+  const sharedSecretKey = await crypto.subtle.importKey(
+    'raw',
+    sharedSecret,
+    'HKDF',
+    false,
+    ['deriveBits']
+  );
+
+  const aesKeyBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      salt: new Uint8Array(32),
+      info: new TextEncoder().encode('ATS/KMS/setup-transport/v2'),
+      hash: 'SHA-256',
+    },
+    sharedSecretKey,
+    256
+  );
+
+  const aesKey = await crypto.subtle.importKey(
+    'raw',
+    aesKeyBits,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+
+  const iv = base64urlToArrayBuffer(newCredentialsEncrypted.iv);
+  const ciphertext = base64urlToArrayBuffer(newCredentialsEncrypted.encryptedCredentials);
+
+  const credentialsJSON = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: iv,
+      tagLength: 128,
+    },
+    aesKey,
+    ciphertext
+  );
+
+  const newCredentials = JSON.parse(new TextDecoder().decode(credentialsJSON)) as
+    | { passphrase: string }
+    | { credentialId: string; prfOutput: string; rpId?: string }
+    | { credentialId: string; rpId?: string };
+
+  // Delete ephemeral transport key (one-time use)
+  ephemeralTransportKeys.delete(newCredentialsEncrypted.transportKeyId);
+  console.log('[Worker] Step 3: New credentials decrypted ✓');
+
+  // Step 4: Now show unlock modal to get EXISTING credentials
+  console.log('[Worker] Step 4: Requesting unlock with existing credentials...');
+  const unlockCredentials = await requestUnlock(userId);
+  console.log('[Worker] Step 4: Unlock credentials received ✓');
+
+  // Step 5: Unlock with existing credentials to get MS
+  console.log('[Worker] Step 5: Unlocking with existing credentials to get MS...');
+  const ms = await withUnlock(unlockCredentials, async (_mkek, masterSecret) => {
+    // Ensure audit key is loaded (required for multi-enrollment)
+    await ensureAuditKey(_mkek);
+    // Return the MS for use outside withUnlock
+    return masterSecret as Uint8Array;
+  });
+  console.log('[Worker] Step 5: MS obtained and audit key ensured ✓');
+
+  // Step 6: Setup new enrollment with existing MS based on new credential type
+  console.log('[Worker] Step 6: Rewrapping MS with new credentials...');
+  const method = newCredentialsEncrypted.method;
+  let enrollmentResult;
+
+  if (method === 'passphrase') {
+    const passphraseCredentials = newCredentials as { passphrase: string };
+    enrollmentResult = await setupPassphrase(userId, passphraseCredentials.passphrase, ms);
+  } else if (method === 'passkey-prf') {
+    const prfCredentials = newCredentials as { credentialId: string; prfOutput: string; rpId?: string };
+    const rpId = prfCredentials.rpId || '';
+    enrollmentResult = await setupPasskeyPRF(
+      userId,
+      base64urlToArrayBuffer(prfCredentials.credentialId),
+      base64urlToArrayBuffer(prfCredentials.prfOutput),
+      ms,
+      rpId
+    );
+  } else if (method === 'passkey-gate') {
+    const gateCredentials = newCredentials as { credentialId: string; rpId?: string };
+    const rpId = gateCredentials.rpId || '';
+    enrollmentResult = await setupPasskeyGate(userId, base64urlToArrayBuffer(gateCredentials.credentialId), ms, rpId);
+  } else {
+    const exhaustive: never = method;
+    throw new Error(`Unknown enrollment method: ${String(exhaustive)}`);
+  }
+  console.log('[Worker] Step 6: MS rewrapped with new credentials ✓');
+
+  // Zeroize MS
+  ms.fill(0);
+
+  if (!enrollmentResult.success) {
+    throw new Error(enrollmentResult.error);
+  }
+
+  await logOperation({
+    op: 'add-enrollment-with-popup',
+    kid: '',
+    requestId,
+    userId,
+    details: { method, action: 'add-enrollment-with-popup' },
+  });
+
+  console.log('[Worker] handleAddEnrollmentWithPopup COMPLETE ✓');
   return { success: true, enrollmentId: `enrollment:${method}:v2` };
 }
 

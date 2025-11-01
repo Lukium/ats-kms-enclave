@@ -682,58 +682,27 @@ async function setupWithPopupKMSOnly(): Promise<void> {
 }
 
 /**
- * Add additional enrollment method using KMS-only popup flow.
+ * Add additional enrollment method with popup-first flow.
+ * Demonstrates multi-enrollment where user can add a second auth method
+ * while keeping the same Master Secret.
  *
  * This function:
- * 1. Prompts user to unlock with existing credentials
- * 2. Calls addEnrollment() which opens popup for new auth method
- * 3. KMS handles unlocking with existing creds, getting new creds via popup, and re-wrapping MS
+ * 1. Opens popup to collect NEW authentication method (user gesture preserved)
+ * 2. Shows unlock modal to collect EXISTING credentials
+ * 3. KMS handles unlocking with existing creds, re-wrapping MS with new creds
+ *
+ * The popup-first approach ensures the browser doesn't block the popup window.
  */
 async function addEnrollmentWithPopup(): Promise<void> {
-  console.log('[Full Demo] Starting add enrollment with popup...');
+  console.log('[Full Demo] Starting add enrollment with popup-first flow...');
 
   try {
-    setupOperationEl.innerHTML = '<p class="loading">Unlock with existing credentials...</p>';
-
-    // Get enrollment methods to determine which credential type to request
-    const status = await kmsUser.isSetup('demouser@ats.run');
-    console.log('[Full Demo] Current setup status:', status);
-
-    const hasPassphrase = status.methods.includes('passphrase');
-    const hasPasskey = status.methods.includes('passkey');
-
-    console.log('[Full Demo] Has passphrase:', hasPassphrase, 'Has passkey:', hasPasskey);
-
-    let credentials;
-
-    if (hasPassphrase) {
-      // Unlock with passphrase
-      const passphrase = prompt('Enter your current passphrase to unlock:');
-      if (!passphrase) {
-        await refreshUI();
-        return;
-      }
-      credentials = {
-        method: 'passphrase' as const,
-        userId: 'demouser@ats.run',
-        passphrase,
-      };
-    } else if (hasPasskey) {
-      // Unlock with passkey-gate - WebAuthn will be triggered inside the iframe
-      setupOperationEl.innerHTML = '<p class="loading">Unlock with your passkey...</p>';
-      credentials = {
-        method: 'passkey-gate' as const,
-        userId: 'demouser@ats.run',
-      };
-    } else {
-      throw new Error('No existing enrollment found');
-    }
-
     setupOperationEl.innerHTML = '<p class="loading">Opening popup for new authentication method...</p>';
 
-    // Call addEnrollment - everything else is handled by iframe and popup
-    console.log('[Full Demo] Calling addEnrollment with credentials:', { method: credentials.method, userId: credentials.userId });
-    const result = await kmsUser.addEnrollment('demouser@ats.run', credentials);
+    // Call the new addEnrollmentWithPopup API - everything is handled by iframe
+    // Popup opens FIRST (preserves user gesture), then unlock modal appears
+    console.log('[Full Demo] Calling addEnrollmentWithPopup...');
+    const result = await kmsUser.addEnrollmentWithPopup('demouser@ats.run');
 
     console.log('[Full Demo] Add enrollment complete!', result);
 

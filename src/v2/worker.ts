@@ -1372,45 +1372,50 @@ async function handleAddEnrollmentWithPopup(
   const unlockResult = await withUnlock(unlockCredentials, async (_mkek, masterSecret) => {
     // Ensure audit key is loaded (required for multi-enrollment)
     await ensureAuditKey(_mkek);
-    // Return the MS for use outside withUnlock
-    return masterSecret as Uint8Array;
+    // CRITICAL: Copy the MS before withUnlock zeroizes it
+    // The original MS will be zeroized in withUnlock's finally block
+    const msCopy = new Uint8Array(masterSecret);
+    return msCopy;
   });
   const ms = unlockResult.result;
   console.log('[Worker] Step 5: MS obtained and audit key ensured ✓');
 
   // Step 6: Setup new enrollment with existing MS based on new credential type
-  console.log('[Worker] Step 6: Rewrapping MS with new credentials...');
-  const method = newCredentialsEncrypted.method;
-  let enrollmentResult;
+  // Wrap in try/finally to ensure MS copy is always zeroized (defense-in-depth)
+  try {
+    console.log('[Worker] Step 6: Rewrapping MS with new credentials...');
+    const method = newCredentialsEncrypted.method;
+    let enrollmentResult;
 
-  if (method === 'passphrase') {
-    const passphraseCredentials = newCredentials as { passphrase: string };
-    enrollmentResult = await setupPassphrase(userId, passphraseCredentials.passphrase, ms);
-  } else if (method === 'passkey-prf') {
-    const prfCredentials = newCredentials as { credentialId: string; prfOutput: string; rpId?: string };
-    const rpId = prfCredentials.rpId || '';
-    enrollmentResult = await setupPasskeyPRF(
-      userId,
-      base64urlToArrayBuffer(prfCredentials.credentialId),
-      base64urlToArrayBuffer(prfCredentials.prfOutput),
-      ms,
-      rpId
-    );
-  } else if (method === 'passkey-gate') {
-    const gateCredentials = newCredentials as { credentialId: string; rpId?: string };
-    const rpId = gateCredentials.rpId || '';
-    enrollmentResult = await setupPasskeyGate(userId, base64urlToArrayBuffer(gateCredentials.credentialId), ms, rpId);
-  } else {
-    const exhaustive: never = method;
-    throw new Error(`Unknown enrollment method: ${String(exhaustive)}`);
-  }
-  console.log('[Worker] Step 6: MS rewrapped with new credentials ✓');
+    if (method === 'passphrase') {
+      const passphraseCredentials = newCredentials as { passphrase: string };
+      enrollmentResult = await setupPassphrase(userId, passphraseCredentials.passphrase, ms);
+    } else if (method === 'passkey-prf') {
+      const prfCredentials = newCredentials as { credentialId: string; prfOutput: string; rpId?: string };
+      const rpId = prfCredentials.rpId || '';
+      enrollmentResult = await setupPasskeyPRF(
+        userId,
+        base64urlToArrayBuffer(prfCredentials.credentialId),
+        base64urlToArrayBuffer(prfCredentials.prfOutput),
+        ms,
+        rpId
+      );
+    } else if (method === 'passkey-gate') {
+      const gateCredentials = newCredentials as { credentialId: string; rpId?: string };
+      const rpId = gateCredentials.rpId || '';
+      enrollmentResult = await setupPasskeyGate(userId, base64urlToArrayBuffer(gateCredentials.credentialId), ms, rpId);
+    } else {
+      const exhaustive: never = method;
+      throw new Error(`Unknown enrollment method: ${String(exhaustive)}`);
+    }
+    console.log('[Worker] Step 6: MS rewrapped with new credentials ✓');
 
-  // Zeroize MS
-  ms.fill(0);
-
-  if (!enrollmentResult.success) {
-    throw new Error(enrollmentResult.error);
+    if (!enrollmentResult.success) {
+      throw new Error(enrollmentResult.error);
+    }
+  } finally {
+    // CRITICAL: Always zeroize MS copy (defense-in-depth)
+    ms.fill(0);
   }
 
   await logOperation({

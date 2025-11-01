@@ -974,38 +974,30 @@ async function handleAddEnrollment(
 ): Promise<{ success: true; enrollmentId: string }> {
   const { userId, credentials } = params;
 
-  // Unlock to verify credentials and ensure audit key is loaded
-  await withUnlock(credentials, async (mkek, _ms) => {
-    await ensureAuditKey(mkek);
-    return true;
+  console.log('[Worker] handleAddEnrollment START:', { userId, method: credentials.method, requestId });
+
+  // Unlock ONCE to verify credentials, ensure audit key, and get MS
+  // (Similar pattern to createLease - do everything in a single withUnlock call)
+  console.log('[Worker] Step 1: Unlocking with credentials to get MS...');
+  const ms = await withUnlock(credentials, async (_mkek, masterSecret) => {
+    // Ensure audit key is loaded (required for multi-enrollment)
+    await ensureAuditKey(_mkek);
+    // Return the MS for use outside withUnlock
+    return masterSecret as Uint8Array;
   });
+  console.log('[Worker] Step 1: MS obtained and audit key ensured ✓');
 
-  // Get the MS by unlocking again (we need the raw MS, not just verification)
-  let ms: Uint8Array;
-  if (credentials.method === 'passphrase') {
-    const result = await unlockWithPassphrase(userId, credentials.passphrase);
-    if (!result.success) throw new Error(result.error);
-    ms = result.ms;
-  } else if (credentials.method === 'passkey-prf') {
-    const result = await unlockWithPasskeyPRF(userId, credentials.prfOutput);
-    if (!result.success) throw new Error(result.error);
-    ms = result.ms;
-  } else if (credentials.method === 'passkey-gate') {
-    const result = await unlockWithPasskeyGate(userId);
-    if (!result.success) throw new Error(result.error);
-    ms = result.ms;
-  } else {
-    throw new Error('Invalid credentials method');
-  }
-
-  // Step 1: Generate transport key (stays in iframe, never sent to parent)
+  // Step 2: Generate transport key (stays in iframe, never sent to parent)
+  console.log('[Worker] Step 2: Generating transport key...');
   const transport = await generateSetupTransportKey();
+  console.log('[Worker] Step 2: Transport key generated ✓');
 
-  // Step 2: Request parent to open popup with minimal URL
+  // Step 3: Request parent to open popup with minimal URL
   const popupURL = new URL('https://kms.ats.run/');
   popupURL.searchParams.set('mode', 'setup');
 
-  // Step 3: Tell client to open popup and handle the entire popup flow
+  // Step 4: Tell client to open popup and handle the entire popup flow
+  console.log('[Worker] Step 3: Sending worker:setup-with-popup message to parent...');
   const credentialsPromise = new Promise<{
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
     transportKeyId: string;
@@ -1015,6 +1007,7 @@ async function handleAddEnrollment(
     encryptedCredentials: string;
   }>((resolve, reject) => {
     const timeout = setTimeout(() => {
+      console.error('[Worker] Popup timeout after 5 minutes');
       reject(new Error('Add enrollment popup timeout'));
     }, 300000); // 5 minute timeout
 
@@ -1026,6 +1019,7 @@ async function handleAddEnrollment(
     });
 
     // Send request to client (main thread) with all info needed
+    console.log('[Worker] Posting message with requestId:', requestId);
     self.postMessage({
       type: 'worker:setup-with-popup',
       requestId,
@@ -1036,12 +1030,15 @@ async function handleAddEnrollment(
       appSalt: transport.appSalt,
       hkdfSalt: transport.hkdfSalt,
     });
+    console.log('[Worker] Message posted, waiting for popup response...');
   });
 
   // Wait for client to complete entire popup flow and return credentials
+  console.log('[Worker] Step 4: Waiting for popup credentials...');
   const newCredentialsEncrypted = await credentialsPromise;
+  console.log('[Worker] Step 4: Credentials received ✓');
 
-  // Step 4: Decrypt credentials (copy from setupWithEncryptedCredentials)
+  // Step 5: Decrypt credentials (copy from setupWithEncryptedCredentials)
   const transportKey = ephemeralTransportKeys.get(newCredentialsEncrypted.transportKeyId);
   if (!transportKey) {
     throw new Error('Transport key not found or expired');

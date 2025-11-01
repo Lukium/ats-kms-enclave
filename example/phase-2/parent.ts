@@ -99,6 +99,46 @@ async function loadAuditLog(): Promise<void> {
 }
 
 /**
+ * Refresh UI by fetching current setup status and re-rendering
+ */
+async function refreshUI(): Promise<void> {
+  const status = await kmsUser.isSetup('demouser@ats.run');
+  renderSetupUI(status);
+  renderLeaseUI(status);
+  await loadAuditLog();
+}
+
+/**
+ * Show a dismissable error notification
+ */
+function showErrorNotification(title: string, message: string): void {
+  const notificationEl = document.createElement('div');
+  notificationEl.className = 'error-notification';
+  notificationEl.innerHTML = `
+    <div class="error-notification-content">
+      <strong>❌ ${title}</strong>
+      <p>${message}</p>
+      <button class="dismiss-btn">Dismiss</button>
+    </div>
+  `;
+
+  // Add event listener to dismiss button
+  const dismissBtn = notificationEl.querySelector('.dismiss-btn');
+  if (dismissBtn) {
+    dismissBtn.addEventListener('click', () => notificationEl.remove());
+  }
+
+  // Insert at the top of operations content
+  const operationsContent = document.getElementById('operations-content');
+  if (operationsContent) {
+    operationsContent.insertBefore(notificationEl, operationsContent.firstChild);
+  }
+
+  // Auto-dismiss after 10 seconds
+  setTimeout(() => notificationEl.remove(), 10000);
+}
+
+/**
  * Initialize KMS and load initial audit log
  */
 async function initKMS(): Promise<StatusResult> {
@@ -656,9 +696,13 @@ async function addEnrollmentWithPopup(): Promise<void> {
     setupOperationEl.innerHTML = '<p class="loading">Unlock with existing credentials...</p>';
 
     // Get enrollment methods to determine which credential type to request
-    const enrollments = await kmsUser.getEnrollments('demouser@ats.run');
-    const hasPassphrase = enrollments.methods.includes('passphrase');
-    const hasPasskey = enrollments.methods.some(m => m.startsWith('passkey'));
+    const status = await kmsUser.isSetup('demouser@ats.run');
+    console.log('[Full Demo] Current setup status:', status);
+
+    const hasPassphrase = status.methods.includes('passphrase');
+    const hasPasskey = status.methods.includes('passkey');
+
+    console.log('[Full Demo] Has passphrase:', hasPassphrase, 'Has passkey:', hasPasskey);
 
     let credentials;
 
@@ -666,8 +710,7 @@ async function addEnrollmentWithPopup(): Promise<void> {
       // Unlock with passphrase
       const passphrase = prompt('Enter your current passphrase to unlock:');
       if (!passphrase) {
-        setupOperationEl.innerHTML = '<div class="error-message">Cancelled</div>';
-        await checkSetupStatus();
+        await refreshUI();
         return;
       }
       credentials = {
@@ -676,7 +719,7 @@ async function addEnrollmentWithPopup(): Promise<void> {
         passphrase,
       };
     } else if (hasPasskey) {
-      // Unlock with passkey-gate (simplest for demo)
+      // Unlock with passkey-gate - WebAuthn will be triggered inside the iframe
       setupOperationEl.innerHTML = '<p class="loading">Unlock with your passkey...</p>';
       credentials = {
         method: 'passkey-gate' as const,
@@ -689,6 +732,7 @@ async function addEnrollmentWithPopup(): Promise<void> {
     setupOperationEl.innerHTML = '<p class="loading">Opening popup for new authentication method...</p>';
 
     // Call addEnrollment - everything else is handled by iframe and popup
+    console.log('[Full Demo] Calling addEnrollment with credentials:', { method: credentials.method, userId: credentials.userId });
     const result = await kmsUser.addEnrollment('demouser@ats.run', credentials);
 
     console.log('[Full Demo] Add enrollment complete!', result);
@@ -697,14 +741,12 @@ async function addEnrollmentWithPopup(): Promise<void> {
     window.location.reload();
   } catch (error) {
     console.error('[Full Demo] Add enrollment failed:', error);
-    setupOperationEl.innerHTML = `
-      <div class="error-message">
-        <p>❌ <strong>Add enrollment failed</strong></p>
-        <p>${error instanceof Error ? error.message : String(error)}</p>
-      </div>
-    `;
-    // Restore the UI after error
-    setTimeout(() => void checkSetupStatus(), 3000);
+    showErrorNotification(
+      'Add enrollment failed',
+      error instanceof Error ? error.message : String(error)
+    );
+    // Restore the UI after 3 seconds
+    setTimeout(() => void refreshUI(), 3000);
   }
 }
 

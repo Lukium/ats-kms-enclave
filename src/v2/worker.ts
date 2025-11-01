@@ -968,23 +968,11 @@ async function handleSetupPasskeyGate(
 async function handleAddEnrollment(
   params: {
     userId: string;
-    method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
     credentials: AuthCredentials;
-    newCredentials: unknown;
   },
   requestId: string
 ): Promise<{ success: true; enrollmentId: string }> {
-  const { userId, method, credentials, newCredentials } = params;
-
-  // Validate newCredentials structure based on method
-  function validateNewCredentials(m: string, creds: unknown): Record<string, unknown> {
-    if (typeof creds !== 'object' || creds === null) {
-      throw new Error(`newCredentials must be an object for ${m}`);
-    }
-    return creds as Record<string, unknown>;
-  }
-
-  const validatedCreds = validateNewCredentials(method, newCredentials);
+  const { userId, credentials } = params;
 
   // Unlock to verify credentials and ensure audit key is loaded
   await withUnlock(credentials, async (mkek, _ms) => {
@@ -1010,36 +998,142 @@ async function handleAddEnrollment(
     throw new Error('Invalid credentials method');
   }
 
-  // Setup new enrollment with existing MS
+  // Step 1: Generate transport key (stays in iframe, never sent to parent)
+  const transport = await generateSetupTransportKey();
+
+  // Step 2: Request parent to open popup with minimal URL
+  const popupURL = new URL('https://kms.ats.run/');
+  popupURL.searchParams.set('mode', 'setup');
+
+  // Step 3: Tell client to open popup and handle the entire popup flow
+  const credentialsPromise = new Promise<{
+    method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+    transportKeyId: string;
+    userId: string;
+    ephemeralPublicKey: string;
+    iv: string;
+    encryptedCredentials: string;
+  }>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Add enrollment popup timeout'));
+    }, 300000); // 5 minute timeout
+
+    // Store resolver
+    pendingPopupRequests.set(requestId, {
+      resolve,
+      reject,
+      timeout
+    });
+
+    // Send request to client (main thread) with all info needed
+    self.postMessage({
+      type: 'worker:setup-with-popup',
+      requestId,
+      userId: params.userId,
+      popupURL: popupURL.toString(),
+      transportKey: transport.publicKey,
+      transportKeyId: transport.keyId,
+      appSalt: transport.appSalt,
+      hkdfSalt: transport.hkdfSalt,
+    });
+  });
+
+  // Wait for client to complete entire popup flow and return credentials
+  const newCredentialsEncrypted = await credentialsPromise;
+
+  // Step 4: Decrypt credentials (copy from setupWithEncryptedCredentials)
+  const transportKey = ephemeralTransportKeys.get(newCredentialsEncrypted.transportKeyId);
+  if (!transportKey) {
+    throw new Error('Transport key not found or expired');
+  }
+
+  const popupPublicKeyBytes = base64urlToArrayBuffer(newCredentialsEncrypted.ephemeralPublicKey);
+  const popupPublicKey = await crypto.subtle.importKey(
+    'raw',
+    popupPublicKeyBytes,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+
+  const sharedSecret = await crypto.subtle.deriveBits(
+    {
+      name: 'ECDH',
+      public: popupPublicKey,
+    },
+    transportKey.privateKey,
+    256
+  );
+
+  const sharedSecretKey = await crypto.subtle.importKey(
+    'raw',
+    sharedSecret,
+    'HKDF',
+    false,
+    ['deriveBits']
+  );
+
+  const aesKeyBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      salt: new Uint8Array(32),
+      info: new TextEncoder().encode('ATS/KMS/setup-transport/v2'),
+      hash: 'SHA-256',
+    },
+    sharedSecretKey,
+    256
+  );
+
+  const aesKey = await crypto.subtle.importKey(
+    'raw',
+    aesKeyBits,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+
+  const iv = base64urlToArrayBuffer(newCredentialsEncrypted.iv);
+  const ciphertext = base64urlToArrayBuffer(newCredentialsEncrypted.encryptedCredentials);
+
+  const credentialsJSON = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: iv,
+      tagLength: 128,
+    },
+    aesKey,
+    ciphertext
+  );
+
+  const decryptedCredentials = JSON.parse(new TextDecoder().decode(credentialsJSON)) as
+    | { passphrase: string }
+    | { credentialId: string; prfOutput: string; rpId?: string }
+    | { credentialId: string; rpId?: string };
+
+  // Delete ephemeral transport key (one-time use)
+  ephemeralTransportKeys.delete(newCredentialsEncrypted.transportKeyId);
+
+  // Step 5: Setup new enrollment with existing MS based on decrypted credential type
+  const method = newCredentialsEncrypted.method;
   let enrollmentResult;
+
   if (method === 'passphrase') {
-    if (typeof validatedCreds.passphrase !== 'string') {
-      throw new Error('passphrase must be a string');
-    }
-    enrollmentResult = await setupPassphrase(userId, validatedCreds.passphrase, ms);
+    const passphraseCredentials = decryptedCredentials as { passphrase: string };
+    enrollmentResult = await setupPassphrase(userId, passphraseCredentials.passphrase, ms);
   } else if (method === 'passkey-prf') {
-    if (!(validatedCreds.credentialId instanceof ArrayBuffer)) {
-      throw new Error('credentialId must be an ArrayBuffer');
-    }
-    if (!(validatedCreds.prfOutput instanceof ArrayBuffer)) {
-      throw new Error('prfOutput must be an ArrayBuffer');
-    }
-    // rpId is optional with default value ''
-    const rpId = typeof validatedCreds.rpId === 'string' ? validatedCreds.rpId : '';
+    const prfCredentials = decryptedCredentials as { credentialId: string; prfOutput: string; rpId?: string };
+    const rpId = prfCredentials.rpId || '';
     enrollmentResult = await setupPasskeyPRF(
       userId,
-      validatedCreds.credentialId,
-      validatedCreds.prfOutput,
+      base64urlToArrayBuffer(prfCredentials.credentialId),
+      base64urlToArrayBuffer(prfCredentials.prfOutput),
       ms,
       rpId
     );
   } else if (method === 'passkey-gate') {
-    if (!(validatedCreds.credentialId instanceof ArrayBuffer)) {
-      throw new Error('credentialId must be an ArrayBuffer');
-    }
-    // rpId is optional with default value ''
-    const rpId = typeof validatedCreds.rpId === 'string' ? validatedCreds.rpId : '';
-    enrollmentResult = await setupPasskeyGate(userId, validatedCreds.credentialId, ms, rpId);
+    const gateCredentials = decryptedCredentials as { credentialId: string; rpId?: string };
+    const rpId = gateCredentials.rpId || '';
+    enrollmentResult = await setupPasskeyGate(userId, base64urlToArrayBuffer(gateCredentials.credentialId), ms, rpId);
   } else {
     const exhaustive: never = method;
     throw new Error(`Unknown enrollment method: ${String(exhaustive)}`);

@@ -714,32 +714,28 @@ export class KMSUser {
    * // Add passkey PRF after initial passphrase setup
    * const result = await kmsUser.addEnrollment(
    *   'user@example.com',
-   *   'passkey-prf',
-   *   { passphrase: 'my-current-passphrase' },  // Existing auth
-   *   {  // New WebAuthn credentials
-   *     credentialId: rawId,
-   *     prfOutput: prfData,
-   *     rpId: 'ats.run',
-   *   }
+   *   { passphrase: 'my-current-passphrase' }  // Existing auth - used to unlock
    * );
    *
-   * console.log('Added passkey PRF:', result.enrollmentId);
+   * console.log('Added enrollment:', result.enrollmentId);
    * ```
+   *
+   * This method uses the stateless popup flow:
+   * 1. Unlocks with existing credentials to get Master Secret
+   * 2. Opens popup to collect new authentication method
+   * 3. Re-wraps Master Secret with new KEK from popup
+   * 4. Returns enrollment ID for the newly added method
    *
    * @see {@link getEnrollments} to list all enrolled methods
    * @see {@link removeEnrollment} to remove a method
    */
   async addEnrollment(
     userId: string,
-    method: 'passphrase' | 'passkey-prf' | 'passkey-gate',
-    credentials: AuthCredentials,
-    newCredentials: unknown
+    credentials: AuthCredentials
   ): Promise<SetupResult> {
     return this.sendRequest<SetupResult>('addEnrollment', {
       userId,
-      method,
       credentials,
-      newCredentials,
     });
   }
 

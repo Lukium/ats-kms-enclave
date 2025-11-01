@@ -272,24 +272,13 @@ export function validateSetupPasskeyGate(params: unknown): {
 
 export function validateAddEnrollment(params: unknown): {
   userId: string;
-  method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
   credentials: AuthCredentials;
-  newCredentials: unknown;
 } {
   const p = validateParamsObject('addEnrollment', params);
-  const method = validateString('addEnrollment', 'method', p.method);
-
-  // Validate method is one of the allowed values
-  if (method !== 'passphrase' && method !== 'passkey-prf' && method !== 'passkey-gate') {
-    throw new RPCValidationError('addEnrollment', 'method', 'passphrase | passkey-prf | passkey-gate', method);
-  }
 
   return {
     userId: validateString('addEnrollment', 'userId', p.userId),
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- Runtime validation above ensures this is safe
-    method: method as 'passphrase' | 'passkey-prf' | 'passkey-gate',
     credentials: validateAuthCredentials('addEnrollment', p.credentials),
-    newCredentials: p.newCredentials, // Pass through - discriminated union based on method
   };
 }
 

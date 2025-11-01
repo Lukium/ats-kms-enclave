@@ -552,11 +552,9 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
     const buttonLabel = hasAnyMethod ? 'Add' : 'Setup';
     html += '<div class="setup-choice">';
 
-    // KMS-only popup flow (Option A+) - secure flow
-    if (!hasAnyMethod) {
-      html += `<button id="setup-popup-kms-only-btn" class="operation-btn primary">🚀 ${buttonLabel} with Popup</button>`;
-      html += `<p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Secure flow: Parent never sees credentials or transport keys</p>`;
-    }
+    // Show button for both initial setup and adding enrollment
+    html += `<button id="setup-popup-btn" class="operation-btn primary">🚀 ${buttonLabel} Authentication Method</button>`;
+    html += `<p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Secure flow: Parent never sees credentials or transport keys</p>`;
 
     html += '</div>';
   } else {
@@ -572,14 +570,17 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
 
   // Add event listeners
   // Both initial setup and add enrollment use the same flow now
-  // The KMS client.ts handles multi-enrollment detection automatically
 
-  // KMS-only popup button (new secure flow)
-  if (!hasAnyMethod) {
-    document.getElementById('setup-popup-kms-only-btn')?.addEventListener('click', setupWithPopupKMSOnly);
+  // Setup/Add enrollment button (same handler for both)
+  if (!hasPassphrase || !hasPasskey) {
+    if (hasAnyMethod) {
+      // Adding enrollment - need to unlock first, then call addEnrollment
+      document.getElementById('setup-popup-btn')?.addEventListener('click', addEnrollmentWithPopup);
+    } else {
+      // Initial setup - call setupWithPopup
+      document.getElementById('setup-popup-btn')?.addEventListener('click', setupWithPopupKMSOnly);
+    }
   }
-
-  // Legacy flows removed - use setupWithPopupKMSOnly() instead
 }
 
 /**
@@ -637,6 +638,73 @@ async function setupWithPopupKMSOnly(): Promise<void> {
         <p>${error instanceof Error ? error.message : String(error)}</p>
       </div>
     `;
+  }
+}
+
+/**
+ * Add additional enrollment method using KMS-only popup flow.
+ *
+ * This function:
+ * 1. Prompts user to unlock with existing credentials
+ * 2. Calls addEnrollment() which opens popup for new auth method
+ * 3. KMS handles unlocking with existing creds, getting new creds via popup, and re-wrapping MS
+ */
+async function addEnrollmentWithPopup(): Promise<void> {
+  console.log('[Full Demo] Starting add enrollment with popup...');
+
+  try {
+    setupOperationEl.innerHTML = '<p class="loading">Unlock with existing credentials...</p>';
+
+    // Get enrollment methods to determine which credential type to request
+    const enrollments = await kmsUser.getEnrollments('demouser@ats.run');
+    const hasPassphrase = enrollments.methods.includes('passphrase');
+    const hasPasskey = enrollments.methods.some(m => m.startsWith('passkey'));
+
+    let credentials;
+
+    if (hasPassphrase) {
+      // Unlock with passphrase
+      const passphrase = prompt('Enter your current passphrase to unlock:');
+      if (!passphrase) {
+        setupOperationEl.innerHTML = '<div class="error-message">Cancelled</div>';
+        await checkSetupStatus();
+        return;
+      }
+      credentials = {
+        method: 'passphrase' as const,
+        userId: 'demouser@ats.run',
+        passphrase,
+      };
+    } else if (hasPasskey) {
+      // Unlock with passkey-gate (simplest for demo)
+      setupOperationEl.innerHTML = '<p class="loading">Unlock with your passkey...</p>';
+      credentials = {
+        method: 'passkey-gate' as const,
+        userId: 'demouser@ats.run',
+      };
+    } else {
+      throw new Error('No existing enrollment found');
+    }
+
+    setupOperationEl.innerHTML = '<p class="loading">Opening popup for new authentication method...</p>';
+
+    // Call addEnrollment - everything else is handled by iframe and popup
+    const result = await kmsUser.addEnrollment('demouser@ats.run', credentials);
+
+    console.log('[Full Demo] Add enrollment complete!', result);
+
+    // Reload the page to show updated interface
+    window.location.reload();
+  } catch (error) {
+    console.error('[Full Demo] Add enrollment failed:', error);
+    setupOperationEl.innerHTML = `
+      <div class="error-message">
+        <p>❌ <strong>Add enrollment failed</strong></p>
+        <p>${error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    `;
+    // Restore the UI after error
+    setTimeout(() => void checkSetupStatus(), 3000);
   }
 }
 

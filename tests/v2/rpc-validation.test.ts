@@ -286,83 +286,59 @@ describe('validateSetupPasskeyGate', () => {
 
 describe('validateAddEnrollment', () => {
   describe('valid inputs', () => {
-    it('should validate passphrase enrollment', () => {
+    it('should validate passphrase unlock credentials', () => {
       const result = validateAddEnrollment({
         userId: 'user123',
-        method: 'passphrase',
         credentials: {
           method: 'passphrase',
           userId: 'user123',
           passphrase: 'current-pass',
         },
-        newCredentials: {
-          passphrase: 'new-pass',
-        },
       });
-      expect(result.method).toBe('passphrase');
+      expect(result.userId).toBe('user123');
       expect(result.credentials.method).toBe('passphrase');
     });
 
-    it('should validate passkey-prf enrollment', () => {
+    it('should validate passkey-prf unlock credentials', () => {
       const result = validateAddEnrollment({
         userId: 'user123',
-        method: 'passkey-prf',
         credentials: {
           method: 'passkey-prf',
           userId: 'user123',
           prfOutput: new ArrayBuffer(32),
         },
-        newCredentials: {
-          credentialId: new ArrayBuffer(16),
-          prfOutput: new ArrayBuffer(32),
-        },
       });
-      expect(result.method).toBe('passkey-prf');
+      expect(result.userId).toBe('user123');
+      expect(result.credentials.method).toBe('passkey-prf');
     });
 
-    it('should validate passkey-gate enrollment', () => {
+    it('should validate passkey-gate unlock credentials', () => {
       const result = validateAddEnrollment({
         userId: 'user123',
-        method: 'passkey-gate',
         credentials: {
           method: 'passkey-gate',
           userId: 'user123',
         },
-        newCredentials: {
-          credentialId: new ArrayBuffer(16),
-        },
       });
-      expect(result.method).toBe('passkey-gate');
+      expect(result.userId).toBe('user123');
+      expect(result.credentials.method).toBe('passkey-gate');
     });
   });
 
   describe('invalid inputs', () => {
-    it('should reject invalid method value', () => {
+    it('should reject missing credentials', () => {
       expect(() =>
         validateAddEnrollment({
           userId: 'user123',
-          method: 'invalid-method',
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'pass',
-          },
-          newCredentials: {},
         })
       ).toThrow(RPCValidationError);
     });
 
-    it('should reject non-string method', () => {
+    it('should reject invalid credentials object', () => {
       expect(() =>
         validateAddEnrollment({
           userId: 'user123',
-          method: 123,
-          credentials: {
-            method: 'passphrase',
-            userId: 'user123',
-            passphrase: 'pass',
-          },
-          newCredentials: {},
+          credentials: 'not-an-object',
         })
       ).toThrow(RPCValidationError);
     });

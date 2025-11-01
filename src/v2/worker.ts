@@ -1382,9 +1382,9 @@ async function handleAddEnrollmentWithPopup(
 
   // Step 6: Setup new enrollment with existing MS based on new credential type
   // Wrap in try/finally to ensure MS copy is always zeroized (defense-in-depth)
+  const method = newCredentialsEncrypted.method;
   try {
     console.log('[Worker] Step 6: Rewrapping MS with new credentials...');
-    const method = newCredentialsEncrypted.method;
     let enrollmentResult;
 
     if (method === 'passphrase') {

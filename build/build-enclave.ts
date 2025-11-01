@@ -267,6 +267,11 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
+.kms-auth-option form {
+  margin: 0;
+  padding: 0;
+}
+
 .kms-auth-btn {
   width: 100%;
   padding: 1rem;
@@ -595,18 +600,22 @@ function generateEnclaveHTML(workerHash: string): void {
 
         <!-- Passphrase Option -->
         <div class="kms-auth-option">
-          <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
-          <input
-            type="password"
-            id="kms-passphrase-input"
-            class="kms-input"
-            placeholder="Enter your passphrase"
-            autocomplete="off"
-          />
-          <button id="kms-passphrase-btn" class="kms-auth-btn kms-secondary">
-            <span class="kms-auth-icon">🔐</span>
-            <span class="kms-auth-label">Unlock with Passphrase</span>
-          </button>
+          <form id="kms-unlock-form" onsubmit="return false;">
+            <input type="text" name="username" autocomplete="username" style="display:none" value="kms-user" readonly />
+            <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
+            <input
+              type="password"
+              id="kms-passphrase-input"
+              name="password"
+              class="kms-input"
+              placeholder="Enter your passphrase"
+              autocomplete="current-password"
+            />
+            <button id="kms-passphrase-btn" type="button" class="kms-auth-btn kms-secondary">
+              <span class="kms-auth-icon">🔐</span>
+              <span class="kms-auth-label">Unlock with Passphrase</span>
+            </button>
+          </form>
         </div>
 
         <!-- Error Display -->
@@ -647,32 +656,37 @@ function generateEnclaveHTML(workerHash: string): void {
 
         <!-- Passphrase Setup Option -->
         <div class="kms-auth-option">
-          <label for="kms-setup-passphrase-input" class="kms-input-label">Create Passphrase</label>
-          <input
-            type="password"
-            id="kms-setup-passphrase-input"
-            class="kms-input"
-            placeholder="Enter a strong passphrase (min 12 chars)"
-            autocomplete="off"
-          />
-          <div id="kms-passphrase-char-count" class="kms-char-count">
-            0 / 12 characters
-          </div>
-          <label for="kms-setup-passphrase-confirm-input" class="kms-input-label">Confirm Passphrase</label>
-          <input
-            type="password"
-            id="kms-setup-passphrase-confirm-input"
-            class="kms-input"
-            placeholder="Re-enter your passphrase"
-            autocomplete="off"
-          />
-          <div id="kms-passphrase-match-feedback" class="kms-match-feedback hidden">
-            <!-- Feedback will be inserted here dynamically -->
-          </div>
-          <button id="kms-setup-passphrase-btn" class="kms-auth-btn kms-secondary">
-            <span class="kms-auth-icon">🔐</span>
-            <span class="kms-auth-label">Setup with Passphrase</span>
-          </button>
+          <form id="kms-setup-form" onsubmit="return false;">
+            <input type="text" name="username" autocomplete="username" style="display:none" value="kms-user" readonly />
+            <label for="kms-setup-passphrase-input" class="kms-input-label">Create Passphrase</label>
+            <input
+              type="password"
+              id="kms-setup-passphrase-input"
+              name="new-password"
+              class="kms-input"
+              placeholder="Enter a strong passphrase (min 12 chars)"
+              autocomplete="new-password"
+            />
+            <div id="kms-passphrase-char-count" class="kms-char-count">
+              0 / 12 characters
+            </div>
+            <label for="kms-setup-passphrase-confirm-input" class="kms-input-label">Confirm Passphrase</label>
+            <input
+              type="password"
+              id="kms-setup-passphrase-confirm-input"
+              name="new-password"
+              class="kms-input"
+              placeholder="Re-enter your passphrase"
+              autocomplete="new-password"
+            />
+            <div id="kms-passphrase-match-feedback" class="kms-match-feedback hidden">
+              <!-- Feedback will be inserted here dynamically -->
+            </div>
+            <button id="kms-setup-passphrase-btn" type="button" class="kms-auth-btn kms-secondary">
+              <span class="kms-auth-icon">🔐</span>
+              <span class="kms-auth-label">Setup with Passphrase</span>
+            </button>
+          </form>
         </div>
 
         <!-- Error Display -->

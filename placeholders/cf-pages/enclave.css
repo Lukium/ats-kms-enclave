@@ -150,6 +150,11 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
+.kms-auth-option form {
+  margin: 0;
+  padding: 0;
+}
+
 .kms-auth-btn {
   width: 100%;
   padding: 1rem;

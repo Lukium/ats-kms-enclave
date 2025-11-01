@@ -603,6 +603,175 @@ describe('authentication interception', () => {
 });
 
 // ============================================================================
+// Setup With Popup Flow Tests
+// ============================================================================
+
+describe('setupWithPopup flow', () => {
+  let env: ReturnType<typeof setupTestEnvironment>;
+  let client: KMSClient;
+
+  beforeEach(async () => {
+    env = setupTestEnvironment();
+    client = new KMSClient({
+      parentOrigin: 'https://allthe.services',
+    });
+    await client.init();
+    env.mockParent.clearMessages();
+  });
+
+  afterEach(async () => {
+    await client.terminate();
+    env.cleanup();
+  });
+
+  it('should handle worker:setup-with-popup message and request parent to open popup', () => {
+    const setupMessage = {
+      type: 'worker:setup-with-popup',
+      requestId: 'test-request-123',
+      userId: 'test@example.com',
+      popupURL: 'https://kms.ats.run/?mode=setup',
+      transportKey: 'test-transport-key',
+      transportKeyId: 'test-key-id',
+      appSalt: 'test-app-salt',
+      hkdfSalt: 'test-hkdf-salt',
+    };
+
+    const worker = env.getMockWorker();
+    worker!.simulateMessage(setupMessage);
+
+    // Should send kms:request-popup to parent
+    const lastMessage = env.mockParent.getLastMessage();
+    expect(lastMessage).toBeDefined();
+    expect(lastMessage.data).toMatchObject({
+      type: 'kms:request-popup',
+      requestId: 'test-request-123',
+    });
+    expect(lastMessage.data.url).toContain('https://kms.ats.run/?mode=setup');
+    expect(lastMessage.data.url).toContain('parentOrigin=');
+  });
+
+  it('should add parentOrigin to popup URL', () => {
+    const setupMessage = {
+      type: 'worker:setup-with-popup',
+      requestId: 'test-request-123',
+      userId: 'test@example.com',
+      popupURL: 'https://kms.ats.run/?mode=setup',
+      transportKey: 'test-transport-key',
+      transportKeyId: 'test-key-id',
+      appSalt: 'test-app-salt',
+      hkdfSalt: 'test-hkdf-salt',
+    };
+
+    const worker = env.getMockWorker();
+    worker!.simulateMessage(setupMessage);
+
+    const lastMessage = env.mockParent.getLastMessage();
+    const popupURL = new URL(lastMessage.data.url);
+    expect(popupURL.searchParams.get('parentOrigin')).toBe('https://allthe.services');
+  });
+
+  it('should send worker:popup-error if parent window not available', () => {
+    // Mock window.parent to be same as window (not in iframe)
+    Object.defineProperty(window, 'parent', {
+      writable: true,
+      configurable: true,
+      value: window,
+    });
+
+    const setupMessage = {
+      type: 'worker:setup-with-popup',
+      requestId: 'test-request-123',
+      userId: 'test@example.com',
+      popupURL: 'https://kms.ats.run/?mode=setup',
+      transportKey: 'test-transport-key',
+      transportKeyId: 'test-key-id',
+      appSalt: 'test-app-salt',
+      hkdfSalt: 'test-hkdf-salt',
+    };
+
+    const worker = env.getMockWorker();
+    const workerPostSpy = vi.spyOn(worker!, 'postMessage');
+    worker!.simulateMessage(setupMessage);
+
+    // Should send error back to worker
+    const errorMessage = workerPostSpy.mock.calls.find(
+      call => call[0]?.type === 'worker:popup-error'
+    );
+    expect(errorMessage).toBeDefined();
+    expect(errorMessage![0]).toMatchObject({
+      type: 'worker:popup-error',
+      requestId: 'test-request-123',
+      reason: expect.stringContaining('parent window'),
+    });
+
+    workerPostSpy.mockRestore();
+  });
+
+  it('should send worker:popup-error if parentOrigin not configured', async () => {
+    // Create client without parentOrigin
+    await client.terminate();
+    const clientWithoutOrigin = new KMSClient({
+      parentOrigin: '',
+    });
+    await clientWithoutOrigin.init();
+
+    const setupMessage = {
+      type: 'worker:setup-with-popup',
+      requestId: 'test-request-123',
+      userId: 'test@example.com',
+      popupURL: 'https://kms.ats.run/?mode=setup',
+      transportKey: 'test-transport-key',
+      transportKeyId: 'test-key-id',
+      appSalt: 'test-app-salt',
+      hkdfSalt: 'test-hkdf-salt',
+    };
+
+    const worker = env.getMockWorker();
+    const workerPostSpy = vi.spyOn(worker!, 'postMessage');
+    worker!.simulateMessage(setupMessage);
+
+    // Should send error back to worker
+    const errorMessage = workerPostSpy.mock.calls.find(
+      call => call[0]?.type === 'worker:popup-error'
+    );
+    expect(errorMessage).toBeDefined();
+    expect(errorMessage![0]).toMatchObject({
+      type: 'worker:popup-error',
+      requestId: 'test-request-123',
+      reason: expect.stringContaining('origin'),
+    });
+
+    workerPostSpy.mockRestore();
+    await clientWithoutOrigin.terminate();
+  });
+
+  it('should not send transport params in popup URL', () => {
+    const setupMessage = {
+      type: 'worker:setup-with-popup',
+      requestId: 'test-request-123',
+      userId: 'test@example.com',
+      popupURL: 'https://kms.ats.run/?mode=setup',
+      transportKey: 'test-transport-key',
+      transportKeyId: 'test-key-id',
+      appSalt: 'test-app-salt',
+      hkdfSalt: 'test-hkdf-salt',
+    };
+
+    const worker = env.getMockWorker();
+    worker!.simulateMessage(setupMessage);
+
+    // Check popup URL doesn't contain sensitive params
+    const lastMessage = env.mockParent.getLastMessage();
+    const popupURL = new URL(lastMessage.data.url);
+
+    expect(popupURL.searchParams.has('transportKey')).toBe(false);
+    expect(popupURL.searchParams.has('transportKeyId')).toBe(false);
+    expect(popupURL.searchParams.has('appSalt')).toBe(false);
+    expect(popupURL.searchParams.has('hkdfSalt')).toBe(false);
+  });
+});
+
+// ============================================================================
 // Integration Tests
 // ============================================================================
 

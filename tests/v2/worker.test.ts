@@ -1450,6 +1450,127 @@ describe('removeEnrollment', () => {
 // Integration Tests
 // ============================================================================
 
+describe('setupWithPopup', () => {
+  it('should initiate popup setup flow and send worker:setup-with-popup message', async () => {
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+
+    // Spy on self.postMessage to intercept worker→client messages
+    const postMessageSpy = vi.spyOn(self, 'postMessage');
+
+    // Start the setup (don't await - it will timeout waiting for credentials)
+    const responsePromise = handleMessage(request);
+
+    // Wait a bit for the worker to send the setup-with-popup message
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Verify worker sent setup-with-popup message to client
+    const setupMessage = postMessageSpy.mock.calls.find(
+      call => call[0]?.type === 'worker:setup-with-popup'
+    );
+
+    expect(setupMessage).toBeDefined();
+    expect(setupMessage![0]).toMatchObject({
+      type: 'worker:setup-with-popup',
+      requestId: request.id,
+      userId: 'test@example.com',
+      popupURL: expect.stringContaining('https://kms.ats.run/?mode=setup'),
+    });
+
+    // Verify transport params are included
+    expect(setupMessage![0]).toHaveProperty('transportKey');
+    expect(setupMessage![0]).toHaveProperty('transportKeyId');
+    expect(setupMessage![0]).toHaveProperty('appSalt');
+    expect(setupMessage![0]).toHaveProperty('hkdfSalt');
+
+    // Verify popup URL does NOT contain sensitive params
+    const popupURL = new URL(setupMessage![0].popupURL);
+    expect(popupURL.searchParams.has('transportKey')).toBe(false);
+    expect(popupURL.searchParams.has('keyId')).toBe(false);
+    expect(popupURL.searchParams.has('appSalt')).toBe(false);
+    expect(popupURL.searchParams.has('hkdfSalt')).toBe(false);
+
+    // Send error to clean up the pending request
+    const messageEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-error',
+        requestId: request.id,
+        reason: 'Test cleanup'
+      }
+    });
+    self.dispatchEvent(messageEvent);
+
+    // Wait for error response
+    const response = await responsePromise;
+    expect(response.error).toBeDefined();
+
+    postMessageSpy.mockRestore();
+  });
+
+  it('should reject if popup credentials not received', async () => {
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+
+    // Spy on self.postMessage to intercept worker→client messages
+    const postMessageSpy = vi.spyOn(self, 'postMessage');
+
+    // Start the setup
+    const responsePromise = handleMessage(request);
+
+    // Wait for worker to send setup-with-popup message
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Verify worker sent setup-with-popup message to client
+    const setupMessage = postMessageSpy.mock.calls.find(
+      call => call[0]?.type === 'worker:setup-with-popup'
+    );
+    expect(setupMessage).toBeDefined();
+
+    // Note: The full encryption/decryption flow is tested in integration tests
+    // Here we just test the message flow, so we send an error response
+    const errorEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-error',
+        requestId: request.id,
+        reason: 'Test - not testing full encryption in unit tests',
+      }
+    });
+    self.dispatchEvent(errorEvent);
+
+    // Wait for response
+    const response = await responsePromise;
+
+    expect(response.error).toBeDefined();
+    expect(response.error).toContain('Test - not testing full encryption in unit tests');
+
+    postMessageSpy.mockRestore();
+  });
+
+  it('should handle popup error gracefully', async () => {
+    const request = createRequest('setupWithPopup', { userId: 'test@example.com' });
+
+    // Start the setup
+    const responsePromise = handleMessage(request);
+
+    // Wait for worker to send setup-with-popup message
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Simulate client sending error
+    const errorEvent = new MessageEvent('message', {
+      data: {
+        type: 'worker:popup-error',
+        requestId: request.id,
+        reason: 'User closed popup',
+      }
+    });
+    self.dispatchEvent(errorEvent);
+
+    // Wait for response
+    const response = await responsePromise;
+
+    expect(response.error).toBeDefined();
+    expect(response.error).toContain('User closed popup');
+  });
+});
+
 describe('worker integration', () => {
   it('should handle complete VAPID flow', async () => {
     const passphrase = 'integration-test-passphrase-123';

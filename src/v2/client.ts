@@ -255,6 +255,12 @@ export class KMSClient {
       return;
     }
 
+    if (eventData?.type === 'kms:popup-ready') {
+      // Popup is ready - this is handled in handleSetupWithPopup's promise
+      // No need to forward, the promise listener will catch it
+      return;
+    }
+
     // Validate client is initialized
     if (!this.isInitialized || !this.worker) {
       console.error('[KMS Client] Received message before initialization');

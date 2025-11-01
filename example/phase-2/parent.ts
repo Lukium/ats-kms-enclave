@@ -144,12 +144,91 @@ async function initKMS(): Promise<StatusResult> {
 }
 
 /**
+ * Handle KMS popup request (Option A+ flow)
+ *
+ * In the KMS-only popup flow, the iframe KMS requests that the parent
+ * open a popup window. Parent acts as a simple window opener and nothing more.
+ */
+function handlePopupRequest(event: MessageEvent): void {
+  // Validate origin (should be from KMS iframe)
+  if (event.origin !== KMS_ORIGIN) {
+    console.warn('[Full Demo] Ignored popup request from invalid origin:', event.origin);
+    return;
+  }
+
+  if (event.data?.type === 'kms:request-popup') {
+    const url = event.data.url as string;
+    const requestId = event.data.requestId as string;
+
+    console.log('[Full Demo] Received popup request:', { url, requestId });
+
+    try {
+      // Open popup window
+      const popup = window.open(
+        url,
+        'kms-setup',
+        'width=600,height=700,menubar=no,toolbar=no,location=no,status=no,resizable,scrollbars'
+      );
+
+      if (!popup) {
+        // Popup was blocked
+        console.warn('[Full Demo] Popup was blocked by browser');
+        // Send message back to iframe (source of the request)
+        if (event.source && event.source instanceof Window) {
+          event.source.postMessage(
+            {
+              type: 'kms:popup-blocked',
+              requestId,
+              reason: 'Popup blocked by browser'
+            },
+            KMS_ORIGIN
+          );
+        }
+        return;
+      }
+
+      // Popup opened successfully
+      console.log('[Full Demo] Popup opened successfully');
+      // Send message back to iframe (source of the request)
+      if (event.source && event.source instanceof Window) {
+        event.source.postMessage(
+          {
+            type: 'kms:popup-opened',
+            requestId
+          },
+          KMS_ORIGIN
+        );
+      }
+    } catch (error) {
+      console.error('[Full Demo] Failed to open popup:', error);
+      // Send error back to iframe
+      if (event.source && event.source instanceof Window) {
+        event.source.postMessage(
+          {
+            type: 'kms:popup-blocked',
+            requestId,
+            reason: error instanceof Error ? error.message : 'Unknown error'
+          },
+          KMS_ORIGIN
+        );
+      }
+    }
+  }
+}
+
+/**
  * Handle setup completion message from KMS setup window
  */
 async function handleSetupComplete(event: MessageEvent): Promise<void> {
   // Validate origin (should be from KMS)
   if (event.origin !== KMS_ORIGIN) {
     console.warn('[Full Demo] Ignored message from invalid origin:', event.origin);
+    return;
+  }
+
+  // Handle popup request (Option A+ flow)
+  if (event.data?.type === 'kms:request-popup') {
+    handlePopupRequest(event);
     return;
   }
 

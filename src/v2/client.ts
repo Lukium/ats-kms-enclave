@@ -312,6 +312,20 @@ export class KMSClient {
     try {
       const data = event.data as RPCResponse | { type: string; [key: string]: unknown };
 
+      // Intercept setup-with-popup request from worker
+      if ('type' in data && data.type === 'worker:setup-with-popup') {
+        void this.handleSetupWithPopup({
+          requestId: data.requestId as string,
+          userId: data.userId as string,
+          popupURL: data.popupURL as string,
+          transportKey: data.transportKey as string,
+          transportKeyId: data.transportKeyId as string,
+          appSalt: data.appSalt as string,
+          hkdfSalt: data.hkdfSalt as string,
+        });
+        return;
+      }
+
       // Intercept popup request from worker
       if ('type' in data && data.type === 'worker:request-popup-from-parent') {
         this.handleWorkerPopupRequest(
@@ -376,6 +390,158 @@ export class KMSClient {
       this.worker?.postMessage({
         type: 'worker:popup-blocked',
         requestId,
+        reason: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Orchestrate complete popup setup flow.
+   *
+   * This method handles the entire popup flow for KMS-only credential collection:
+   * 1. Request parent to open popup window
+   * 2. Wait for popup ready signal (kms:popup-ready)
+   * 3. Establish MessageChannel with popup
+   * 4. Send transport parameters to popup via MessagePort
+   * 5. Receive encrypted credentials from popup
+   * 6. Send credentials back to worker for processing
+   *
+   * @param params - Setup parameters from worker
+   */
+  private async handleSetupWithPopup(params: {
+    requestId: string;
+    userId: string;
+    popupURL: string;
+    transportKey: string;
+    transportKeyId: string;
+    appSalt: string;
+    hkdfSalt: string;
+  }): Promise<void> {
+    try {
+      // Step 1: Request parent to open popup
+      if (!this.parentOrigin) {
+        throw new Error('Parent origin not configured');
+      }
+
+      const targetWindow = window.parent && window.parent !== window ? window.parent : null;
+      if (!targetWindow) {
+        throw new Error('No parent window available');
+      }
+
+      // Ask parent to open popup
+      targetWindow.postMessage(
+        {
+          type: 'kms:request-popup',
+          url: params.popupURL,
+          requestId: params.requestId,
+        },
+        this.parentOrigin
+      );
+
+      // Step 2: Wait for popup ready signal and capture popup window reference
+      // The popup will send 'kms:popup-ready' and we'll get its window reference
+      const popupWindowPromise = new Promise<Window>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Popup ready timeout'));
+        }, 30000); // 30 second timeout
+
+        const handlePopupReady = (event: MessageEvent): void => {
+          // Popup is same-origin (kms.ats.run), so we can receive direct messages
+          const data = event.data as { type?: string };
+          if (data?.type === 'kms:popup-ready' && event.source) {
+            clearTimeout(timeout);
+            window.removeEventListener('message', handlePopupReady);
+            resolve(event.source as Window);
+          }
+        };
+
+        window.addEventListener('message', handlePopupReady);
+      });
+
+      const popupWindow = await popupWindowPromise;
+
+      // Step 3: Establish MessageChannel with popup
+      const channel = new MessageChannel();
+      const port1 = channel.port1;
+      const port2 = channel.port2;
+
+      // Step 4: Send transport parameters to popup via MessagePort
+      // Wait for popup to receive the channel and respond
+      const credentialsPromise = new Promise<{
+        method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+        transportKeyId: string;
+        userId: string;
+        ephemeralPublicKey: string;
+        iv: string;
+        encryptedCredentials: string;
+      }>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Credentials timeout'));
+        }, 300000); // 5 minute timeout for user to enter credentials
+
+        port1.onmessage = (event: MessageEvent): void => {
+          const data = event.data as {
+            type?: string;
+            method?: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+            transportKeyId?: string;
+            userId?: string;
+            ephemeralPublicKey?: string;
+            iv?: string;
+            encryptedCredentials?: string;
+            reason?: string;
+          };
+
+          if (data?.type === 'popup:credentials') {
+            clearTimeout(timeout);
+            port1.close();
+            resolve({
+              method: data.method as 'passphrase' | 'passkey-prf' | 'passkey-gate',
+              transportKeyId: data.transportKeyId as string,
+              userId: data.userId as string,
+              ephemeralPublicKey: data.ephemeralPublicKey as string,
+              iv: data.iv as string,
+              encryptedCredentials: data.encryptedCredentials as string,
+            });
+          } else if (data?.type === 'popup:error') {
+            clearTimeout(timeout);
+            port1.close();
+            reject(new Error(data.reason || 'Popup error'));
+          } else if (data?.type === 'popup:connected') {
+            // Popup acknowledged connection, waiting for credentials
+            /* eslint-disable-next-line no-console */
+            console.log('[KMS Client] Popup connected, waiting for credentials...');
+          }
+        };
+      });
+
+      // Send connection message with transport params to popup
+      popupWindow.postMessage(
+        {
+          type: 'kms:connect',
+          transportKey: params.transportKey,
+          transportKeyId: params.transportKeyId,
+          appSalt: params.appSalt,
+          hkdfSalt: params.hkdfSalt,
+          userId: params.userId,
+        },
+        window.origin,
+        [port2] // Transfer port2 to popup
+      );
+
+      // Step 5: Wait for encrypted credentials from popup
+      const credentials = await credentialsPromise;
+
+      // Step 6: Send credentials back to worker
+      this.worker?.postMessage({
+        type: 'worker:popup-credentials',
+        requestId: params.requestId,
+        credentials,
+      });
+    } catch (err: unknown) {
+      console.error('[KMS Client] Setup with popup failed:', err);
+      this.worker?.postMessage({
+        type: 'worker:popup-error',
+        requestId: params.requestId,
         reason: err instanceof Error ? err.message : 'Unknown error',
       });
     }
@@ -1254,8 +1420,28 @@ export class KMSClient {
         // Step 5: Encrypt credentials
         const encrypted = await this.encryptCredentials(credentials, this.transportPublicKey!);
 
-        // Step 6: Send to parent with detected method
-        if (window.opener) {
+        // Step 6: Send credentials via MessagePort (KMS-only flow) or window.opener (legacy)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+        const credentialPort = (this as any).credentialPort as MessagePort | undefined;
+
+        if (credentialPort) {
+          // KMS-only popup flow: send via MessagePort to iframe
+          console.log('[KMS Client] Sending credentials via MessagePort to iframe');
+          credentialPort.postMessage({
+            type: 'popup:credentials',
+            method: detectedMethod,
+            transportKeyId: this.transportKeyId,
+            userId,
+            ...encrypted,
+          });
+
+          // Show success and close
+          this.hideSetupLoading();
+          this.showSetupSuccess();
+          setTimeout(() => window.close(), 2000);
+        } else if (window.opener) {
+          // Legacy stateless popup flow: send via window.opener to parent
+          console.log('[KMS Client] Sending credentials via window.opener to parent');
           (window.opener as Window).postMessage(
             {
               type: 'kms:setup-credentials',
@@ -1486,42 +1672,49 @@ export class KMSClient {
 
         /* c8 ignore start - stateless popup mode requires browser integration testing */
         /* eslint-disable no-console */
-        console.log('[KMS Client] Credentials encrypted, preparing to send to parent via MessagePort');
+        console.log('[KMS Client] Credentials encrypted, preparing to send');
 
-        // Verify MessagePort is established
-        if (!this.messagePort) {
-          console.error('[KMS Client] MessagePort not established - cannot send credentials');
-          this.hideSetupLoading();
-          this.showSetupError('Communication channel not ready. Please try again.');
-          return;
-        }
+        // Check for MessagePort (KMS-only flow) or window.opener (legacy flow)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+        const credentialPort = (this as any).credentialPort as MessagePort | undefined;
 
-        // Prepare credentials payload
-        const payload = {
-          type: 'kms:setup-credentials',
-          payload: {
+        if (credentialPort) {
+          // KMS-only popup flow: send via MessagePort to iframe
+          console.log('[KMS Client] Sending credentials via MessagePort to iframe');
+          credentialPort.postMessage({
+            type: 'popup:credentials',
             method: 'passphrase',
             transportKeyId: this.transportKeyId,
             userId,
             ...encrypted,
-          }
-        };
+          });
 
-        // Send via MessagePort
-        try {
-          console.log('[KMS Client] Sending encrypted credentials via MessagePort');
-          this.messagePort.postMessage(payload);
-          console.log('[KMS Client] ✅ Credentials sent successfully via MessagePort');
-
-          // Show success and close popup after delay
+          // Show success and close
           this.hideSetupLoading();
           this.showSetupSuccess();
-          console.log('[KMS Client] Closing popup in 2 seconds...');
           setTimeout(() => window.close(), 2000);
-        } catch (err) {
-          console.error('[KMS Client] Failed to send via MessagePort:', err);
+        } else if (window.opener) {
+          // Legacy stateless popup flow: send via window.opener to parent
+          console.log('[KMS Client] Sending credentials via window.opener to parent');
+          (window.opener as Window).postMessage(
+            {
+              type: 'kms:setup-credentials',
+              method: 'passphrase',
+              transportKeyId: this.transportKeyId,
+              userId,
+              ...encrypted,
+            },
+            this.parentOrigin
+          );
+
+          // Show success and close
           this.hideSetupLoading();
-          this.showSetupError('Failed to send credentials. Please try again.');
+          this.showSetupSuccess();
+          setTimeout(() => window.close(), 2000);
+        } else {
+          console.error('[KMS Client] No communication channel available');
+          this.hideSetupLoading();
+          this.showSetupError('Communication channel not ready. Please try again.');
         }
         /* eslint-enable no-console */
         return;
@@ -1774,16 +1967,82 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       console.error('[KMS Client] Auto-initialization failed:', err);
     });
 
-    // If standalone setup window, show setup modal immediately
+    // If standalone setup window, handle two flows:
+    // 1. Stateless popup (legacy): transport params in URL
+    // 2. KMS-only popup (new): receives transport params via MessageChannel
     if (isStandaloneSetup) {
-      // Wait a bit for client to fully initialize
-      setTimeout(() => {
-        client.setupSetupModalHandlers();
-        const setupModal = document.getElementById('setup-modal');
-        if (setupModal) {
-          setupModal.classList.remove('hidden');
+      const hasTransportParams = params.has('transportKey') && params.has('keyId');
+
+      if (!hasTransportParams) {
+        // KMS-only popup flow: no transport params in URL
+        // Signal ready to iframe and wait for MessageChannel
+        /* eslint-disable-next-line no-console */
+        console.log('[KMS Client] Popup in KMS-only mode, signaling ready to iframe...');
+
+        // Send ready signal to iframe (same origin: kms.ats.run)
+        if (window.opener) {
+          /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+          window.opener.postMessage(
+            { type: 'kms:popup-ready' },
+            window.location.origin
+          );
+          /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
         }
-      }, 100);
+
+        // Listen for kms:connect message with MessagePort
+        window.addEventListener('message', (event: MessageEvent) => {
+          if (event.origin !== window.location.origin) return;
+
+          const data = event.data as {
+            type?: string;
+            transportKey?: string;
+            transportKeyId?: string;
+            appSalt?: string;
+            hkdfSalt?: string;
+            userId?: string;
+          };
+
+          if (data?.type === 'kms:connect' && event.ports && event.ports[0]) {
+            /* eslint-disable no-console */
+            console.log('[KMS Client] Popup received kms:connect with MessagePort');
+            /* eslint-enable no-console */
+
+            // Store transport params and port for credential sending
+            // Using type assertion to access private properties in auto-init code
+            /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
+            (client as any).transportPublicKey = data.transportKey!;
+            (client as any).transportKeyId = data.transportKeyId!;
+            (client as any).appSalt = data.appSalt!;
+            (client as any).hkdfSalt = data.hkdfSalt!;
+            (client as any).isStatelessPopup = true;
+
+            // Store the MessagePort for sending credentials later
+            (client as any).credentialPort = event.ports[0];
+
+            // Confirm connection
+            event.ports[0].postMessage({ type: 'popup:connected' });
+            /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
+
+            // Show setup modal
+            setTimeout(() => {
+              client.setupSetupModalHandlers();
+              const setupModal = document.getElementById('setup-modal');
+              if (setupModal) {
+                setupModal.classList.remove('hidden');
+              }
+            }, 100);
+          }
+        });
+      } else {
+        // Legacy stateless popup flow: transport params in URL
+        setTimeout(() => {
+          client.setupSetupModalHandlers();
+          const setupModal = document.getElementById('setup-modal');
+          if (setupModal) {
+            setupModal.classList.remove('hidden');
+          }
+        }, 100);
+      }
     }
   };
 

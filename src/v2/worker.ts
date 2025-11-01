@@ -1030,12 +1030,13 @@ async function handleAddEnrollment(
   // Unlock ONCE to verify credentials, ensure audit key, and get MS
   // (Similar pattern to createLease - do everything in a single withUnlock call)
   console.log('[Worker] Step 1: Unlocking with credentials to get MS...');
-  const ms = await withUnlock(credentials, async (_mkek, masterSecret) => {
+  const unlockResult = await withUnlock(credentials, async (_mkek, masterSecret) => {
     // Ensure audit key is loaded (required for multi-enrollment)
     await ensureAuditKey(_mkek);
     // Return the MS for use outside withUnlock
     return masterSecret as Uint8Array;
   });
+  const ms = unlockResult.result;
   console.log('[Worker] Step 1: MS obtained and audit key ensured ✓');
 
   // Step 2: Generate transport key (stays in iframe, never sent to parent)
@@ -1368,12 +1369,13 @@ async function handleAddEnrollmentWithPopup(
 
   // Step 5: Unlock with existing credentials to get MS
   console.log('[Worker] Step 5: Unlocking with existing credentials to get MS...');
-  const ms = await withUnlock(unlockCredentials, async (_mkek, masterSecret) => {
+  const unlockResult = await withUnlock(unlockCredentials, async (_mkek, masterSecret) => {
     // Ensure audit key is loaded (required for multi-enrollment)
     await ensureAuditKey(_mkek);
     // Return the MS for use outside withUnlock
     return masterSecret as Uint8Array;
   });
+  const ms = unlockResult.result;
   console.log('[Worker] Step 5: MS obtained and audit key ensured ✓');
 
   // Step 6: Setup new enrollment with existing MS based on new credential type

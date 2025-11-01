@@ -493,14 +493,22 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
     const buttonLabel = hasAnyMethod ? 'Add' : 'Setup';
     html += '<div class="setup-choice">';
 
+    // KMS-only popup flow (Option A+) - new secure flow
+    if (!hasAnyMethod) {
+      html += `<button id="setup-popup-kms-only-btn" class="operation-btn primary">🚀 ${buttonLabel} with Popup (KMS-only)</button>`;
+      html += `<p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Secure flow: Parent never sees credentials or transport keys</p>`;
+      html += `<hr style="margin: 1rem 0; border: none; border-top: 1px solid #e2e8f0;">`;
+      html += `<p style="font-size: 0.85em; color: #718096; margin-bottom: 0.5rem;">Legacy flows (for testing):</p>`;
+    }
+
     if (canAddPassphrase) {
       const btnId = hasAnyMethod ? 'add-passphrase-btn' : 'setup-passphrase-btn';
-      html += `<button id="${btnId}" class="operation-btn">🔐 ${buttonLabel} Passphrase</button>`;
+      html += `<button id="${btnId}" class="operation-btn">🔐 ${buttonLabel} Passphrase (Legacy)</button>`;
     }
 
     if (canAddWebAuthn) {
       const btnId = hasAnyMethod ? 'add-webauthn-btn' : 'setup-webauthn-btn';
-      html += `<button id="${btnId}" class="operation-btn">🔑 ${buttonLabel} WebAuthn</button>`;
+      html += `<button id="${btnId}" class="operation-btn">🔑 ${buttonLabel} WebAuthn (Legacy)</button>`;
     }
 
     html += '</div>';
@@ -518,6 +526,13 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
   // Add event listeners
   // Both initial setup and add enrollment use the same flow now
   // The KMS client.ts handles multi-enrollment detection automatically
+
+  // KMS-only popup button (new secure flow)
+  if (!hasAnyMethod) {
+    document.getElementById('setup-popup-kms-only-btn')?.addEventListener('click', setupWithPopupKMSOnly);
+  }
+
+  // Legacy flows
   if (canAddPassphrase) {
     const btnId = hasAnyMethod ? 'add-passphrase-btn' : 'setup-passphrase-btn';
     document.getElementById(btnId)?.addEventListener('click', setupPassphrase);
@@ -529,9 +544,61 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
 }
 
 /**
- * Setup passphrase authentication using stateless popup.
+ * Setup authentication using KMS-only popup flow (Option A+).
  *
- * This function uses the new stateless popup flow:
+ * This is the new secure flow where:
+ * 1. Parent calls setupWithPopup() - iframe handles everything
+ * 2. Iframe generates transport keys (never sent to parent)
+ * 3. Iframe requests parent to open popup (minimal URL, no transport params)
+ * 4. Parent opens popup and notifies iframe
+ * 5. Popup and iframe communicate directly via MessageChannel
+ * 6. Parent never sees transport keys or encrypted credentials
+ *
+ * Security benefits:
+ * - Parent out of credential path (reduced attack surface)
+ * - Transport keys never leave iframe
+ * - Direct same-origin communication (iframe ↔ popup)
+ */
+async function setupWithPopupKMSOnly(): Promise<void> {
+  console.log('[Full Demo] Starting setup with KMS-only popup...');
+
+  try {
+    setupOperationEl.innerHTML = '<p class="loading">Requesting popup setup...</p>';
+
+    // Call the new setupWithPopup RPC method
+    // Everything else is handled by iframe and popup
+    const result = await kmsUser.setupWithPopup({
+      userId: 'demouser@ats.run',
+    });
+
+    console.log('[Full Demo] Setup complete via KMS-only popup!', result);
+
+    setupOperationEl.innerHTML = `
+      <div class="success-message">
+        <p>✅ <strong>Setup complete!</strong></p>
+        <p>Enrollment ID: <code>${result.enrollmentId}</code></p>
+        <p>VAPID Key: <code>${result.vapidKid}</code></p>
+      </div>
+    `;
+
+    // Reload status and audit log
+    await loadKMSStatus();
+    await loadAuditLog();
+  } catch (error) {
+    console.error('[Full Demo] Setup with KMS-only popup failed:', error);
+    setupOperationEl.innerHTML = `
+      <div class="error-message">
+        <p>❌ <strong>Setup failed</strong></p>
+        <p>${error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    `;
+  }
+}
+
+/**
+ * Setup passphrase authentication using stateless popup (LEGACY).
+ *
+ * This function uses the old stateless popup flow:
  * 1. Generate ephemeral transport keys in iframe
  * 2. Open popup with transport parameters in URL
  * 3. Popup collects credentials and encrypts with transport key

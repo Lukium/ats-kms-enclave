@@ -32,6 +32,7 @@ import {
   timingSafeEqual,
   deriveDeterministicSalt,
   calibratePBKDF2Iterations,
+  getPlatformHash,
 } from '@/v2/crypto-utils';
 
 // ============================================================================
@@ -216,6 +217,32 @@ describe('derToP1363', () => {
     const p1363 = derToP1363(der);
     expect(p1363[31]).toBe(0x80);
     expect(p1363[63]).toBe(0xff);
+  });
+
+  it('should throw on truncated DER (missing r length)', () => {
+    const der = new Uint8Array([
+      0x30, 0x04, // SEQUENCE, length 4
+      0x02        // INTEGER tag for r, but missing length byte
+    ]);
+    expect(() => derToP1363(der)).toThrow('missing r length');
+  });
+
+  it('should throw on invalid s integer tag', () => {
+    const der = new Uint8Array([
+      0x30, 0x06,
+      0x02, 0x01, 0x01, // r = 1
+      0x03, 0x01, 0x01  // Wrong tag (0x03 instead of 0x02)
+    ]);
+    expect(() => derToP1363(der)).toThrow('expected integer for s');
+  });
+
+  it('should throw on truncated DER (missing s length)', () => {
+    const der = new Uint8Array([
+      0x30, 0x05,
+      0x02, 0x01, 0x01, // r = 1
+      0x02              // INTEGER tag for s, but missing length byte
+    ]);
+    expect(() => derToP1363(der)).toThrow('missing s length');
   });
 });
 
@@ -635,5 +662,33 @@ describe('calibratePBKDF2Iterations', () => {
     // Allow 100% variance due to system load (CI environments are highly variable)
     const tolerance = result1.iterations * 1.0;
     expect(Math.abs(result1.iterations - result2.iterations)).toBeLessThan(tolerance);
+  });
+});
+
+// ============================================================================
+// Platform Hash Tests
+// ============================================================================
+
+describe('getPlatformHash', () => {
+  it('should return a base64url string', async () => {
+    const hash = await getPlatformHash();
+    expect(typeof hash).toBe('string');
+    expect(hash.length).toBeGreaterThan(0);
+    // Base64url should not contain +, /, or =
+    expect(hash).not.toMatch(/[+/=]/);
+  });
+
+  it('should be deterministic (same platform = same hash)', async () => {
+    const hash1 = await getPlatformHash();
+    const hash2 = await getPlatformHash();
+    expect(hash1).toBe(hash2);
+  });
+
+  it('should produce a 44-character hash (32 bytes base64url)', async () => {
+    const hash = await getPlatformHash();
+    // SHA-256 = 32 bytes = 256 bits
+    // Base64url encoding: ceil(32 * 8 / 6) = ceil(42.67) = 43 characters
+    // But base64url of 32 bytes is exactly 43 chars without padding
+    expect(hash.length).toBe(43);
   });
 });

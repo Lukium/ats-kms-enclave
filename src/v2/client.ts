@@ -575,12 +575,12 @@ export class KMSClient {
    *
    * @param params - Parameters from worker unlock request
    */
-  private async handleUnlockRequest(params: {
+  private handleUnlockRequest(params: {
     requestId: string;
     userId: string;
-  }): Promise<void> {
+  }): void {
     try {
-      console.log('[KMS Client] Unlock request received from worker:', params);
+      // Unlock request from worker for addEnrollment flow
 
       // Store requestId for when credentials are collected
       this.pendingUnlockRequestId = params.requestId;
@@ -1047,6 +1047,7 @@ export class KMSClient {
    * @param userId - User ID
    * @returns Collected credentials
    */
+  /* c8 ignore start - Multi-enrollment unlock UI tested via Playwright (client-ui-coverage.spec.ts) */
   private async promptUnlockForEnrollment(enrollments: string[], userId: string): Promise<AuthCredentials> {
 
     // Hide success message from previous setup (if visible)
@@ -1210,6 +1211,7 @@ export class KMSClient {
       }
     });
   }
+  /* c8 ignore stop */
 
   /**
    * Setup modal handling (for standalone setup window)

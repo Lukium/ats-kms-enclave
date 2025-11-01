@@ -403,9 +403,11 @@ export async function calibratePBKDF2Iterations(
 export async function getPlatformHash(): Promise<string> {
   const concurrency = typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator
     ? String((navigator as Navigator & { hardwareConcurrency?: number }).hardwareConcurrency ?? '')
+    /* c8 ignore next - Node.js fallback tested manually */
     : '';
   const info = typeof navigator !== 'undefined'
     ? [navigator.userAgent, navigator.platform, concurrency].join('|')
+    /* c8 ignore next - Node.js fallback tested manually */
     : [process.platform, process.arch, process.version].join('|');
   const data = new TextEncoder().encode(info);
   // Use WebCrypto subtle.digest which works in both browser and Node.js

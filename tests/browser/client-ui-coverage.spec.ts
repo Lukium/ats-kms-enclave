@@ -243,4 +243,49 @@ test.describe('Client.ts UI Coverage Tests', () => {
     // Modal should hide
     await iframe.locator('#unlock-modal').waitFor({ state: 'hidden', timeout: 5000 });
   });
+
+  test('should show multi-enrollment unlock UI when adding second authentication method', async ({ page }) => {
+    await setupVirtualAuthenticator(page);
+
+    // First, setup with passphrase
+    await page.click('[data-action="setup-passphrase"]');
+    await page.waitForTimeout(500);
+
+    const iframe = page.frameLocator('iframe[src*="localhost:5174"]');
+
+    // Fill in passphrase
+    await iframe.locator('#kms-setup-passphrase-input').fill('test-passphrase-12345');
+    await iframe.locator('#kms-setup-passphrase-confirm-input').fill('test-passphrase-12345');
+    await iframe.locator('#kms-setup-passphrase-btn').click();
+
+    // Wait for success
+    await iframe.locator('#kms-setup-success').waitFor({ state: 'visible', timeout: 5000 });
+
+    // Now try to add a second enrollment (passkey)
+    await page.evaluate(async () => {
+      const kmsUser = (window as any).kmsUser;
+      return kmsUser.addEnrollment('test@example.com', 'passkey-prf');
+    });
+
+    await page.waitForTimeout(500);
+
+    // Should show multi-enrollment unlock instructions
+    const unlockInstructions = iframe.locator('#multi-enrollment-unlock');
+    await expect(unlockInstructions).toBeVisible();
+    await expect(unlockInstructions).toContainText('Multi-Enrollment Authentication Required');
+
+    // Should show passphrase unlock option since we set up passphrase first
+    const passphraseUnlock = iframe.locator('#temp-passphrase-unlock');
+    await expect(passphraseUnlock).toBeVisible();
+
+    const passphraseInput = iframe.locator('#temp-passphrase-input');
+    await expect(passphraseInput).toBeVisible();
+
+    // Enter passphrase to unlock
+    await passphraseInput.fill('test-passphrase-12345');
+    await iframe.locator('#temp-passphrase-btn').click();
+
+    // Wait for WebAuthn prompt (would happen after successful unlock)
+    await page.waitForTimeout(1000);
+  });
 });

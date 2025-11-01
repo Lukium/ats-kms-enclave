@@ -844,3 +844,42 @@ describe('wrapKey edge cases for branch coverage', () => {
     expect(unwrapped.algorithm.name).toBe('RSA-PSS');
   });
 });
+
+// Import loadRateLimitState for testing
+import { loadRateLimitState } from '../../src/v2/storage-types.js';
+
+describe('loadRateLimitState', () => {
+  it('should return valid state when input is valid', () => {
+    const validState = {
+      tokensIssued: 5,
+      lastResetAt: Date.now(),
+    };
+    const result = loadRateLimitState(validState);
+    expect(result).toEqual(validState);
+  });
+
+  it('should return default state when input is invalid', () => {
+    const invalidState = { invalid: true };
+    const result = loadRateLimitState(invalidState);
+    expect(result).toMatchObject({
+      tokensIssued: 0,
+      lastResetAt: expect.any(Number),
+    });
+  });
+
+  it('should return default state when input is null', () => {
+    const result = loadRateLimitState(null);
+    expect(result).toMatchObject({
+      tokensIssued: 0,
+      lastResetAt: expect.any(Number),
+    });
+  });
+
+  it('should return default state when input is undefined', () => {
+    const result = loadRateLimitState(undefined);
+    expect(result).toMatchObject({
+      tokensIssued: 0,
+      lastResetAt: expect.any(Number),
+    });
+  });
+});

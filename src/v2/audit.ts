@@ -512,6 +512,7 @@ export async function logOperation(op: AuditOperation): Promise<AuditEntryV2> {
       rejecter!(err as Error);
     }
   }).catch(() => {
+    /* c8 ignore next - Error swallowing for chain resilience */
     // Swallow errors to keep chain alive
   });
 

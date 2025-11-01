@@ -35,9 +35,6 @@ import {
   setupPassphrase,
   setupPasskeyPRF,
   setupPasskeyGate,
-  unlockWithPassphrase,
-  unlockWithPasskeyPRF,
-  unlockWithPasskeyGate,
   withUnlock,
   deriveMKEKFromMS,
   isSetup,
@@ -1025,31 +1022,24 @@ async function handleAddEnrollment(
 ): Promise<{ success: true; enrollmentId: string }> {
   const { userId, credentials } = params;
 
-  console.log('[Worker] handleAddEnrollment START:', { userId, method: credentials.method, requestId });
-
   // Unlock ONCE to verify credentials, ensure audit key, and get MS
   // (Similar pattern to createLease - do everything in a single withUnlock call)
-  console.log('[Worker] Step 1: Unlocking with credentials to get MS...');
   const unlockResult = await withUnlock(credentials, async (_mkek, masterSecret) => {
     // Ensure audit key is loaded (required for multi-enrollment)
     await ensureAuditKey(_mkek);
     // Return the MS for use outside withUnlock
-    return masterSecret as Uint8Array;
+    return masterSecret;
   });
   const ms = unlockResult.result;
-  console.log('[Worker] Step 1: MS obtained and audit key ensured ✓');
 
   // Step 2: Generate transport key (stays in iframe, never sent to parent)
-  console.log('[Worker] Step 2: Generating transport key...');
   const transport = await generateSetupTransportKey();
-  console.log('[Worker] Step 2: Transport key generated ✓');
 
   // Step 3: Request parent to open popup with minimal URL
   const popupURL = new URL('https://kms.ats.run/');
   popupURL.searchParams.set('mode', 'setup');
 
   // Step 4: Tell client to open popup and handle the entire popup flow
-  console.log('[Worker] Step 3: Sending worker:setup-with-popup message to parent...');
   const credentialsPromise = new Promise<{
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
     transportKeyId: string;
@@ -1071,7 +1061,6 @@ async function handleAddEnrollment(
     });
 
     // Send request to client (main thread) with all info needed
-    console.log('[Worker] Posting message with requestId:', requestId);
     self.postMessage({
       type: 'worker:setup-with-popup',
       requestId,
@@ -1082,13 +1071,10 @@ async function handleAddEnrollment(
       appSalt: transport.appSalt,
       hkdfSalt: transport.hkdfSalt,
     });
-    console.log('[Worker] Message posted, waiting for popup response...');
   });
 
   // Wait for client to complete entire popup flow and return credentials
-  console.log('[Worker] Step 4: Waiting for popup credentials...');
   const newCredentialsEncrypted = await credentialsPromise;
-  console.log('[Worker] Step 4: Credentials received ✓');
 
   // Step 5: Decrypt credentials (copy from setupWithEncryptedCredentials)
   const transportKey = ephemeralTransportKeys.get(newCredentialsEncrypted.transportKeyId);
@@ -1220,18 +1206,13 @@ async function handleAddEnrollmentWithPopup(
 ): Promise<{ success: true; enrollmentId: string }> {
   const { userId } = params;
 
-  console.log('[Worker] handleAddEnrollmentWithPopup START:', { userId, requestId });
-
   // Step 1: Generate transport key (stays in iframe, never sent to parent)
-  console.log('[Worker] Step 1: Generating transport key...');
   const transport = await generateSetupTransportKey();
-  console.log('[Worker] Step 1: Transport key generated ✓');
 
   // Step 2: Request popup to collect NEW credentials (user gesture preserved)
   const popupURL = new URL('https://kms.ats.run/');
   popupURL.searchParams.set('mode', 'setup');
 
-  console.log('[Worker] Step 2: Sending worker:setup-with-popup message to parent...');
   const newCredentialsEncrypted = await new Promise<{
     method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
     transportKeyId: string;
@@ -1253,7 +1234,6 @@ async function handleAddEnrollmentWithPopup(
     });
 
     // Send request to client (main thread) with all info needed
-    console.log('[Worker] Posting message with requestId:', requestId);
     self.postMessage({
       type: 'worker:setup-with-popup',
       requestId,
@@ -1264,12 +1244,9 @@ async function handleAddEnrollmentWithPopup(
       appSalt: transport.appSalt,
       hkdfSalt: transport.hkdfSalt,
     });
-    console.log('[Worker] Message posted, waiting for popup response...');
   });
-  console.log('[Worker] Step 2: New credentials received from popup ✓');
 
   // Step 3: Decrypt new credentials
-  console.log('[Worker] Step 3: Decrypting new credentials...');
   const transportKey = ephemeralTransportKeys.get(newCredentialsEncrypted.transportKeyId);
   if (!transportKey) {
     throw new Error('Transport key not found or expired');
@@ -1340,10 +1317,8 @@ async function handleAddEnrollmentWithPopup(
 
   // Delete ephemeral transport key (one-time use)
   ephemeralTransportKeys.delete(newCredentialsEncrypted.transportKeyId);
-  console.log('[Worker] Step 3: New credentials decrypted ✓');
 
   // Step 4: Now request unlock modal to get EXISTING credentials
-  console.log('[Worker] Step 4: Requesting unlock with existing credentials...');
   const unlockCredentials = await new Promise<AuthCredentials>((resolve, reject) => {
     const timeout = setTimeout(() => {
       console.error('[Worker] Unlock timeout after 5 minutes');
@@ -1363,12 +1338,9 @@ async function handleAddEnrollmentWithPopup(
       requestId,
       userId,
     });
-    console.log('[Worker] Unlock modal request sent, waiting for credentials...');
   });
-  console.log('[Worker] Step 4: Unlock credentials received ✓');
 
   // Step 5: Unlock with existing credentials to get MS
-  console.log('[Worker] Step 5: Unlocking with existing credentials to get MS...');
   const unlockResult = await withUnlock(unlockCredentials, async (_mkek, masterSecret) => {
     // Ensure audit key is loaded (required for multi-enrollment)
     await ensureAuditKey(_mkek);
@@ -1378,13 +1350,11 @@ async function handleAddEnrollmentWithPopup(
     return msCopy;
   });
   const ms = unlockResult.result;
-  console.log('[Worker] Step 5: MS obtained and audit key ensured ✓');
 
   // Step 6: Setup new enrollment with existing MS based on new credential type
   // Wrap in try/finally to ensure MS copy is always zeroized (defense-in-depth)
   const method = newCredentialsEncrypted.method;
   try {
-    console.log('[Worker] Step 6: Rewrapping MS with new credentials...');
     let enrollmentResult;
 
     if (method === 'passphrase') {
@@ -1408,7 +1378,6 @@ async function handleAddEnrollmentWithPopup(
       const exhaustive: never = method;
       throw new Error(`Unknown enrollment method: ${String(exhaustive)}`);
     }
-    console.log('[Worker] Step 6: MS rewrapped with new credentials ✓');
 
     if (!enrollmentResult.success) {
       throw new Error(enrollmentResult.error);
@@ -1426,7 +1395,6 @@ async function handleAddEnrollmentWithPopup(
     details: { method, action: 'add-enrollment-with-popup' },
   });
 
-  console.log('[Worker] handleAddEnrollmentWithPopup COMPLETE ✓');
   return { success: true, enrollmentId: `enrollment:${method}:v2` };
 }
 

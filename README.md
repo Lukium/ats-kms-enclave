@@ -46,10 +46,10 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-11-01 14:16:37 UTC*
+*Last updated: 2025-11-01 21:24:00 UTC*
 
 **Test Results:**
-- Test Files: 9 passed (9)
+- Test Files: 10 passed (10)
 - Tests: 401+ passed
 - Duration: See last test run
 
@@ -57,18 +57,18 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ```
 File                    │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-All files               │ 10226   │   81.41│    81.70 │   84.87│   81.41 │
- v2/audit.ts            │ 614     │   99.18│    96.22 │     100│   99.18 │ 5 lines
- v2/client.ts           │ 2243    │   32.86│    61.95 │   63.15│   32.86 │ 1234 lines
- v2/crypto-utils.ts     │ 415     │   95.65│    95.45 │   94.44│   95.65 │ 18 lines
+All files               │ 10682   │   81.49│    83.80 │   86.77│   81.49 │
+ v2/audit.ts            │ 615     │   99.34│    96.15 │     100│   99.34 │ 4 lines
+ v2/client.ts           │ 2337    │   35.68│    61.05 │   64.10│   35.68 │ 1112 lines
+ v2/crypto-utils.ts     │ 417     │     100│    95.71 │     100│     100 │ 
  v2/error-utils.ts      │ 95      │     100│      100 │     100│     100 │ 
- v2/kms-user.ts         │ 1945    │   92.95│    70.90 │   63.63│   92.95 │ 137 lines
- v2/rpc-validation.ts   │ 633     │   93.51│    86.29 │   94.73│   93.51 │ 41 lines
- v2/storage-types.ts    │ 50      │   87.75│    50.00 │     100│   87.75 │ 6 lines
- v2/storage.ts          │ 649     │   93.95│    88.46 │   97.72│   93.95 │ 37 lines
+ v2/kms-user.ts         │ 2052    │   91.12│    70.17 │   61.76│   91.12 │ 182 lines
+ v2/rpc-validation.ts   │ 643     │   93.14│    88.54 │   92.30│   93.14 │ 44 lines
+ v2/storage-types.ts    │ 50      │     100│      100 │     100│     100 │ 
+ v2/storage.ts          │ 649     │   97.05│    86.90 │     100│   97.05 │ 18 lines
  v2/unlock.ts           │ 485     │   98.76│    92.00 │     100│   98.76 │ 6 lines
- v2/webauthn-types.ts   │ 105     │   93.26│    18.18 │   66.66│   93.26 │ 7 lines
- v2/worker.ts           │ 2353    │   91.19│    80.16 │   84.37│   91.19 │ 207 lines
+ v2/webauthn-types.ts   │ 105     │     100│    68.42 │     100│     100 │ 
+ v2/worker.ts           │ 2594    │   85.73│    84.04 │   93.93│   85.73 │ 370 lines
 ```
 <!-- END AUTO-GENERATED -->
 

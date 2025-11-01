@@ -405,6 +405,7 @@ export type RPCMethod =
   | 'unlockWithPassphrase'
   | 'unlockWithPasskey'
   | 'addEnrollment'
+  | 'addEnrollmentWithPopup'
   | 'removeEnrollment'
   | 'getEnrollments'
   | 'generateVAPID'

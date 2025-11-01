@@ -174,23 +174,23 @@ If you need to rollback, verify these still work:
 - Old `setupWithEncryptedCredentials` will be kept as deprecated method
 - Migration can be gradual
 
-## Implementation Complete - New Safe Point
+## Implementation Complete - Current Safe Point
 
-### Commit: 1773041 - Implementation Successful ✅
+### Commit: 38b3b81 - Legacy Code Removed, Build Verified ✅
 
-**Full Hash:** `1773041ad1bde8845b34b55331514bd5e191bb6f`
-**Short Hash:** `1773041`
-**Date:** 2025-11-01 07:06:57 -0400
+**Full Hash:** `38b3b81d4e7782622aa51ea27265581c4a3a5fcd`
+**Short Hash:** `38b3b81`
+**Date:** 2025-11-01 07:30:19 -0400
 **Author:** Lukium
 
 **Commit Message:**
 ```
-fix: Complete setupWithPopup flow with UI updates and testing improvements
+build: Rebuild enclave after legacy code removal
 ```
 
-### Implementation Status: COMPLETE
+### Implementation Status: COMPLETE + CLEANED UP
 
-The KMS-only popup credential flow (Option A+) has been successfully implemented and tested.
+The KMS-only popup credential flow (Option A+) has been successfully implemented, tested, and the legacy code has been removed.
 
 **What Was Implemented:**
 - ✅ setupWithPopup RPC method (worker, client, kms-user)
@@ -246,16 +246,26 @@ The KMS-only popup credential flow (Option A+) has been successfully implemented
 4. `bcf1ddb` - test: Add comprehensive tests for setupWithPopup flow
 5. `3a74dde` - fix: Use MessageChannel for iframe-popup communication
 6. `1773041` - fix: Complete setupWithPopup flow with UI updates
+7. `ef749fd` - refactor: Remove legacy parent-mediated popup credential flow
+8. `38b3b81` - build: Rebuild enclave after legacy code removal
 
-**Files Modified:**
-- `src/v2/types.ts` - Added setupWithPopup RPC method
-- `src/v2/rpc-validation.ts` - Added validation
-- `src/v2/kms-user.ts` - Added setupWithPopup() method + 5min timeout
-- `src/v2/worker.ts` - Added handleSetupWithPopup() handler
+**Files Modified in Implementation:**
+- `src/v2/types.ts` - Added setupWithPopup RPC method, removed legacy methods
+- `src/v2/rpc-validation.ts` - Added setupWithPopup validation, removed legacy
+- `src/v2/kms-user.ts` - Added setupWithPopup(), removed legacy RPC methods
+- `src/v2/worker.ts` - Added handleSetupWithPopup(), removed legacy handlers
 - `src/v2/client.ts` - Added MessagePort handling, disabled auto-close
-- `example/phase-2/parent.ts` - Added popup request handler + page reload
+- `example/phase-2/parent.ts` - Added popup handler, removed legacy functions
 - `tests/v2/worker.test.ts` - Added 3 setupWithPopup tests
 - `tests/v2/client.test.ts` - Added 5 setupWithPopup tests
+
+**Legacy Code Removed (Commit ef749fd):**
+- Removed `setupPassphrase()` and `setupWebAuthn()` from parent.ts (218 lines)
+- Removed `generateSetupTransportKey()` RPC method (client-callable)
+- Removed `setupWithEncryptedCredentials()` RPC method (client-callable)
+- Removed legacy RPC handlers from worker.ts
+- Removed legacy type definitions and validators
+- Total: 383 lines removed
 
 **Test Results:**
 - All 409 tests passing ✅
@@ -270,19 +280,26 @@ The KMS-only popup credential flow (Option A+) has been successfully implemented
 - ✅ Page reloads with full interface
 - ✅ VAPID keys generated and displayed
 
+**Build Artifacts (Commit 38b3b81):**
+- New artifact: `kms-worker.1c0afa3e.js`
+- Size: 45.93 KB (reduced from 47KB after legacy removal)
+- SHA-256: `1c0afa3e7055c34bbdc7a822479068783b33a773cedcf4439b62584df3876c7c`
+- SRI: `sha256-HAr6PnBVw0u9x6giR5BoeDszp3PO3PRDm2JYTfOHbHw=`
+- Build verified and tested ✅
+
 ### How to Use This Safe Point
 
 If future changes break the setupWithPopup flow, revert to this commit:
 
 ```bash
 # Option 1: Hard reset (WARNING: Loses uncommitted changes)
-git reset --hard 1773041
+git reset --hard 38b3b81
 
 # Option 2: Create new branch from this point
-git checkout -b fix-from-working-popup 1773041
+git checkout -b fix-from-clean-popup 38b3b81
 
 # Option 3: Revert specific files
-git checkout 1773041 -- <file-path>
+git checkout 38b3b81 -- <file-path>
 ```
 
 ## Original Safe Point (Before Implementation)
@@ -293,8 +310,11 @@ git checkout 1773041 -- <file-path>
 
 This was the safe point before starting implementation. Implementation is now complete and working.
 
-## Created
+## Document History
 
-**Date:** 2025-11-01
+**Created:** 2025-11-01 05:26:32 -0400
 **Purpose:** Safe rollback point before implementing KMS-only popup flow
-**Updated:** 2025-11-01 07:07:00 - Implementation complete ✅
+
+**Updates:**
+- 2025-11-01 07:07:00 - Implementation complete (commit 1773041) ✅
+- 2025-11-01 07:30:19 - Legacy code removed, build verified (commit 38b3b81) ✅

@@ -547,30 +547,15 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
     html += '</div>';
   }
 
-  // Determine available options
-  const canAddPassphrase = !hasPassphrase;
-  const canAddWebAuthn = !hasPasskey;
-
-  if (canAddPassphrase || canAddWebAuthn) {
+  // Setup/Add new authentication method
+  if (!hasPassphrase || !hasPasskey) {
     const buttonLabel = hasAnyMethod ? 'Add' : 'Setup';
     html += '<div class="setup-choice">';
 
-    // KMS-only popup flow (Option A+) - new secure flow
+    // KMS-only popup flow (Option A+) - secure flow
     if (!hasAnyMethod) {
-      html += `<button id="setup-popup-kms-only-btn" class="operation-btn primary">🚀 ${buttonLabel} with Popup (KMS-only)</button>`;
+      html += `<button id="setup-popup-kms-only-btn" class="operation-btn primary">🚀 ${buttonLabel} with Popup</button>`;
       html += `<p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Secure flow: Parent never sees credentials or transport keys</p>`;
-      html += `<hr style="margin: 1rem 0; border: none; border-top: 1px solid #e2e8f0;">`;
-      html += `<p style="font-size: 0.85em; color: #718096; margin-bottom: 0.5rem;">Legacy flows (for testing):</p>`;
-    }
-
-    if (canAddPassphrase) {
-      const btnId = hasAnyMethod ? 'add-passphrase-btn' : 'setup-passphrase-btn';
-      html += `<button id="${btnId}" class="operation-btn">🔐 ${buttonLabel} Passphrase (Legacy)</button>`;
-    }
-
-    if (canAddWebAuthn) {
-      const btnId = hasAnyMethod ? 'add-webauthn-btn' : 'setup-webauthn-btn';
-      html += `<button id="${btnId}" class="operation-btn">🔑 ${buttonLabel} WebAuthn (Legacy)</button>`;
     }
 
     html += '</div>';

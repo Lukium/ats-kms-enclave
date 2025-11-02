@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
-**Status:** ❌ FAILED
-**Timestamp:** Sun, 02 Nov 2025 12:47:30 GMT
+**Status:** ✅ VERIFIED
+**Timestamp:** Sun, 02 Nov 2025 12:59:04 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012477576)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012608199)
 
 ---
 
@@ -70,37 +70,30 @@ Current version is in allowed list
 **Allowed Hashes:**
 - `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
 
-### ❌ Security Headers
+### ✅ Security Headers
 
-Some headers failed
+All headers verified
 
-#### content-security-policy ❌
+#### content-security-policy ✅
 
-**Expected:**
-```
-default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'
-```
+**Expected:** `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'`
 
-**Actual:**
-```
-(missing)
-```
+**Actual:** ✅ Matches
 
-**Issue:** Header missing
+**Frame Ancestors Explanation:**
+The `frame-ancestors` directive controls which origins can embed the KMS enclave in an iframe:
 
-#### permissions-policy ❌
+- `https://alpha.allthe.services` - Development build of the AllTheServices app
+- `https://beta.allthe.services` - Beta build (not yet available)
+- `https://allthe.services` - Production build (not yet available)
+- `https://phase2-demo.allthe.services` - Demo for the KMS enclave itself
+- `http://localhost:5173` - Local development counterpart of the dev build
 
-**Expected:**
-```
-accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
-```
+#### permissions-policy ✅
 
-**Actual:**
-```
-(missing)
-```
+**Expected:** `accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()`
 
-**Issue:** Header missing
+**Actual:** ✅ Matches
 
 #### x-content-type-options ✅
 
@@ -108,19 +101,11 @@ accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=()
 
 **Actual:** ✅ Matches
 
-#### referrer-policy ❌
+#### referrer-policy ✅
 
-**Expected:**
-```
-no-referrer
-```
+**Expected:** `no-referrer`
 
-**Actual:**
-```
-strict-origin-when-cross-origin
-```
-
-**Issue:** Mismatch
+**Actual:** ✅ Matches
 
 #### cross-origin-opener-policy ✅
 
@@ -145,7 +130,7 @@ strict-origin-when-cross-origin
 
 
 - **Version:** 2.0.0
-- **Build Time:** Sun, 02 Nov 2025 12:45:05 GMT
+- **Build Time:** Sun, 02 Nov 2025 12:56:16 GMT
 - **Reproducible:** Yes
 - **Environment:** production
 
@@ -187,6 +172,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 12:47:30 GMT*
+*Last updated: Sun, 02 Nov 2025 12:59:04 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

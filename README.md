@@ -63,6 +63,10 @@ All verification reports are written to the **`attestation` branch**:
 - `verification-badge.svg` - Status badge
 - `verification-badge.json` - Machine-readable metadata
 
+## Deployment
+
+This branch does **not** trigger Cloudflare Pages deployments. Only the `main` branch deploys to production.
+
 ## Links
 
 - **Attestation Branch**: https://github.com/Lukium/ats-kms-enclave/tree/attestation

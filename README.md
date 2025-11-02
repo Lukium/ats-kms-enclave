@@ -16,7 +16,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - 🔑 **Passkey & passphrase unlock** - Multiple authentication methods
 - 📊 **Audit logging** - Tamper-evident cryptographic chain
 - 🔍 **User-auditable** - Well-tested, documented codebase
-- 🧪 **85%+ test coverage** - Strict TDD with 401+ tests
+- 🧪 **80%+ test coverage** - Strict TDD with 450+ tests
 
 ## Current Status
 
@@ -37,7 +37,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - ✅ **Audit Logging** - Tamper-evident chain with HMAC verification
 - ✅ **Multiple Users** - Per-user key isolation and management
 - ✅ **Browser Integration** - Full Web Push subscription lifecycle
-- ✅ **401+ tests passing** - 85%+ coverage across all components
+- ✅ **450+ tests passing** - 80%+ coverage across all components
 
 **[Try the Phase 1 demo →](example/phase-1/README.md)** (requires two terminals: `pnpm demo:phase-1:kms` and `pnpm demo:phase-1:parent`, or run `make demo` for instructions)
 
@@ -59,18 +59,18 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-11-02 10:08:49 UTC*
+*Last updated: 2025-11-02 17:04:24 UTC*
 
 **Test Results:**
 - Test Files: 10 passed (10)
-- Tests: 401+ passed
+- Tests: 450+ passed
 - Duration: See last test run
 
 **Coverage Report:**
 ```
 File                    │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-All files               │ 10682   │   81.49│    83.86 │   86.77│   81.49 │
+All files               │ 10682   │   81.49│    83.80 │   86.77│   81.49 │
  v2/audit.ts            │ 615     │   99.34│    96.15 │     100│   99.34 │ 4 lines
  v2/client.ts           │ 2337    │   35.68│    61.05 │   64.10│   35.68 │ 1112 lines
  v2/crypto-utils.ts     │ 417     │     100│    95.71 │     100│     100 │ 
@@ -78,10 +78,10 @@ All files               │ 10682   │   81.49│    83.86 │   86.77│   81.
  v2/kms-user.ts         │ 2052    │   91.12│    70.17 │   61.76│   91.12 │ 182 lines
  v2/rpc-validation.ts   │ 643     │   93.14│    88.54 │   92.30│   93.14 │ 44 lines
  v2/storage-types.ts    │ 50      │     100│      100 │     100│     100 │ 
- v2/storage.ts          │ 649     │   97.05│    86.74 │     100│   97.05 │ 18 lines
- v2/unlock.ts           │ 485     │   98.76│    92.45 │     100│   98.76 │ 6 lines
+ v2/storage.ts          │ 649     │   97.05│    86.90 │     100│   97.05 │ 18 lines
+ v2/unlock.ts           │ 485     │   98.76│    92.00 │     100│   98.76 │ 6 lines
  v2/webauthn-types.ts   │ 105     │     100│    68.42 │     100│     100 │ 
- v2/worker.ts           │ 2594    │   85.73│    84.10 │   93.93│   85.73 │ 370 lines
+ v2/worker.ts           │ 2594    │   85.73│    84.04 │   93.93│   85.73 │ 370 lines
 ```
 <!-- END AUTO-GENERATED -->
 
@@ -113,7 +113,7 @@ The design has been broken down into focused documents:
 
 ✅ **Isolated key management** - Keys cannot be accessed by compromised PWA
 
-✅ **Non-extractable keys** - WebCrypto prevents key export
+✅ **Non-extractable keys** – WebCrypto keys are created non-extractable (no export), usable only via allowed operations
 
 ✅ **Audit logging** - Tamper-evident chain tracks all operations
 
@@ -130,12 +130,13 @@ The design has been broken down into focused documents:
 **Defends against**:
 - Malicious PWA updates
 - CDN compromise
-- Supply chain attacks
+- Supply-chain code tampering (detectable)
 - MITM attacks
 - Service Worker tampering
+- Storage-only theft of key material (e.g., IndexedDB ciphertext)
 
 **Partially mitigates but does not fully defend against**:
-- **Malicious browser extensions** – can intercept runtime secrets if granted elevated privileges
+- **Malicious browser extensions** – can intercept runtime secrets or hook crypto calls if granted elevated privileges
 - **Compromised OS** – can inspect process memory or capture user input during unlock
 - **Physical device access** – attacker can extract data or observe unlock events
 - **Browser implementation bugs** – may bypass isolation or leak memory
@@ -156,7 +157,7 @@ Our approach takes a different path:
 - Verification can be automated (e.g., via GitHub Actions) to confirm running code matches public release
 - **Single codebase** works across all platforms with modern browsers
 
-**The tradeoff**: While native applications can leverage stronger OS-level isolation primitives, our model achieves **stronger global trust** through verifiability, transparency, and platform neutrality. We also leverage OS-level security for user authentication via WebAuthn, providing hardware-backed identity verification. In practice, this can yield a *higher trust ceiling* — not because the code is unbreakable, but because **it's extremely difficult to hide a break**.
+**The tradeoff**: While native applications can leverage stronger OS-level isolation primitives, our model achieves **stronger global trust** through verifiability, transparency, and platform neutrality. We also leverage OS-level security for user authentication via WebAuthn, providing hardware-backed identity verification. In practice, this can yield a *higher trust ceiling in code-integrity assurance* — not because the code is unbreakable, but because **it's extremely difficult to hide a break**.
 
 This positions the KMS enclave as a forward-looking trust model: **shifting trust from authority to transparency**.
 
@@ -190,6 +191,7 @@ All verification results are published to the **[attestation branch](https://git
 - **Verification Reports**: Auto-generated, constantly updated
 - **Transparency**: All results and attestation URLs are publicly accessible
 - **Reproducibility**: Anyone can reproduce builds and verify hashes independently
+- **Background**: See [Why a Verifiable Web Enclave](docs/architecture/WHY_WEB_ENCLAVE.md) for the rationale behind this trust model and how it differs from hardware-backed approaches
 
 ### How to Verify Manually
 

@@ -36,9 +36,12 @@ export function generateReport(data: ReportData): string {
 ## Verification Summary
 
 **Status:** ${status}
+
 **Timestamp:** ${formatTimestamp(result.timestamp)}
+
 **Worker Hash:** ${result.manifest?.current.sha256.substring(0, 8) || 'unknown'}
-${runUrl ? `**Workflow Run:** [View Details](${runUrl})` : ''}
+${runUrl ? `
+**Workflow Run:** [View Details](${runUrl})` : ''}
 
 ---
 
@@ -72,10 +75,10 @@ ${result.checks.map(check => {
   if (check.details) {
     if (check.name === 'Hash Verification' && Array.isArray(check.details)) {
       // Format as table
-      details = '\n\n| Artifact | Expected | Actual | Status |\n|----------|----------|--------|--------|\n';
+      details = '\n\n| Artifact | Status | Expected | Actual |\n|----------|--------|----------|--------|\n';
       check.details.forEach((item: any) => {
         const itemStatus = item.passed ? '✅' : '❌';
-        details += `| **${item.name}** | \`${item.expected}\` | \`${item.actual}\` | ${itemStatus} |\n`;
+        details += `| **${item.name}** | ${itemStatus} | \`${item.expected}\` | \`${item.actual}\` |\n`;
       });
     } else if (check.name === 'Worker Hash' && check.details.expected) {
       details = `

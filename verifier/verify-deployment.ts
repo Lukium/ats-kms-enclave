@@ -482,11 +482,16 @@ export async function verifyDeployment(baseUrl: string): Promise<VerificationRes
     const hashCheck = await verifyHashIntegrity(baseUrl, manifest);
     checks.push(hashCheck);
 
-    // 3. Verify allowed list
+    // 3. Verify GitHub attestation
+    console.log();
+    const attestationCheck = await verifyGitHubAttestation(baseUrl, manifest);
+    checks.push(attestationCheck);
+
+    // 4. Verify allowed list
     const allowedCheck = verifyAllowedList(manifest);
     checks.push(allowedCheck);
 
-    // 4. Verify security headers
+    // 5. Verify security headers
     console.log();
     const headersResult = await verifyHeaders(baseUrl);
     checks.push({
@@ -500,11 +505,6 @@ export async function verifyDeployment(baseUrl: string): Promise<VerificationRes
     console.log();
     const buildCheck = await verifyReproducibleBuild(manifest);
     checks.push(buildCheck);
-
-    // 7. Verify GitHub attestation
-    console.log();
-    const attestationCheck = await verifyGitHubAttestation(baseUrl, manifest);
-    checks.push(attestationCheck);
 
   } catch (error) {
     checks.push({

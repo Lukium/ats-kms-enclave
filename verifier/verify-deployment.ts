@@ -13,12 +13,15 @@
  */
 
 import { createHash } from 'crypto';
+import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { verifyHeaders } from './verify-headers.js';
 
 interface KMSManifest {
   schema: number;
   current: {
     version: string;
+    commit: string;
     artifact: string;
     sha256: string;
     files: {
@@ -252,6 +255,81 @@ function verifyAllowedList(manifest: KMSManifest): VerificationCheck {
 }
 
 /**
+ * Verify reproducible build by rebuilding from source and comparing hashes
+ */
+async function verifyReproducibleBuild(manifest: KMSManifest): Promise<VerificationCheck> {
+  console.log(`🔨 Verifying reproducible build from commit ${manifest.current.commit.substring(0, 8)}...`);
+
+  try {
+    const commit = manifest.current.commit;
+    const expectedHash = manifest.current.sha256;
+    const workerFilename = manifest.current.files.worker.filename;
+
+    // 1. Check out the commit
+    console.log(`  📥 Checking out commit ${commit}...`);
+    execSync(`git fetch origin ${commit}`, { stdio: 'pipe' });
+    execSync(`git checkout ${commit}`, { stdio: 'pipe' });
+
+    // 2. Install dependencies
+    console.log(`  📦 Installing dependencies...`);
+    execSync('pnpm install --frozen-lockfile', { stdio: 'pipe' });
+
+    // 3. Run reproducible build
+    console.log(`  🔨 Building with SOURCE_DATE_EPOCH=${manifest.current.build.SOURCE_DATE_EPOCH}...`);
+    execSync('pnpm build:reproducible', {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        SOURCE_DATE_EPOCH: manifest.current.build.SOURCE_DATE_EPOCH
+      }
+    });
+
+    // 4. Compute hash of built artifact
+    console.log(`  🔐 Computing hash of built artifact...`);
+    const builtArtifact = readFileSync(`dist/enclave/${workerFilename}`);
+    const actualHash = createHash('sha256').update(builtArtifact).digest('hex');
+
+    // 5. Compare hashes
+    const passed = actualHash === expectedHash;
+
+    if (passed) {
+      console.log(`  ✅ Build hash matches! ${actualHash.substring(0, 16)}...`);
+    } else {
+      console.log(`  ❌ Build hash mismatch!`);
+      console.log(`     Expected: ${expectedHash}`);
+      console.log(`     Actual:   ${actualHash}`);
+    }
+
+    return {
+      name: 'Reproducible Build',
+      passed,
+      message: passed ? 'Build is reproducible - hash matches' : 'Build hash mismatch',
+      details: {
+        commit,
+        expected: expectedHash,
+        actual: actualHash,
+        SOURCE_DATE_EPOCH: manifest.current.build.SOURCE_DATE_EPOCH,
+      },
+    };
+  } catch (error) {
+    console.log(`  ❌ Build verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      name: 'Reproducible Build',
+      passed: false,
+      message: `Build verification error: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    // Always return to the verifier branch
+    try {
+      console.log(`  🔄 Returning to verifier branch...`);
+      execSync('git checkout verifier', { stdio: 'pipe' });
+    } catch (cleanupError) {
+      console.log(`  ⚠️  Warning: Could not return to verifier branch`);
+    }
+  }
+}
+
+/**
  * Placeholder for Rekor verification (Phase 2.2)
  */
 function verifyRekorAttestation(manifest: KMSManifest): VerificationCheck {
@@ -317,7 +395,12 @@ export async function verifyDeployment(baseUrl: string): Promise<VerificationRes
       details: headersResult.checks,
     });
 
-    // 6. [Future] Verify Rekor attestation
+    // 6. Verify reproducible build
+    console.log();
+    const buildCheck = await verifyReproducibleBuild(manifest);
+    checks.push(buildCheck);
+
+    // 7. [Future] Verify Rekor attestation
     console.log();
     const rekorCheck = verifyRekorAttestation(manifest);
     checks.push(rekorCheck);

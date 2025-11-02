@@ -1,0 +1,54 @@
+name: Random KMS Verification
+
+on:
+  # Run every minute with 4/1440 probability (~4 verifications per day at random times)
+  # This creates a 1-minute attack window instead of 1 hour
+  schedule:
+    - cron: '* * * * *'  # Every minute
+
+  # Manual trigger for testing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  maybe-trigger-verification:
+    name: Random Verification Trigger
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Roll the dice (4/1440 = 1/360 probability)
+        id: dice
+        run: |
+          # Generate random number 0-359 (360 possibilities)
+          # If 0, trigger verification (1/360 = 4/1440 chance per minute)
+          # Expected: ~4 verifications per day at completely random times
+          ROLL=$((RANDOM % 360))
+          echo "Dice roll: $ROLL (need 0 to trigger)"
+
+          if [ $ROLL -eq 0 ]; then
+            echo "🎲 Lucky roll! Triggering verification..."
+            echo "trigger=true" >> $GITHUB_OUTPUT
+          else
+            echo "⏭️  Not this time. Next check in 1 minute."
+            echo "trigger=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger verification workflow
+        if: steps.dice.outputs.trigger == 'true'
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -d '{"event_type":"verify-deployment"}'
+
+          echo "✅ Verification workflow triggered on verifier branch"
+          echo "Check: https://github.com/${{ github.repository }}/actions"
+
+      - name: Log skip
+        if: steps.dice.outputs.trigger == 'false'
+        run: |
+          echo "ℹ️  Skipped this time (4/24 probability)"
+          echo "Next check in 1 hour"

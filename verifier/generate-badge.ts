@@ -23,27 +23,16 @@ interface BadgeData {
 }
 
 /**
- * Format timestamp as relative time (e.g., "2 hours ago")
+ * Format timestamp as compact date/time (e.g., "Nov 2, 11:10 UTC")
+ * Static SVG cannot update, so we show the actual verification time
  */
-function formatRelativeTime(timestamp: string): string {
-  const now = new Date();
-  const then = new Date(timestamp);
-  const diffMs = now.getTime() - then.getTime();
-
-  const seconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) {
-    return `${days} day${days > 1 ? 's' : ''} ago`;
-  } else if (hours > 0) {
-    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  } else if (minutes > 0) {
-    return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
-  } else {
-    return 'just now';
-  }
+function formatCompactTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+  const day = date.getUTCDate();
+  const hours = date.getUTCHours().toString().padStart(2, '0');
+  const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+  return `${month} ${day}, ${hours}:${minutes} UTC`;
 }
 
 /**
@@ -53,12 +42,12 @@ export function generateBadge(data: BadgeData): string {
   const status = data.passed ? '✅' : '❌';
   const statusText = data.passed ? 'Verified' : 'FAILED';
   const statusColor = data.passed ? '#4CAF50' : '#F44336';
-  const timeAgo = formatRelativeTime(data.timestamp);
+  const verifiedTime = formatCompactTimestamp(data.timestamp);
   const shortHash = data.hash.substring(0, 8);
 
   // Calculate widths for each section (approximate)
   const section1Width = 110; // "KMS Verified ✅"
-  const section2Width = 120; // "2 hours ago"
+  const section2Width = 150; // "Nov 2, 11:10 UTC"
   const section3Width = 80;  // "d5333940"
   const totalWidth = section1Width + section2Width + section3Width;
 
@@ -80,13 +69,13 @@ export function generateBadge(data: BadgeData): string {
 
   <!-- Text -->
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-    <!-- "KMS" text -->
-    <text x="28" y="15" fill="#000" fill-opacity=".3">KMS ${statusText}</text>
-    <text x="27" y="14">KMS ${statusText}</text>
+    <!-- "KMS Verified" text -->
+    <text x="${section1Width / 2}" y="15" fill="#000" fill-opacity=".3">KMS ${statusText}</text>
+    <text x="${section1Width / 2 - 1}" y="14">KMS ${statusText}</text>
 
-    <!-- Time ago -->
-    <text x="${section1Width + section2Width / 2}" y="15" fill="#000" fill-opacity=".3">${timeAgo}</text>
-    <text x="${section1Width + section2Width / 2 - 1}" y="14">${timeAgo}</text>
+    <!-- Timestamp -->
+    <text x="${section1Width + section2Width / 2}" y="15" fill="#000" fill-opacity=".3">${verifiedTime}</text>
+    <text x="${section1Width + section2Width / 2 - 1}" y="14">${verifiedTime}</text>
 
     <!-- Hash -->
     <text x="${section1Width + section2Width + section3Width / 2}" y="15" fill="#fff" fill-opacity=".8">${shortHash}</text>
@@ -106,7 +95,7 @@ export function generateBadgeMetadata(data: BadgeData): string {
     timestamp: data.timestamp,
     hash: data.hash,
     shortHash: data.hash.substring(0, 8),
-    timeAgo: formatRelativeTime(data.timestamp),
+    verifiedTime: formatCompactTimestamp(data.timestamp),
     runUrl: data.runUrl,
     generatedAt: new Date().toISOString(),
   }, null, 2);

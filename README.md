@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
 **Status:** ❌ FAILED
-**Timestamp:** Sun, 02 Nov 2025 13:47:05 GMT
+**Timestamp:** Sun, 02 Nov 2025 13:51:02 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013183412)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013224540)
 
 ---
 
@@ -125,7 +125,7 @@ Build is reproducible - hash matches
 
 ### ❌ GitHub Attestation
 
-Verification error: require is not defined
+Attestation verification failed
 
 
 ---
@@ -134,7 +134,7 @@ Verification error: require is not defined
 
 
 - **Version:** 2.0.0
-- **Build Time:** Sun, 02 Nov 2025 13:06:40 GMT
+- **Build Time:** Sun, 02 Nov 2025 13:44:24 GMT
 - **Reproducible:** Yes
 - **Environment:** production
 
@@ -176,6 +176,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 13:47:05 GMT*
+*Last updated: Sun, 02 Nov 2025 13:51:02 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

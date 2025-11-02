@@ -25,7 +25,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 - Worker-based RPC protocol proof-of-concept
 - 108 tests passing (100% coverage)
 
-**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30) [`bf23208`](https://github.com/lukium/ats-kms/commit/bf23208)
+**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30) [`bf23208`](https://github.com/lukium/ats-kms-enclave/commit/bf23208)
 - ✅ **KMS Worker** - Secure cryptographic operations in dedicated Worker
 - ✅ **Client Bridge** - Type-safe RPC communication with parent PWA
 - ✅ **Passkey Unlock** - WebAuthn-based authentication (FIDO2/passkey)
@@ -284,7 +284,7 @@ See [example/phase-0/README.md](example/phase-0/README.md) for more details.
 ## Repository Structure
 
 ```
-ats-kms/
+ats-kms-enclave/
 ├── docs/architecture/crypto/  # Architecture documentation (complete)
 │   ├── README.md              # Overview
 │   ├── design/                # Detailed design components
@@ -344,7 +344,7 @@ We will respond within 48 hours and work with you to address the issue.
 - Worker-based RPC protocol proof-of-concept
 - 108 tests passing (100% coverage)
 
-**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30) [`bf23208`](https://github.com/lukium/ats-kms/commit/bf23208)
+**Phase 1: Production KMS** ✅ **COMPLETE** (2025-10-30) [`bf23208`](https://github.com/lukium/ats-kms-enclave/commit/bf23208)
 - Production-ready KMS with full cryptographic operations
 - Passkey (WebAuthn) and passphrase (PBKDF2) unlock mechanisms
 - Lease-based JWT authorization

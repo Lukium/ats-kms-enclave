@@ -48,7 +48,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: ats-kms-enclave
-          directory: dist
+          directory: dist/enclave
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary

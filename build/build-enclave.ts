@@ -149,7 +149,7 @@ body {
 
 .enclave-status {
   max-width: 600px;
-  margin: 0 auto;
+  margin: 40px auto;
   padding: 30px;
   background: #2a2a2a;
   border-radius: 8px;
@@ -802,6 +802,17 @@ async function main() {
     const clientSRI = await buildEnclaveClient(filename);
     generateEnclaveHTML(hash, cssSRI, clientSRI);
 
+    // Copy static assets (logo, favicon) to dist/enclave/
+    const staticAssetsDir = join(rootDir, 'placeholders/cf-pages');
+    const logoSrc = join(staticAssetsDir, 'logo.png');
+    const faviconSrc = join(staticAssetsDir, 'favicon.png');
+    const logoDest = join(distDir, 'enclave/logo.png');
+    const faviconDest = join(distDir, 'enclave/favicon.png');
+
+    writeFileSync(logoDest, readFileSync(logoSrc));
+    writeFileSync(faviconDest, readFileSync(faviconSrc));
+    console.log(`✅ Copied static assets: logo.png, favicon.png`);
+
     // Write build manifest with SRI hashes
     const manifest = {
       version: '2.0.0',
@@ -873,6 +884,15 @@ async function main() {
     const cfHtmlPath = join(cfPagesDir, 'index.html');
     writeFileSync(cfHtmlPath, readFileSync(join(distDir, 'enclave/index.html')));
     console.log(`  ✅ ${cfHtmlPath}`);
+
+    // Copy logo and favicon
+    const cfLogoPath = join(cfPagesDir, 'logo.png');
+    writeFileSync(cfLogoPath, readFileSync(join(distDir, 'enclave/logo.png')));
+    console.log(`  ✅ ${cfLogoPath}`);
+
+    const cfFaviconPath = join(cfPagesDir, 'favicon.png');
+    writeFileSync(cfFaviconPath, readFileSync(join(distDir, 'enclave/favicon.png')));
+    console.log(`  ✅ ${cfFaviconPath}`);
 
     // Update the .well-known/kms-manifest.json with real data
     const cfManifestPath = join(cfPagesDir, '.well-known/kms-manifest.json');

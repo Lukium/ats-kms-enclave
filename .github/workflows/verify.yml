@@ -149,12 +149,13 @@ jobs:
 
           # Clear everything except .git
           git rm -rf . || true
+          git clean -fdx  # Remove untracked files too
 
           # Copy attestation outputs
           cp attestation-output/* .
 
-          # Add and commit
-          git add .
+          # Add only report files (not node_modules or other junk)
+          git add README.md verification-badge.svg verification-badge.json
           git commit -m "chore: Update verification report
 
           Verification run: ${{ github.run_id }}

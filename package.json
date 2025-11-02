@@ -22,7 +22,7 @@
     "build": "pnpm build:enclave",
     "build:enclave": "tsx build/build-enclave.ts",
     "build:dev": "tsx build/build-enclave.ts",
-    "build:reproducible": "SOURCE_DATE_EPOCH=1609459200 tsx build/build-enclave.ts",
+    "build:reproducible": "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) tsx build/build-enclave.ts",
     "demo": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-2.ts",
     "demo:build": "vite build --config example/vite.config.phase-0.ts",
     "demo:phase-0": "vite --config example/vite.config.phase-0.ts",

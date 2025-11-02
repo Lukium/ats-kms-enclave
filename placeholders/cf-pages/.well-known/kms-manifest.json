@@ -23,7 +23,7 @@
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1609459200"
+      "SOURCE_DATE_EPOCH": "1762082561"
     }
   },
   "allowed": [

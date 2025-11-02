@@ -4,8 +4,22 @@
     "version": "2.0.0",
     "artifact": "kms-worker.d5333940.js",
     "sha256": "d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423",
-    "sri": "sha256-1TM5QD02zZxYqJbgwchWIT4Mbvnjl50oFWTszBgXFCM=",
-    "timestamp": "2025-11-02T09:55:17.557Z",
+    "files": {
+      "worker": {
+        "filename": "kms-worker.d5333940.js",
+        "sha256": "d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423",
+        "sri": "sha384-LJMBIUTUBN5Bw1gP568W9RtdESjNcdpo/EQyzDUuumOeVZj59mlvJgKYKOGQrDM3"
+      },
+      "client": {
+        "filename": "enclave-client.js",
+        "sri": "sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR"
+      },
+      "css": {
+        "filename": "enclave.css",
+        "sri": "sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx"
+      }
+    },
+    "timestamp": "2025-11-02T10:09:38.106Z",
     "build": {
       "reproducible": true,
       "environment": "production",
@@ -16,5 +30,5 @@
     "d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423"
   ],
   "deprecated": [],
-  "comment": "Phase 2: Deterministic builds with content-addressed artifacts"
+  "comment": "Phase 2.1: Deterministic builds with SRI (Subresource Integrity)"
 }

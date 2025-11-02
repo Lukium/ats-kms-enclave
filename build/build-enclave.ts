@@ -36,9 +36,20 @@ const srcDir = join(rootDir, 'src');
 const distDir = join(rootDir, 'dist');
 
 /**
+ * Compute SRI (Subresource Integrity) hash for a file
+ * Uses SHA-384 as recommended by W3C for SRI
+ * @param content File content buffer
+ * @returns SRI hash string in format "sha384-..."
+ */
+function computeSRIHash(content: Buffer): string {
+  const hash = createHash('sha384').update(content).digest('base64');
+  return `sha384-${hash}`;
+}
+
+/**
  * Build the KMS enclave worker bundle
  */
-async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string; filename: string }> {
+async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string; filename: string; sri: string }> {
   console.log('📦 Building KMS Enclave Worker...');
 
   // Ensure dist directory exists
@@ -79,9 +90,12 @@ async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string;
     metafile: true,
   });
 
-  // Generate SHA-256 hash
+  // Generate SHA-256 hash for content addressing
   const content = readFileSync(tempPath);
   const hash = createHash('sha256').update(content).digest('hex');
+
+  // Generate SHA-384 SRI hash
+  const sri = computeSRIHash(content);
 
   // Use first 8 chars of hash for filename (like git)
   const shortHash = hash.substring(0, 8);
@@ -98,6 +112,7 @@ async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string;
   console.log(`✅ Built: ${outputPath}`);
   console.log(`📊 Size: ${(content.length / 1024).toFixed(2)} KB`);
   console.log(`🔒 SHA-256: ${hash}`);
+  console.log(`🔒 SRI: ${sri}`);
   console.log(`📝 Filename: ${filename}`);
 
   // Write metafile for analysis (also content-addressed)
@@ -107,14 +122,15 @@ async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string;
     console.log(`📄 Metafile: ${metafilePath}`);
   }
 
-  return { outputPath, hash, filename };
+  return { outputPath, hash, filename, sri };
 }
 
 /**
  * Generate the CSS file for the enclave
  * Includes both iframe status styles and modal UI styles
+ * @returns SRI hash for the CSS file
  */
-function generateEnclaveCSS(): void {
+function generateEnclaveCSS(): string {
   const css = `/* ============================================
    Base Styles
    ============================================ */
@@ -507,14 +523,23 @@ h1 {
 
   const cssPath = join(distDir, 'enclave/enclave.css');
   writeFileSync(cssPath, css, 'utf-8');
+
+  // Compute SRI hash
+  const cssBuffer = Buffer.from(css, 'utf-8');
+  const sri = computeSRIHash(cssBuffer);
+
   console.log(`✅ Generated: ${cssPath}`);
+  console.log(`🔒 SRI: ${sri}`);
+
+  return sri;
 }
 
 /**
  * Build the client script for the enclave
  * Compiles src/v2/client.ts and injects the hashed worker filename
+ * @returns SRI hash for the client script
  */
-async function buildEnclaveClient(workerFilename: string): Promise<void> {
+async function buildEnclaveClient(workerFilename: string): Promise<string> {
   console.log('\n📦 Building KMS Enclave Client...');
 
   const clientPath = join(distDir, 'enclave/enclave-client.js');
@@ -544,14 +569,21 @@ async function buildEnclaveClient(workerFilename: string): Promise<void> {
     external: [],
   });
 
+  // Compute SRI hash
+  const clientContent = readFileSync(clientPath);
+  const sri = computeSRIHash(clientContent);
+
   console.log(`✅ Built: ${clientPath}`);
+  console.log(`🔒 SRI: ${sri}`);
+
+  return sri;
 }
 
 /**
  * Generate the HTML wrapper for the enclave
  * Includes both iframe status display and modal UI for popup windows
  */
-function generateEnclaveHTML(workerHash: string): void {
+function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: string): void {
   console.log('\n📝 Generating KMS Enclave HTML...');
 
   const html = `<!DOCTYPE html>
@@ -562,7 +594,7 @@ function generateEnclaveHTML(workerHash: string): void {
   <title>AllTheServices KMS Enclave</title>
   <meta name="description" content="AllTheServices Key Management System Enclave">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="enclave.css">
+  <link rel="stylesheet" href="enclave.css" integrity="${cssSRI}" crossorigin="anonymous">
 </head>
 <body>
   <!-- Iframe Status Display (shown when embedded in iframe) -->
@@ -720,7 +752,7 @@ function generateEnclaveHTML(workerHash: string): void {
     </div>
   </div>
 
-  <script type="module" src="enclave-client.js"></script>
+  <script type="module" src="enclave-client.js" integrity="${clientSRI}" crossorigin="anonymous"></script>
 </body>
 </html>`;
 
@@ -739,14 +771,14 @@ async function main() {
 
   try {
     // Build the worker bundle
-    const { hash, filename } = await buildEnclaveWorker();
+    const { hash, filename, sri: workerSRI } = await buildEnclaveWorker();
 
     // Generate CSS, client script, and HTML
-    generateEnclaveCSS();
-    await buildEnclaveClient(filename);
-    generateEnclaveHTML(hash);
+    const cssSRI = generateEnclaveCSS();
+    const clientSRI = await buildEnclaveClient(filename);
+    generateEnclaveHTML(hash, cssSRI, clientSRI);
 
-    // Write build manifest
+    // Write build manifest with SRI hashes
     const manifest = {
       version: '2.0.0',
       buildTime: SOURCE_DATE_EPOCH,
@@ -755,7 +787,16 @@ async function main() {
           path: `enclave/${filename}`,
           filename: filename,
           hash: hash,
-          algorithm: 'sha256'
+          algorithm: 'sha256',
+          sri: workerSRI
+        },
+        client: {
+          path: 'enclave/enclave-client.js',
+          sri: clientSRI
+        },
+        css: {
+          path: 'enclave/enclave.css',
+          sri: cssSRI
         },
         html: {
           path: 'enclave/index.html'
@@ -776,6 +817,18 @@ async function main() {
     // Copy to Cloudflare Pages directory for deployment
     const cfPagesDir = join(rootDir, 'placeholders/cf-pages');
     console.log(`\n📤 Copying to Cloudflare Pages directory...`);
+
+    // Clean up old worker files (security: only keep current version)
+    console.log(`\n🧹 Cleaning up old worker files...`);
+    const fs = await import('fs');
+    const existingWorkers = fs.readdirSync(cfPagesDir)
+      .filter(f => f.startsWith('kms-worker.') && f.endsWith('.js') && f !== filename);
+
+    for (const oldWorker of existingWorkers) {
+      const oldPath = join(cfPagesDir, oldWorker);
+      fs.unlinkSync(oldPath);
+      console.log(`  🗑️  Removed: ${oldWorker}`);
+    }
 
     // Copy the worker JS file
     const cfWorkerPath = join(cfPagesDir, filename);
@@ -805,7 +858,21 @@ async function main() {
         version: '2.0.0',
         artifact: filename,
         sha256: hash,
-        sri: `sha256-${Buffer.from(hash, 'hex').toString('base64')}`,
+        files: {
+          worker: {
+            filename: filename,
+            sha256: hash,
+            sri: workerSRI
+          },
+          client: {
+            filename: 'enclave-client.js',
+            sri: clientSRI
+          },
+          css: {
+            filename: 'enclave.css',
+            sri: cssSRI
+          }
+        },
         timestamp: new Date().toISOString(),
         build: {
           reproducible: true,
@@ -815,7 +882,7 @@ async function main() {
       },
       allowed: [hash], // Current version is allowed
       deprecated: [],
-      comment: `Phase 2: Deterministic builds with content-addressed artifacts`
+      comment: `Phase 2.1: Deterministic builds with SRI (Subresource Integrity)`
     };
     writeFileSync(cfManifestPath, JSON.stringify(cfManifest, null, 2));
     console.log(`  ✅ ${cfManifestPath}`);

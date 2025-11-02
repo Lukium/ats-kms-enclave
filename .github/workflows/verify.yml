@@ -60,6 +60,7 @@ jobs:
           fi
         env:
           KMS_URL: https://kms.ats.run
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get worker hash from manifest
         id: manifest

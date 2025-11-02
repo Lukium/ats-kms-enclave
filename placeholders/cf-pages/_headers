@@ -68,8 +68,8 @@
 /*.js
   Content-Type: application/javascript; charset=utf-8
 
-  # No CORS needed (same-origin only via CSP)
-  Cross-Origin-Resource-Policy: same-origin
+  # Allow cross-origin loading for iframe embedding
+  Cross-Origin-Resource-Policy: cross-origin
 
   # Cache forever (content-addressed filename = immutable)
   Cache-Control: public, max-age=31536000, immutable
@@ -80,8 +80,8 @@
 /*.mjs
   Content-Type: application/javascript; charset=utf-8
 
-  # No CORS needed (same-origin only via CSP)
-  Cross-Origin-Resource-Policy: same-origin
+  # Allow cross-origin loading for iframe embedding
+  Cross-Origin-Resource-Policy: cross-origin
 
   # Cache forever (content-addressed filename = immutable)
   Cache-Control: public, max-age=31536000, immutable
@@ -93,8 +93,8 @@
 /*.css
   Content-Type: text/css; charset=utf-8
 
-  # No CORS needed (same-origin only via CSP)
-  Cross-Origin-Resource-Policy: same-origin
+  # Allow cross-origin loading for iframe embedding
+  Cross-Origin-Resource-Policy: cross-origin
 
   # Cache for 5 minutes (can be updated without content addressing)
   Cache-Control: public, max-age=300

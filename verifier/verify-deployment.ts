@@ -319,12 +319,18 @@ async function verifyReproducibleBuild(manifest: KMSManifest): Promise<Verificat
       message: `Build verification error: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
-    // Always return to the verifier branch
+    // Always return to the verifier branch and clean up
     try {
       console.log(`  🔄 Returning to verifier branch...`);
       execSync('git checkout verifier', { stdio: 'pipe' });
+
+      console.log(`  🧹 Cleaning up build artifacts...`);
+      // Remove all untracked files and directories (node_modules, dist, etc.)
+      execSync('git clean -fdx', { stdio: 'pipe' });
+
+      console.log(`  ✅ Cleanup complete`);
     } catch (cleanupError) {
-      console.log(`  ⚠️  Warning: Could not return to verifier branch`);
+      console.log(`  ⚠️  Warning: Cleanup failed - ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
     }
   }
 }

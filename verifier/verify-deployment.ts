@@ -321,11 +321,17 @@ async function main() {
     console.log(`🕒 Verified at: ${result.timestamp}`);
     console.log(`📦 Version: ${result.manifest?.current.version}`);
     console.log(`🔑 Hash: ${result.manifest?.current.sha256.substring(0, 8)}`);
-    process.exit(0);
   } else {
     console.log('❌ Verification failed!');
-    process.exit(1);
   }
+
+  // Output JSON for report generation
+  if (process.env.OUTPUT_JSON) {
+    const fs = await import('fs');
+    fs.writeFileSync(process.env.OUTPUT_JSON, JSON.stringify(result, null, 2));
+  }
+
+  process.exit(result.allPassed ? 0 : 1);
 }
 
 // Run if called directly

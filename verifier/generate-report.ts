@@ -49,17 +49,61 @@ ${result.checks.map(check => {
   if (check.details) {
     if (check.name === 'Worker Hash' && check.details.expected) {
       details = `
-- **Expected:** \`${check.details.expected}\`
-- **Actual:** \`${check.details.actual}\`
-- **URL:** ${check.details.url}`;
+
+**Expected Hash:**
+\`\`\`
+${check.details.expected}
+\`\`\`
+
+**Actual Hash:**
+\`\`\`
+${check.details.actual}
+\`\`\`
+
+**Source:** ${check.details.url}`;
     } else if (check.name === 'SRI Hashes' && Array.isArray(check.details)) {
-      details = '\n' + check.details.map((d: any) =>
-        `  - **${d.name}:** ${d.passed ? '✅' : '❌'} ${d.message}`
-      ).join('\n');
+      details = '\n\n' + check.details.map((d: any) => {
+        if (!d.passed && d.message && d.message.includes('expected')) {
+          // Extract hashes from error message
+          return `#### ${d.name} ❌
+
+${d.message}`;
+        }
+        return `#### ${d.name} ✅
+
+${d.message}`;
+      }).join('\n\n');
     } else if (check.name === 'Security Headers' && Array.isArray(check.details)) {
-      details = '\n' + check.details.map((h: any) =>
-        `  - **${h.name}:** ${h.passed ? '✅' : '❌'} ${h.message || 'OK'}`
-      ).join('\n');
+      details = '\n\n' + check.details.map((h: any) => {
+        if (h.passed) {
+          return `#### ${h.name} ✅
+
+**Expected:** \`${h.expected}\`
+
+**Actual:** ✅ Matches`;
+        } else {
+          return `#### ${h.name} ❌
+
+**Expected:**
+\`\`\`
+${h.expected}
+\`\`\`
+
+**Actual:**
+\`\`\`
+${h.actual || '(missing)'}
+\`\`\`
+
+**Issue:** ${h.message}`;
+        }
+      }).join('\n\n');
+    } else if (check.name === 'Allowed List' && check.details) {
+      details = `
+
+**Current Hash:** \`${check.details.currentHash}\`
+
+**Allowed Hashes:**
+${check.details.allowed.map((hash: string) => `- \`${hash}\``).join('\n')}`;
     }
   }
 
@@ -128,10 +172,23 @@ The verifier runs approximately **4 times per day** at random times to check tha
  * Main entry point
  */
 async function main() {
-  // This would typically receive the verification result via stdin or file
-  console.log('generateReport requires verification result data');
-  console.log('Use: echo $JSON | tsx generate-report.ts');
-  process.exit(1);
+  const inputFile = process.argv[2];
+  const runUrl = process.argv[3];
+
+  if (!inputFile) {
+    console.error('Usage: tsx generate-report.ts <verification-result.json> [runUrl]');
+    process.exit(1);
+  }
+
+  const fs = await import('fs');
+  const resultData = JSON.parse(fs.readFileSync(inputFile, 'utf-8'));
+
+  const report = generateReport({
+    result: resultData,
+    runUrl,
+  });
+
+  console.log(report);
 }
 
 // Run if called directly

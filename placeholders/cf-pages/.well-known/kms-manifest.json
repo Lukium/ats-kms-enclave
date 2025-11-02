@@ -16,14 +16,14 @@
       },
       "css": {
         "filename": "enclave.css",
-        "sri": "sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx"
+        "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-02T10:09:38.106Z",
+    "timestamp": "2025-11-02T12:24:38.036Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1762082561"
+      "SOURCE_DATE_EPOCH": "1762085884"
     }
   },
   "allowed": [

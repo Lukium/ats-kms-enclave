@@ -138,102 +138,142 @@ async function fetchManifest(baseUrl: string): Promise<KMSManifest> {
 }
 
 /**
- * Fetch the deployed worker and compute its hash
+ * Verify all hash integrity checks (SHA256 and SRI)
  */
-async function verifyWorkerHash(baseUrl: string, manifest: KMSManifest): Promise<VerificationCheck> {
-  const workerUrl = `${baseUrl}/${manifest.current.files.worker.filename}`;
-  console.log(`📥 Fetching worker: ${workerUrl}`);
+async function verifyHashIntegrity(baseUrl: string, manifest: KMSManifest): Promise<VerificationCheck> {
+  console.log(`🔐 Verifying hash integrity...`);
 
+  const results: { name: string; passed: boolean; expected: string; actual: string }[] = [];
+
+  // 1. Verify Worker SHA256 hash
   try {
+    const workerUrl = `${baseUrl}/${manifest.current.files.worker.filename}`;
     const response = await fetch(workerUrl);
     if (!response.ok) {
-      return {
-        name: 'Worker Hash',
+      results.push({
+        name: 'Worker SHA256',
         passed: false,
-        message: `Failed to fetch worker: HTTP ${response.status}`,
-      };
-    }
-
-    const content = await response.arrayBuffer();
-    const hash = createHash('sha256').update(Buffer.from(content)).digest('hex');
-
-    const expected = manifest.current.files.worker.sha256;
-    const passed = hash === expected;
-
-    return {
-      name: 'Worker Hash',
-      passed,
-      message: passed ? 'Worker hash matches manifest' : 'Worker hash mismatch',
-      details: {
-        expected,
+        expected: manifest.current.files.worker.sha256,
+        actual: `Failed to fetch: HTTP ${response.status}`,
+      });
+    } else {
+      const content = await response.arrayBuffer();
+      const hash = createHash('sha256').update(Buffer.from(content)).digest('hex');
+      results.push({
+        name: 'Worker SHA256',
+        passed: hash === manifest.current.files.worker.sha256,
+        expected: manifest.current.files.worker.sha256,
         actual: hash,
-        url: workerUrl,
-      },
-    };
+      });
+    }
   } catch (error) {
-    return {
-      name: 'Worker Hash',
+    results.push({
+      name: 'Worker SHA256',
       passed: false,
-      message: error instanceof Error ? error.message : String(error),
-    };
+      expected: manifest.current.files.worker.sha256,
+      actual: error instanceof Error ? error.message : String(error),
+    });
   }
-}
 
-/**
- * Verify SRI hashes for all resources
- */
-async function verifySRIHashes(baseUrl: string, manifest: KMSManifest): Promise<VerificationCheck> {
-  console.log(`🔐 Verifying SRI hashes...`);
-
-  const resources = [
-    { name: 'client.js', filename: manifest.current.files.client.filename, sri: manifest.current.files.client.sri },
-    { name: 'enclave.css', filename: manifest.current.files.css.filename, sri: manifest.current.files.css.sri },
-  ];
-
-  const results: { name: string; passed: boolean; message: string; expected?: string; actual?: string; url?: string }[] = [];
-
-  for (const resource of resources) {
-    const url = `${baseUrl}/${resource.filename}`;
-
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        results.push({
-          name: resource.name,
-          passed: false,
-          message: `Failed to fetch: HTTP ${response.status}`,
-        });
-        continue;
-      }
-
+  // 2. Verify Worker SRI hash
+  try {
+    const workerUrl = `${baseUrl}/${manifest.current.files.worker.filename}`;
+    const response = await fetch(workerUrl);
+    if (!response.ok) {
+      results.push({
+        name: 'Worker SRI',
+        passed: false,
+        expected: manifest.current.files.worker.sri,
+        actual: `Failed to fetch: HTTP ${response.status}`,
+      });
+    } else {
       const content = await response.arrayBuffer();
       const hash = createHash('sha384').update(Buffer.from(content)).digest('base64');
       const actualSRI = `sha384-${hash}`;
-
-      const passed = actualSRI === resource.sri;
       results.push({
-        name: resource.name,
-        passed,
-        message: passed ? 'SRI hash matches' : `SRI mismatch`,
-        expected: resource.sri,
+        name: 'Worker SRI',
+        passed: actualSRI === manifest.current.files.worker.sri,
+        expected: manifest.current.files.worker.sri,
         actual: actualSRI,
-        url,
-      });
-    } catch (error) {
-      results.push({
-        name: resource.name,
-        passed: false,
-        message: error instanceof Error ? error.message : String(error),
       });
     }
+  } catch (error) {
+    results.push({
+      name: 'Worker SRI',
+      passed: false,
+      expected: manifest.current.files.worker.sri,
+      actual: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // 3. Verify Client.js SRI hash
+  try {
+    const clientUrl = `${baseUrl}/${manifest.current.files.client.filename}`;
+    const response = await fetch(clientUrl);
+    if (!response.ok) {
+      results.push({
+        name: 'Client.js SRI',
+        passed: false,
+        expected: manifest.current.files.client.sri,
+        actual: `Failed to fetch: HTTP ${response.status}`,
+      });
+    } else {
+      const content = await response.arrayBuffer();
+      const hash = createHash('sha384').update(Buffer.from(content)).digest('base64');
+      const actualSRI = `sha384-${hash}`;
+      results.push({
+        name: 'Client.js SRI',
+        passed: actualSRI === manifest.current.files.client.sri,
+        expected: manifest.current.files.client.sri,
+        actual: actualSRI,
+      });
+    }
+  } catch (error) {
+    results.push({
+      name: 'Client.js SRI',
+      passed: false,
+      expected: manifest.current.files.client.sri,
+      actual: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // 4. Verify Enclave.css SRI hash
+  try {
+    const cssUrl = `${baseUrl}/${manifest.current.files.css.filename}`;
+    const response = await fetch(cssUrl);
+    if (!response.ok) {
+      results.push({
+        name: 'Enclave.css SRI',
+        passed: false,
+        expected: manifest.current.files.css.sri,
+        actual: `Failed to fetch: HTTP ${response.status}`,
+      });
+    } else {
+      const content = await response.arrayBuffer();
+      const hash = createHash('sha384').update(Buffer.from(content)).digest('base64');
+      const actualSRI = `sha384-${hash}`;
+      results.push({
+        name: 'Enclave.css SRI',
+        passed: actualSRI === manifest.current.files.css.sri,
+        expected: manifest.current.files.css.sri,
+        actual: actualSRI,
+      });
+    }
+  } catch (error) {
+    results.push({
+      name: 'Enclave.css SRI',
+      passed: false,
+      expected: manifest.current.files.css.sri,
+      actual: error instanceof Error ? error.message : String(error),
+    });
   }
 
   const allPassed = results.every(r => r.passed);
 
   return {
-    name: 'SRI Hashes',
+    name: 'Hash Verification',
     passed: allPassed,
-    message: allPassed ? 'All SRI hashes verified' : 'Some SRI hashes failed',
+    message: allPassed ? 'All hashes verified' : 'Some hash verifications failed',
     details: results,
   };
 }
@@ -438,19 +478,15 @@ export async function verifyDeployment(baseUrl: string): Promise<VerificationRes
       message: `Manifest fetched (v${manifest.current.version})`,
     });
 
-    // 2. Verify worker hash
-    const workerCheck = await verifyWorkerHash(baseUrl, manifest);
-    checks.push(workerCheck);
+    // 2. Verify hash integrity (SHA256 + SRI)
+    const hashCheck = await verifyHashIntegrity(baseUrl, manifest);
+    checks.push(hashCheck);
 
-    // 3. Verify SRI hashes
-    const sriCheck = await verifySRIHashes(baseUrl, manifest);
-    checks.push(sriCheck);
-
-    // 4. Verify allowed list
+    // 3. Verify allowed list
     const allowedCheck = verifyAllowedList(manifest);
     checks.push(allowedCheck);
 
-    // 5. Verify security headers
+    // 4. Verify security headers
     console.log();
     const headersResult = await verifyHeaders(baseUrl);
     checks.push({

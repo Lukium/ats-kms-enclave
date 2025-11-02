@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
 **Status:** ✅ VERIFIED
-**Timestamp:** Sun, 02 Nov 2025 13:52:40 GMT
+**Timestamp:** Sun, 02 Nov 2025 14:02:55 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013239851)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013339256)
 
 ---
 
@@ -123,9 +123,33 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 Build is reproducible - hash matches
 
+**Commit:** `ba6ea07a6d2688daa600def0ac5fa267f8cc8716`
+
+**Expected Hash:** `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
+
+**Actual Hash:** `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
+
+**Reproduce This Build:**
+```bash
+git fetch origin ba6ea07a6d2688daa600def0ac5fa267f8cc8716
+git checkout ba6ea07a6d2688daa600def0ac5fa267f8cc8716
+pnpm install --frozen-lockfile
+SOURCE_DATE_EPOCH=1762091064 pnpm build:reproducible
+sha256sum dist/enclave/kms-worker.d5333940.js
+```
+
+The hash from the last command should match: `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
+
 ### ✅ GitHub Attestation
 
 Attestation verified via GitHub CLI
+
+**Artifact:** `kms-worker.d5333940.js`
+
+**Commit:** `ba6ea07a6d2688daa600def0ac5fa267f8cc8716`
+
+**Repository Attestations:**
+https://github.com/Lukium/ats-kms-enclave/attestations
 
 
 ---
@@ -176,6 +200,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 13:52:40 GMT*
+*Last updated: Sun, 02 Nov 2025 14:02:55 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

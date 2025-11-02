@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
 **Status:** ✅ VERIFIED
-**Timestamp:** Sun, 02 Nov 2025 11:13:41 GMT
+**Timestamp:** Sun, 02 Nov 2025 11:18:05 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19011446068)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19011497152)
 
 ---
 
@@ -35,11 +35,31 @@ All SRI hashes verified
 
 #### client.js ✅
 
-SRI hash matches
+**Expected SRI:**
+```
+sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR
+```
+
+**Actual SRI:**
+```
+sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR
+```
+
+**Source:** https://kms.ats.run/enclave-client.js
 
 #### enclave.css ✅
 
-SRI hash matches
+**Expected SRI:**
+```
+sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx
+```
+
+**Actual SRI:**
+```
+sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx
+```
+
+**Source:** https://kms.ats.run/enclave.css
 
 ### ✅ Allowed List
 
@@ -59,6 +79,15 @@ All headers verified
 **Expected:** `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'`
 
 **Actual:** ✅ Matches
+
+**Frame Ancestors Explanation:**
+The `frame-ancestors` directive controls which origins can embed the KMS enclave in an iframe:
+
+- `https://alpha.allthe.services` - Development build of the AllTheServices app
+- `https://beta.allthe.services` - Beta build (not yet available)
+- `https://allthe.services` - Production build (not yet available)
+- `https://phase2-demo.allthe.services` - Demo for the KMS enclave itself
+- `http://localhost:5173` - Local development counterpart of the dev build
 
 #### permissions-policy ✅
 
@@ -143,6 +172,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 11:13:41 GMT*
+*Last updated: Sun, 02 Nov 2025 11:18:05 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

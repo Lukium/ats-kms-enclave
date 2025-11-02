@@ -319,18 +319,15 @@ async function verifyReproducibleBuild(manifest: KMSManifest): Promise<Verificat
       message: `Build verification error: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
-    // Always return to the verifier branch and clean up
+    // Always return to the verifier branch
+    // Note: Build artifacts (dist, node_modules) are left as untracked files
+    // They don't interfere with verification and will be cleaned up when the runner is destroyed
     try {
       console.log(`  🔄 Returning to verifier branch...`);
-      execSync('git checkout verifier', { stdio: 'pipe' });
-
-      console.log(`  🧹 Cleaning up build artifacts...`);
-      // Remove specific build artifacts, but keep verifier/ directory
-      execSync('rm -rf dist node_modules build placeholders/cf-pages', { stdio: 'pipe' });
-
-      console.log(`  ✅ Cleanup complete`);
+      execSync('git checkout -f verifier', { stdio: 'pipe' });
+      console.log(`  ✅ Returned to verifier branch`);
     } catch (cleanupError) {
-      console.log(`  ⚠️  Warning: Cleanup failed - ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      console.log(`  ⚠️  Warning: Failed to return to verifier branch - ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
     }
   }
 }

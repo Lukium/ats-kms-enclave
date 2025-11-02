@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
 **Status:** ✅ VERIFIED
-**Timestamp:** Sun, 02 Nov 2025 11:18:05 GMT
+**Timestamp:** Sun, 02 Nov 2025 11:28:41 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19011497152)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19011611985)
 
 ---
 
@@ -91,7 +91,7 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 #### permissions-policy ✅
 
-**Expected:** `geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()`
+**Expected:** `accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()`
 
 **Actual:** ✅ Matches
 
@@ -172,6 +172,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 11:18:05 GMT*
+*Last updated: Sun, 02 Nov 2025 11:28:41 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

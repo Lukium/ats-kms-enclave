@@ -135,7 +135,7 @@ async function verifySRIHashes(baseUrl: string, manifest: KMSManifest): Promise<
     { name: 'enclave.css', filename: manifest.current.files.css.filename, sri: manifest.current.files.css.sri },
   ];
 
-  const results: { name: string; passed: boolean; message: string }[] = [];
+  const results: { name: string; passed: boolean; message: string; expected?: string; actual?: string; url?: string }[] = [];
 
   for (const resource of resources) {
     const url = `${baseUrl}/${resource.filename}`;
@@ -159,7 +159,10 @@ async function verifySRIHashes(baseUrl: string, manifest: KMSManifest): Promise<
       results.push({
         name: resource.name,
         passed,
-        message: passed ? 'SRI hash matches' : `SRI mismatch: expected ${resource.sri}, got ${actualSRI}`,
+        message: passed ? 'SRI hash matches' : `SRI mismatch`,
+        expected: resource.sri,
+        actual: actualSRI,
+        url,
       });
     } catch (error) {
       results.push({

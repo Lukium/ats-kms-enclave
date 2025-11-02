@@ -63,24 +63,51 @@ ${check.details.actual}
 **Source:** ${check.details.url}`;
     } else if (check.name === 'SRI Hashes' && Array.isArray(check.details)) {
       details = '\n\n' + check.details.map((d: any) => {
-        if (!d.passed && d.message && d.message.includes('expected')) {
-          // Extract hashes from error message
+        if (d.expected && d.actual) {
+          const status = d.passed ? '✅' : '❌';
+          return `#### ${d.name} ${status}
+
+**Expected SRI:**
+\`\`\`
+${d.expected}
+\`\`\`
+
+**Actual SRI:**
+\`\`\`
+${d.actual}
+\`\`\`
+
+**Source:** ${d.url}`;
+        } else {
           return `#### ${d.name} ❌
 
 ${d.message}`;
         }
-        return `#### ${d.name} ✅
-
-${d.message}`;
       }).join('\n\n');
     } else if (check.name === 'Security Headers' && Array.isArray(check.details)) {
       details = '\n\n' + check.details.map((h: any) => {
+        let headerDetails = '';
+
+        // Add CSP frame-ancestors explanation
+        if (h.name === 'content-security-policy' && h.passed) {
+          headerDetails = `
+
+**Frame Ancestors Explanation:**
+The \`frame-ancestors\` directive controls which origins can embed the KMS enclave in an iframe:
+
+- \`https://alpha.allthe.services\` - Development build of the AllTheServices app
+- \`https://beta.allthe.services\` - Beta build (not yet available)
+- \`https://allthe.services\` - Production build (not yet available)
+- \`https://phase2-demo.allthe.services\` - Demo for the KMS enclave itself
+- \`http://localhost:5173\` - Local development counterpart of the dev build`;
+        }
+
         if (h.passed) {
           return `#### ${h.name} ✅
 
 **Expected:** \`${h.expected}\`
 
-**Actual:** ✅ Matches`;
+**Actual:** ✅ Matches${headerDetails}`;
         } else {
           return `#### ${h.name} ❌
 

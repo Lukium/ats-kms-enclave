@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
   deployments: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-deploy:
@@ -41,6 +43,15 @@ jobs:
           WORKER_HASH=$(sha256sum dist/enclave/kms-worker.*.js | cut -d' ' -f1)
           echo "worker_hash=$WORKER_HASH" >> $GITHUB_OUTPUT
           echo "✅ Worker hash: $WORKER_HASH"
+
+      - name: Generate build attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            dist/enclave/kms-worker.*.js
+            dist/enclave/enclave-client.js
+            dist/enclave/enclave.css
+            dist/enclave/.well-known/kms-manifest.json
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1

@@ -38,7 +38,7 @@ jobs:
       - name: Compute artifact hash
         id: hash
         run: |
-          WORKER_HASH=$(sha256sum dist/kms-worker.*.js | cut -d' ' -f1)
+          WORKER_HASH=$(sha256sum dist/enclave/kms-worker.*.js | cut -d' ' -f1)
           echo "worker_hash=$WORKER_HASH" >> $GITHUB_OUTPUT
           echo "✅ Worker hash: $WORKER_HASH"
 

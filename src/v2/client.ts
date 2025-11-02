@@ -2352,7 +2352,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       console.log('[KMS Test] Popup opened, waiting 2s then sending message...');
       setTimeout(() => {
         console.log('[KMS Test] Sending test message to popup');
-        popup.postMessage({ type: 'test-message', data: 'Hello from iframe!' }, window.location.origin);
+        popup.postMessage({ type: 'test-message', data: 'COOP TEST v2 - iframe to popup works!' }, window.location.origin);
       }, 2000);
     };
     console.log('[KMS Test] Test function available: window.testIframePopup()');

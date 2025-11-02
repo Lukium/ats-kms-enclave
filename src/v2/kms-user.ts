@@ -223,7 +223,7 @@ export class KMSUser {
       this.iframe.style.zIndex = '99999';
       this.iframe.style.display = 'none'; // Hidden by default
 
-      this.iframe.sandbox.add('allow-scripts', 'allow-same-origin');
+      this.iframe.sandbox.add('allow-scripts', 'allow-same-origin', 'allow-popups');
       this.iframe.allow = 'publickey-credentials-get; publickey-credentials-create';
 
       // Setup message handler (store bound reference for later removal)

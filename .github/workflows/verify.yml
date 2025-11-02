@@ -143,6 +143,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Copy attestation outputs to temp location
+          mkdir -p /tmp/attestation
+          cp attestation-output/* /tmp/attestation/
+
           # Try to checkout attestation branch, create if doesn't exist
           git fetch origin attestation || true
           git checkout attestation || git checkout --orphan attestation
@@ -151,10 +155,10 @@ jobs:
           git rm -rf . || true
           git clean -fdx  # Remove untracked files too
 
-          # Copy attestation outputs
-          cp attestation-output/* .
+          # Copy attestation outputs from temp
+          cp /tmp/attestation/* .
 
-          # Add only report files (not node_modules or other junk)
+          # Add only report files
           git add README.md verification-badge.svg verification-badge.json
           git commit -m "chore: Update verification report
 

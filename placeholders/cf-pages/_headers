@@ -24,11 +24,10 @@
   # Permissions Policy - Disable unnecessary browser features
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
 
-  # Cross-Origin Policies - TEMPORARY: Disabled for testing popup messaging
-  # TODO: Re-enable with proper COEP compliance for all subresources
-  # Cross-Origin-Opener-Policy: same-origin-allow-popups
-  # Cross-Origin-Embedder-Policy: require-corp
-  # Cross-Origin-Resource-Policy: same-origin
+  # Cross-Origin Policies - Enable for cross-origin isolation
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: cross-origin
 
   # Standard security headers
   X-Content-Type-Options: nosniff

@@ -2,10 +2,10 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "artifact": "kms-worker.0a39d5c6.js",
-    "sha256": "0a39d5c69cfc221bd0699187e661f455554e6267f5d74be71251732ea0a49100",
-    "sri": "sha256-CjnVxpz8IhvQaZGH5mH0VVVOYmf110vnElFzLqCkkQA=",
-    "timestamp": "2025-11-01T17:04:31.724Z",
+    "artifact": "kms-worker.d5333940.js",
+    "sha256": "d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423",
+    "sri": "sha256-1TM5QD02zZxYqJbgwchWIT4Mbvnjl50oFWTszBgXFCM=",
+    "timestamp": "2025-11-02T09:15:02.628Z",
     "build": {
       "reproducible": true,
       "environment": "production",
@@ -13,7 +13,7 @@
     }
   },
   "allowed": [
-    "0a39d5c69cfc221bd0699187e661f455554e6267f5d74be71251732ea0a49100"
+    "d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423"
   ],
   "deprecated": [],
   "comment": "Phase 2: Deterministic builds with content-addressed artifacts"

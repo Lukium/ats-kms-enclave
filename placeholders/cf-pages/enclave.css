@@ -69,6 +69,25 @@ h1 {
   margin-top: 20px;
 }
 
+.verification-badge {
+  margin: 16px 0;
+  text-align: center;
+}
+
+.verification-badge a {
+  display: inline-block;
+  transition: opacity 0.2s;
+}
+
+.verification-badge a:hover {
+  opacity: 0.8;
+}
+
+.verification-badge img {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ============================================
    KMS Modal Styles (for popup windows)
    ============================================ */

@@ -202,6 +202,25 @@ h1 {
   margin-top: 20px;
 }
 
+.verification-badge {
+  margin: 16px 0;
+  text-align: center;
+}
+
+.verification-badge a {
+  display: inline-block;
+  transition: opacity 0.2s;
+}
+
+.verification-badge a:hover {
+  opacity: 0.8;
+}
+
+.verification-badge img {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ============================================
    KMS Modal Styles (for popup windows)
    ============================================ */
@@ -602,6 +621,11 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
     <div class="header">
       <img src="logo.png" alt="AllTheServices" class="logo">
       <h1>AllTheServices KMS Enclave</h1>
+    </div>
+    <div class="verification-badge">
+      <a href="https://github.com/Lukium/ats-kms-enclave/tree/attestation" target="_blank" rel="noopener noreferrer">
+        <img src="https://raw.githubusercontent.com/Lukium/ats-kms-enclave/attestation/verification-badge.svg" alt="KMS Verification Status" />
+      </a>
     </div>
     <p><span class="status">Active</span> - Worker loaded and ready</p>
     <div>

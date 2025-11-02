@@ -1,0 +1,73 @@
+name: Build and Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy KMS Enclave
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build enclave (reproducible)
+        run: pnpm build:reproducible
+
+      - name: Compute artifact hash
+        id: hash
+        run: |
+          WORKER_HASH=$(sha256sum dist/kms-*.js | cut -d' ' -f1)
+          echo "worker_hash=$WORKER_HASH" >> $GITHUB_OUTPUT
+          echo "✅ Worker hash: $WORKER_HASH"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: kms-ats-run
+          directory: dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for deployment to propagate
+        run: sleep 30
+
+      - name: Trigger verification workflow
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          event-type: verify-deployment
+          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}", "worker_hash": "${{ steps.hash.outputs.worker_hash }}"}'
+
+      - name: Summary
+        run: |
+          echo "## 🚀 KMS Enclave Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Worker Hash:** \`${{ steps.hash.outputs.worker_hash }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployed to:** https://kms.ats.run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verification workflow triggered automatically." >> $GITHUB_STEP_SUMMARY

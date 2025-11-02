@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
 **Status:** ❌ FAILED
-**Timestamp:** Sun, 02 Nov 2025 12:39:48 GMT
+**Timestamp:** Sun, 02 Nov 2025 12:47:30 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012383888)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012477576)
 
 ---
 
@@ -29,9 +29,9 @@ d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423
 
 **Source:** https://kms.ats.run/kms-worker.d5333940.js
 
-### ❌ SRI Hashes
+### ✅ SRI Hashes
 
-Some SRI hashes failed
+All SRI hashes verified
 
 #### client.js ✅
 
@@ -47,11 +47,11 @@ sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR
 
 **Source:** https://kms.ats.run/enclave-client.js
 
-#### enclave.css ❌
+#### enclave.css ✅
 
 **Expected SRI:**
 ```
-sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx
+sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ
 ```
 
 **Actual SRI:**
@@ -145,7 +145,7 @@ strict-origin-when-cross-origin
 
 
 - **Version:** 2.0.0
-- **Build Time:** Fri, 01 Jan 2021 00:00:00 GMT
+- **Build Time:** Sun, 02 Nov 2025 12:45:05 GMT
 - **Reproducible:** Yes
 - **Environment:** production
 
@@ -158,7 +158,7 @@ strict-origin-when-cross-origin
   - SRI: `sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR`
 
 - **CSS:** `enclave.css`
-  - SRI: `sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx`
+  - SRI: `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ`
 
 ### Allowed Versions
 - `d5333940...`
@@ -187,6 +187,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 12:39:48 GMT*
+*Last updated: Sun, 02 Nov 2025 12:47:30 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

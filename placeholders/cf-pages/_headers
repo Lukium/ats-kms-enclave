@@ -25,8 +25,9 @@
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
 
   # Cross-Origin Policies - Enable for cross-origin isolation
+  # Using credentialless to allow embedding from parent without COEP
   Cross-Origin-Opener-Policy: same-origin-allow-popups
-  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Embedder-Policy: credentialless
   Cross-Origin-Resource-Policy: cross-origin
 
   # Standard security headers

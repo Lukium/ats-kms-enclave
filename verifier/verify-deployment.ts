@@ -325,8 +325,8 @@ async function verifyReproducibleBuild(manifest: KMSManifest): Promise<Verificat
       execSync('git checkout verifier', { stdio: 'pipe' });
 
       console.log(`  🧹 Cleaning up build artifacts...`);
-      // Remove all untracked files and directories (node_modules, dist, etc.)
-      execSync('git clean -fdx', { stdio: 'pipe' });
+      // Remove specific build artifacts, but keep verifier/ directory
+      execSync('rm -rf dist node_modules build placeholders/cf-pages', { stdio: 'pipe' });
 
       console.log(`  ✅ Cleanup complete`);
     } catch (cleanupError) {

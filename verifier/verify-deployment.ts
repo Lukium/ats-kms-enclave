@@ -333,26 +333,71 @@ async function verifyReproducibleBuild(manifest: KMSManifest): Promise<Verificat
 }
 
 /**
- * Placeholder for Rekor verification (Phase 2.2)
+ * Verify GitHub attestations for built artifacts
  */
-function verifyRekorAttestation(manifest: KMSManifest): VerificationCheck {
-  // TODO: Phase 2.2 - Implement Rekor transparency log verification
-  // This will:
-  // 1. Query Rekor for entry by hash
-  // 2. Verify signature with cosign
-  // 3. Validate timestamp
-  // 4. Confirm entry matches manifest
+async function verifyGitHubAttestation(baseUrl: string, manifest: KMSManifest): Promise<VerificationCheck> {
+  console.log(`🔐 Verifying GitHub attestations...`);
 
-  return {
-    name: 'Rekor Attestation',
-    passed: true, // Skipped for now
-    message: '⏭️  Skipped (Phase 2.2)',
-    details: {
-      phase: '2.2',
-      status: 'not-implemented',
-      hash: manifest.current.sha256,
-    },
-  };
+  try {
+    // Download the worker artifact to verify
+    const workerUrl = `${baseUrl}/${manifest.current.files.worker.filename}`;
+    console.log(`  📥 Downloading worker: ${workerUrl}`);
+
+    const response = await fetch(workerUrl);
+    if (!response.ok) {
+      return {
+        name: 'GitHub Attestation',
+        passed: false,
+        message: `Failed to download worker: HTTP ${response.status}`,
+      };
+    }
+
+    const workerContent = await response.arrayBuffer();
+    const tempWorkerPath = `/tmp/${manifest.current.files.worker.filename}`;
+    require('fs').writeFileSync(tempWorkerPath, Buffer.from(workerContent));
+
+    // Verify attestation using gh CLI
+    console.log(`  🔍 Verifying attestation with gh CLI...`);
+    try {
+      execSync(`gh attestation verify ${tempWorkerPath} -R Lukium/ats-kms-enclave`, {
+        stdio: 'pipe',
+        encoding: 'utf-8'
+      });
+
+      console.log(`  ✅ Attestation verified successfully`);
+
+      return {
+        name: 'GitHub Attestation',
+        passed: true,
+        message: 'Attestation verified via GitHub CLI',
+        details: {
+          artifact: manifest.current.files.worker.filename,
+          commit: manifest.current.commit,
+          verifiedVia: 'gh attestation verify',
+        },
+      };
+    } catch (verifyError: any) {
+      const errorOutput = verifyError.stderr || verifyError.stdout || verifyError.message;
+      console.log(`  ❌ Attestation verification failed: ${errorOutput}`);
+
+      return {
+        name: 'GitHub Attestation',
+        passed: false,
+        message: 'Attestation verification failed',
+        details: {
+          artifact: manifest.current.files.worker.filename,
+          error: errorOutput,
+        },
+      };
+    }
+  } catch (error) {
+    console.log(`  ❌ Attestation verification error: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      name: 'GitHub Attestation',
+      passed: false,
+      message: `Verification error: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
@@ -403,10 +448,10 @@ export async function verifyDeployment(baseUrl: string): Promise<VerificationRes
     const buildCheck = await verifyReproducibleBuild(manifest);
     checks.push(buildCheck);
 
-    // 7. [Future] Verify Rekor attestation
+    // 7. Verify GitHub attestation
     console.log();
-    const rekorCheck = verifyRekorAttestation(manifest);
-    checks.push(rekorCheck);
+    const attestationCheck = await verifyGitHubAttestation(baseUrl, manifest);
+    checks.push(attestationCheck);
 
   } catch (error) {
     checks.push({

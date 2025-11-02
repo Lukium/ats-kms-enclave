@@ -38,7 +38,7 @@ jobs:
       - name: Compute artifact hash
         id: hash
         run: |
-          WORKER_HASH=$(sha256sum dist/kms-*.js | cut -d' ' -f1)
+          WORKER_HASH=$(sha256sum dist/kms-worker.*.js | cut -d' ' -f1)
           echo "worker_hash=$WORKER_HASH" >> $GITHUB_OUTPUT
           echo "✅ Worker hash: $WORKER_HASH"
 
@@ -51,17 +51,6 @@ jobs:
           directory: dist
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Wait for deployment to propagate
-        run: sleep 30
-
-      - name: Trigger verification workflow
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          event-type: verify-deployment
-          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}", "worker_hash": "${{ steps.hash.outputs.worker_hash }}"}'
-
       - name: Summary
         run: |
           echo "## 🚀 KMS Enclave Deployment" >> $GITHUB_STEP_SUMMARY
@@ -70,4 +59,4 @@ jobs:
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "**Deployed to:** https://kms.ats.run" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Verification workflow triggered automatically." >> $GITHUB_STEP_SUMMARY
+          echo "Verification runs automatically every 6 hours via scheduled workflow." >> $GITHUB_STEP_SUMMARY

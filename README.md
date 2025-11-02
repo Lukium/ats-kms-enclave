@@ -41,7 +41,7 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 
 **[Try the Phase 1 demo →](example/phase-1/README.md)** (requires two terminals: `pnpm demo:phase-1:kms` and `pnpm demo:phase-1:parent`, or run `make demo` for instructions)
 
-This represents the bulk of the core KMS functionality. See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the full roadmap.
+This represents the bulk of the core KMS functionality. See [docs/architecture/crypto/v2/README.md](docs/architecture/crypto/v2/README.md) for implementation details.
 
 **Phase 2: Reproducible Builds & Verification** ✅ **COMPLETE** (2025-11-02)
 - ✅ **Reproducible Builds** - Deterministic build pipeline with SOURCE_DATE_EPOCH
@@ -53,7 +53,7 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 - ✅ **KMS Manifest** - Version metadata with attestation URLs
 - ✅ **Verification Reports** - Public audit trail on attestation branch
 
-**[View verification reports →](https://github.com/Lukium/ats-kms-enclave/tree/attestation)** | **[Verifier source code →](https://github.com/Lukium/ats-kms-enclave/tree/verifier)**
+**[Try the live demo →](https://phase2-demo.allthe.services)** | **[View verification reports →](https://github.com/Lukium/ats-kms-enclave/tree/attestation)** | **[Verifier source code →](https://github.com/Lukium/ats-kms-enclave/tree/verifier)**
 
 
 ### Test Coverage & Statistics
@@ -112,13 +112,16 @@ The design has been broken down into focused documents:
 ### What This Provides
 
 ✅ **Isolated key management** - Keys cannot be accessed by compromised PWA
+
 ✅ **Non-extractable keys** - WebCrypto prevents key export
+
 ✅ **Audit logging** - Tamper-evident chain tracks all operations
+
 ✅ **Defense in depth** - Multiple independent security layers
 
 ### What This Requires
 
-🔒 **Trust in**: Browser vendor, OS, hardware, user device security
+🔒 **Trust in**: Browser vendor, OS, hardware, and user device security — integrity of these components is assumed, though verifiable builds and transparency reduce the risk of unnoticed tampering.
 
 ⚖️ **Isolation benefits**: Cross-origin separation prevents PWA access to KMS internals, significantly raising the bar for attackers.
 
@@ -131,11 +134,13 @@ The design has been broken down into focused documents:
 - MITM attacks
 - Service Worker tampering
 
-**Does NOT defend against**:
-- Malicious browser extensions
-- Compromised OS
-- Physical device access
-- Browser implementation bugs
+**Partially mitigates but does not fully defend against**:
+- **Malicious browser extensions** – can intercept runtime secrets if granted elevated privileges
+- **Compromised OS** – can inspect process memory or capture user input during unlock
+- **Physical device access** – attacker can extract data or observe unlock events
+- **Browser implementation bugs** – may bypass isolation or leak memory
+
+**Notes**: The KMS minimizes risk through ephemeral key unwrapping, strict zeroization, and continuous integrity verification. While these measures reduce exposure windows and make exploitation difficult, they cannot fully protect against a compromised runtime environment (browser or OS).
 
 See [Security Model](docs/architecture/crypto/design/05-security-model.md) for details.
 
@@ -151,7 +156,7 @@ Our approach takes a different path:
 - Verification can be automated (e.g., via GitHub Actions) to confirm running code matches public release
 - **Single codebase** works across all platforms with modern browsers
 
-**The tradeoff**: While native applications can leverage stronger OS-level isolation primitives, our model achieves **stronger global trust** through verifiability, transparency, and platform neutrality. In practice, this can yield a *higher trust ceiling* — not because the code is unbreakable, but because **it's impossible to hide a break**.
+**The tradeoff**: While native applications can leverage stronger OS-level isolation primitives, our model achieves **stronger global trust** through verifiability, transparency, and platform neutrality. We also leverage OS-level security for user authentication via WebAuthn, providing hardware-backed identity verification. In practice, this can yield a *higher trust ceiling* — not because the code is unbreakable, but because **it's extremely difficult to hide a break**.
 
 This positions the KMS enclave as a forward-looking trust model: **shifting trust from authority to transparency**.
 

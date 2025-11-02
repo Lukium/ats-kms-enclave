@@ -127,7 +127,7 @@ async function fetchManifest(baseUrl: string): Promise<KMSManifest> {
 
     console.log(`✅ Manifest fetched (version: ${manifest.current.version})`);
     return manifest;
-  }, 3, 2000, 'Manifest fetch');
+  }, 4, 3000, 'Manifest fetch');
 }
 
 /**

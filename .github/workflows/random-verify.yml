@@ -1,10 +1,11 @@
 name: Random KMS Verification
 
 on:
-  # Run every minute with 4/1440 probability (~4 verifications per day at random times)
-  # This creates a 1-minute attack window instead of 1 hour
+  # Run every 10 minutes with 4/144 probability (~4 verifications per day at random times)
+  # This creates a 10-minute attack window
+  # Note: GitHub Actions enforces minimum ~5-10 minute intervals for scheduled workflows
   schedule:
-    - cron: '* * * * *'  # Every minute
+    - cron: '*/10 * * * *'  # Every 10 minutes
 
   # Manual trigger for testing
   workflow_dispatch:
@@ -18,20 +19,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Roll the dice (4/1440 = 1/360 probability)
+      - name: Roll the dice (4/144 = 1/36 probability)
         id: dice
         run: |
-          # Generate random number 0-359 (360 possibilities)
-          # If 0, trigger verification (1/360 = 4/1440 chance per minute)
+          # Generate random number 0-35 (36 possibilities)
+          # If 0, trigger verification (1/36 = 4/144 chance per 10 minutes)
           # Expected: ~4 verifications per day at completely random times
-          ROLL=$((RANDOM % 360))
+          ROLL=$((RANDOM % 36))
           echo "Dice roll: $ROLL (need 0 to trigger)"
 
           if [ $ROLL -eq 0 ]; then
             echo "🎲 Lucky roll! Triggering verification..."
             echo "trigger=true" >> $GITHUB_OUTPUT
           else
-            echo "⏭️  Not this time. Next check in 1 minute."
+            echo "⏭️  Not this time. Next check in 10 minutes."
             echo "trigger=false" >> $GITHUB_OUTPUT
           fi
 
@@ -50,5 +51,5 @@ jobs:
       - name: Log skip
         if: steps.dice.outputs.trigger == 'false'
         run: |
-          echo "ℹ️  Skipped this time (4/24 probability)"
-          echo "Next check in 1 hour"
+          echo "ℹ️  Skipped this time (1/36 probability per check)"
+          echo "Next check in 10 minutes"

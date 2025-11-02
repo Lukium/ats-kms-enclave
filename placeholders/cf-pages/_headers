@@ -24,11 +24,9 @@
   # Permissions Policy - Disable unnecessary browser features
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
 
-  # Cross-Origin Policies - Enable for cross-origin isolation
-  # KMS inherits cross-origin isolation from parent's COEP
-  # Don't set COEP on iframe itself - causes embedding issues
-  Cross-Origin-Opener-Policy: same-origin-allow-popups
-  Cross-Origin-Resource-Policy: cross-origin
+  # Cross-Origin Policies - DISABLED (cross-origin isolation not achievable with iframe embedding)
+  # Cross-Origin-Opener-Policy: same-origin-allow-popups
+  # Cross-Origin-Embedder-Policy: require-corp
 
   # Standard security headers
   X-Content-Type-Options: nosniff
@@ -68,8 +66,8 @@
 /*.js
   Content-Type: application/javascript; charset=utf-8
 
-  # Allow cross-origin loading for iframe embedding
-  Cross-Origin-Resource-Policy: cross-origin
+  # Same-origin only (no COEP, so no need for cross-origin)
+  Cross-Origin-Resource-Policy: same-origin
 
   # Cache forever (content-addressed filename = immutable)
   Cache-Control: public, max-age=31536000, immutable
@@ -80,8 +78,8 @@
 /*.mjs
   Content-Type: application/javascript; charset=utf-8
 
-  # Allow cross-origin loading for iframe embedding
-  Cross-Origin-Resource-Policy: cross-origin
+  # Same-origin only (no COEP, so no need for cross-origin)
+  Cross-Origin-Resource-Policy: same-origin
 
   # Cache forever (content-addressed filename = immutable)
   Cache-Control: public, max-age=31536000, immutable
@@ -93,8 +91,8 @@
 /*.css
   Content-Type: text/css; charset=utf-8
 
-  # Allow cross-origin loading for iframe embedding
-  Cross-Origin-Resource-Policy: cross-origin
+  # Same-origin only (no COEP, so no need for cross-origin)
+  Cross-Origin-Resource-Policy: same-origin
 
   # Cache for 5 minutes (can be updated without content addressing)
   Cache-Control: public, max-age=300
@@ -106,8 +104,8 @@
 /*.png
   Content-Type: image/png
 
-  # Allow cross-origin loading for iframe embedding
-  Cross-Origin-Resource-Policy: cross-origin
+  # Same-origin only (no COEP, so no need for cross-origin)
+  Cross-Origin-Resource-Policy: same-origin
 
   # Cache for 1 hour
   Cache-Control: public, max-age=3600

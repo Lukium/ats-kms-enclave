@@ -2333,40 +2333,4 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   // Export for debugging
   (window as Window & { __kmsClient?: unknown }).__kmsClient = client;
   (window as Window & { __kmsContext?: unknown }).__kmsContext = { isIframe, isStandaloneSetup };
-
-  // TEST: Iframe opens same-origin popup and tries postMessage
-  if (isIframe) {
-    (window as Window & { testIframePopup?: () => void }).testIframePopup = () => {
-      console.log('[KMS Test] Opening popup from iframe...');
-      const popup = window.open(
-        `${window.location.origin}?mode=test`,
-        'test-popup',
-        'width=400,height=300'
-      );
-
-      if (!popup) {
-        console.error('[KMS Test] Popup blocked');
-        return;
-      }
-
-      console.log('[KMS Test] Popup opened, waiting 2s then sending message...');
-      setTimeout(() => {
-        console.log('[KMS Test] Sending test message to popup');
-        popup.postMessage({ type: 'test-message', data: 'COOP TEST v2 - iframe to popup works!' }, window.location.origin);
-      }, 2000);
-    };
-    console.log('[KMS Test] Test function available: window.testIframePopup()');
-  }
-
-  // TEST: Popup listens for test messages
-  if (!isIframe && params.get('mode') === 'test') {
-    console.log('[KMS Test] Test popup listening for messages...');
-    window.addEventListener('message', (event: MessageEvent) => {
-      console.log('[KMS Test] Popup received message:', {
-        type: event.data?.type,
-        data: event.data?.data,
-        origin: event.origin
-      });
-    });
-  }
 }

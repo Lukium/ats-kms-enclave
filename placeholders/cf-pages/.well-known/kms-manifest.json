@@ -2,6 +2,7 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
+    "commit": "821885d2b1159393f8d7dcf3eead8e7bd5b261b9",
     "artifact": "kms-worker.d5333940.js",
     "sha256": "d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423",
     "files": {
@@ -19,7 +20,7 @@
         "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-02T12:53:42.853Z",
+    "timestamp": "2025-11-02T13:06:01.971Z",
     "build": {
       "reproducible": true,
       "environment": "production",

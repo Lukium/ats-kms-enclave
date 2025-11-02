@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 // ESM equivalents for __filename and __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -794,6 +795,10 @@ async function main() {
   console.log(`SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH}\n`);
 
   try {
+    // Get git commit SHA for reproducible build verification
+    const gitCommit = execSync('git rev-parse HEAD').toString().trim();
+    console.log(`Git Commit: ${gitCommit}\n`);
+
     // Build the worker bundle
     const { hash, filename, sri: workerSRI } = await buildEnclaveWorker();
 
@@ -900,6 +905,7 @@ async function main() {
       schema: 1,
       current: {
         version: '2.0.0',
+        commit: gitCommit,
         artifact: filename,
         sha256: hash,
         files: {

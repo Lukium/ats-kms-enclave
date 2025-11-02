@@ -931,6 +931,13 @@ async function main() {
     writeFileSync(cfManifestPath, JSON.stringify(cfManifest, null, 2));
     console.log(`  ✅ ${cfManifestPath}`);
 
+    // Copy .well-known/ directory to dist/enclave/ for CI deployment
+    const distWellKnownDir = join(distDir, 'enclave/.well-known');
+    mkdirSync(distWellKnownDir, { recursive: true });
+    const distManifestPath = join(distWellKnownDir, 'kms-manifest.json');
+    writeFileSync(distManifestPath, JSON.stringify(cfManifest, null, 2));
+    console.log(`  ✅ ${distManifestPath}`);
+
     console.log(`\n🚀 Ready for deployment to kms.ats.run!`);
 
   } catch (error) {

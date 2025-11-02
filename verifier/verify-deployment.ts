@@ -14,7 +14,7 @@
 
 import { createHash } from 'crypto';
 import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { verifyHeaders } from './verify-headers.js';
 
 interface KMSManifest {
@@ -354,7 +354,7 @@ async function verifyGitHubAttestation(baseUrl: string, manifest: KMSManifest): 
 
     const workerContent = await response.arrayBuffer();
     const tempWorkerPath = `/tmp/${manifest.current.files.worker.filename}`;
-    require('fs').writeFileSync(tempWorkerPath, Buffer.from(workerContent));
+    writeFileSync(tempWorkerPath, Buffer.from(workerContent));
 
     // Verify attestation using gh CLI
     console.log(`  🔍 Verifying attestation with gh CLI...`);

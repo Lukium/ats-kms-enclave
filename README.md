@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
-**Status:** ✅ VERIFIED
-**Timestamp:** Sun, 02 Nov 2025 11:39:42 GMT
+**Status:** ❌ FAILED
+**Timestamp:** Sun, 02 Nov 2025 12:39:48 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19011729755)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012383888)
 
 ---
 
@@ -29,9 +29,9 @@ d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423
 
 **Source:** https://kms.ats.run/kms-worker.d5333940.js
 
-### ✅ SRI Hashes
+### ❌ SRI Hashes
 
-All SRI hashes verified
+Some SRI hashes failed
 
 #### client.js ✅
 
@@ -47,7 +47,7 @@ sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR
 
 **Source:** https://kms.ats.run/enclave-client.js
 
-#### enclave.css ✅
+#### enclave.css ❌
 
 **Expected SRI:**
 ```
@@ -56,7 +56,7 @@ sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx
 
 **Actual SRI:**
 ```
-sha384-ogGSl/0jZcVZj3QNaYTeomILwvzmDEXpvwUl50L/FLwWZ9Gli9dOVld/ryOd7KSx
+sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ
 ```
 
 **Source:** https://kms.ats.run/enclave.css
@@ -70,30 +70,37 @@ Current version is in allowed list
 **Allowed Hashes:**
 - `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
 
-### ✅ Security Headers
+### ❌ Security Headers
 
-All headers verified
+Some headers failed
 
-#### content-security-policy ✅
+#### content-security-policy ❌
 
-**Expected:** `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'`
+**Expected:**
+```
+default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'
+```
 
-**Actual:** ✅ Matches
+**Actual:**
+```
+(missing)
+```
 
-**Frame Ancestors Explanation:**
-The `frame-ancestors` directive controls which origins can embed the KMS enclave in an iframe:
+**Issue:** Header missing
 
-- `https://alpha.allthe.services` - Development build of the AllTheServices app
-- `https://beta.allthe.services` - Beta build (not yet available)
-- `https://allthe.services` - Production build (not yet available)
-- `https://phase2-demo.allthe.services` - Demo for the KMS enclave itself
-- `http://localhost:5173` - Local development counterpart of the dev build
+#### permissions-policy ❌
 
-#### permissions-policy ✅
+**Expected:**
+```
+accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
+```
 
-**Expected:** `accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()`
+**Actual:**
+```
+(missing)
+```
 
-**Actual:** ✅ Matches
+**Issue:** Header missing
 
 #### x-content-type-options ✅
 
@@ -101,11 +108,19 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 **Actual:** ✅ Matches
 
-#### referrer-policy ✅
+#### referrer-policy ❌
 
-**Expected:** `no-referrer`
+**Expected:**
+```
+no-referrer
+```
 
-**Actual:** ✅ Matches
+**Actual:**
+```
+strict-origin-when-cross-origin
+```
+
+**Issue:** Mismatch
 
 #### cross-origin-opener-policy ✅
 
@@ -130,7 +145,7 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 
 - **Version:** 2.0.0
-- **Build Time:** Sun, 02 Nov 2025 11:22:41 GMT
+- **Build Time:** Fri, 01 Jan 2021 00:00:00 GMT
 - **Reproducible:** Yes
 - **Environment:** production
 
@@ -172,6 +187,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 11:39:42 GMT*
+*Last updated: Sun, 02 Nov 2025 12:39:48 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

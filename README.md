@@ -3,9 +3,12 @@
 ## Verification Summary
 
 **Status:** ✅ VERIFIED
-**Timestamp:** Sun, 02 Nov 2025 14:50:54 GMT
+
+**Timestamp:** Sun, 02 Nov 2025 14:55:33 GMT
+
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013899595)
+
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013945664)
 
 ---
 
@@ -40,13 +43,27 @@ Manifest fetched (v2.0.0)
 
 All hashes verified
 
-| Artifact | Expected | Actual | Status |
-|----------|----------|--------|--------|
-| **Worker SHA256** | `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423` | `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423` | ✅ |
-| **Worker SRI** | `sha384-LJMBIUTUBN5Bw1gP568W9RtdESjNcdpo/EQyzDUuumOeVZj59mlvJgKYKOGQrDM3` | `sha384-LJMBIUTUBN5Bw1gP568W9RtdESjNcdpo/EQyzDUuumOeVZj59mlvJgKYKOGQrDM3` | ✅ |
-| **Client.js SRI** | `sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR` | `sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR` | ✅ |
-| **Enclave.css SRI** | `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ` | `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ` | ✅ |
+| Artifact | Status | Expected | Actual |
+|----------|--------|----------|--------|
+| **Worker SHA256** | ✅ | `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423` | `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423` |
+| **Worker SRI** | ✅ | `sha384-LJMBIUTUBN5Bw1gP568W9RtdESjNcdpo/EQyzDUuumOeVZj59mlvJgKYKOGQrDM3` | `sha384-LJMBIUTUBN5Bw1gP568W9RtdESjNcdpo/EQyzDUuumOeVZj59mlvJgKYKOGQrDM3` |
+| **Client.js SRI** | ✅ | `sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR` | `sha384-cV4zp9lzGeo/98Aonvi8UB0Jr01Qt6Sx1JK6MVw5TZnPmbr6F+bDbtV5cFBprqqR` |
+| **Enclave.css SRI** | ✅ | `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ` | `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ` |
 
+
+### ✅ GitHub Attestation
+
+Attestation verified via GitHub CLI
+
+**Artifact:** `kms-worker.d5333940.js`
+
+**Commit:** `a49f6923357e4a8ed9c3521958dfcabf62810f9b`
+
+**Rekor Transparency Log:**
+https://search.sigstore.dev?logIndex=661285602
+
+**Repository Attestations:**
+https://github.com/Lukium/ats-kms-enclave/attestations/12775579
 
 ### ✅ Allowed List
 
@@ -127,20 +144,6 @@ sha256sum dist/enclave/kms-worker.d5333940.js
 
 The hash from the last command should match: `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
 
-### ✅ GitHub Attestation
-
-Attestation verified via GitHub CLI
-
-**Artifact:** `kms-worker.d5333940.js`
-
-**Commit:** `a49f6923357e4a8ed9c3521958dfcabf62810f9b`
-
-**Rekor Transparency Log:**
-https://search.sigstore.dev?logIndex=661285602
-
-**Repository Attestations:**
-https://github.com/Lukium/ats-kms-enclave/attestations/12775579
-
 
 ---
 
@@ -190,6 +193,6 @@ https://github.com/Lukium/ats-kms-enclave/attestations/12775579
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 14:50:54 GMT*
+*Last updated: Sun, 02 Nov 2025 14:55:33 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

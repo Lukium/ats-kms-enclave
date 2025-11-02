@@ -1,0 +1,91 @@
+{
+  "name": "@ats/kms-enclave",
+  "version": "0.0.0",
+  "description": "Browser-based verifiable Key Management System (KMS) enclave for AllTheServices",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:lines": "vitest run --coverage; EXIT_CODE=$?; node tools/coverage-with-lines.js; exit $EXIT_CODE",
+    "test:ui": "vitest --ui",
+    "test:browser": "playwright test",
+    "test:browser:ui": "playwright test --ui",
+    "test:browser:debug": "playwright test --debug",
+    "test:all": "pnpm test && pnpm test:browser",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "docs": "typedoc",
+    "docs:watch": "typedoc --watch",
+    "update:readme": "node tools/update-readme.js",
+    "build": "pnpm build:enclave",
+    "build:enclave": "tsx build/build-enclave.ts",
+    "build:dev": "tsx build/build-enclave.ts",
+    "build:reproducible": "SOURCE_DATE_EPOCH=1609459200 tsx build/build-enclave.ts",
+    "demo": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-2.ts",
+    "demo:build": "vite build --config example/vite.config.phase-0.ts",
+    "demo:phase-0": "vite --config example/vite.config.phase-0.ts",
+    "demo:phase-1:parent": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-parent.ts",
+    "demo:phase-1:kms": "lsof -ti:5174 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-1-kms.ts",
+    "demo:phase-2": "lsof -ti:5173 | xargs kill -9 2>/dev/null || true && vite --config example/vite.config.phase-2.ts"
+  },
+  "keywords": [
+    "cryptography",
+    "web-crypto",
+    "pwa",
+    "security",
+    "verifiable-builds",
+    "reproducible-builds",
+    "subresource-integrity"
+  ],
+  "author": "AllTheServices",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lukium/ats-kms-enclave.git"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.38.0",
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "@vitest/coverage-v8": "^1.1.1",
+    "@vitest/ui": "^1.1.1",
+    "esbuild": "^0.19.11",
+    "eslint": "^9.38.0",
+    "fake-indexeddb": "^6.2.4",
+    "happy-dom": "^12.10.3",
+    "playwright": "^1.56.1",
+    "playwright-test-coverage": "^1.2.12",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
+    "typedoc": "^0.28.14",
+    "typedoc-plugin-markdown": "^4.9.0",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.46.2",
+    "vite": "^7.1.12",
+    "vitest": "^1.1.1",
+    "yaml": "^2.8.1"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "c8": {
+    "all": true,
+    "lines": 100,
+    "functions": 100,
+    "branches": 100,
+    "statements": 100,
+    "exclude": [
+      "node_modules/**",
+      "tests/**",
+      "build/**",
+      "dist/**",
+      "**/*.d.ts"
+    ]
+  }
+}

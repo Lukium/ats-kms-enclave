@@ -87,6 +87,11 @@ All files               │ 10682   │   81.49│    83.80 │   86.77│   81.
 
 ## Documentation
 
+> **Note on v1/v2 Split**: During Phase 1 development, we identified opportunities for security hardening that merited a significant architectural revision. The codebase was split into `v1/` (kept for historical reference) and `v2/` (current production implementation). **When reviewing documentation or code, prioritize the v2 versions:**
+>
+> - Architecture docs: `docs/architecture/crypto/V2/`
+> - Source code: `src/v2/`
+
 ### Quick Start
 
 - **[docs/API/README.md](docs/API/README.md)** - Complete API reference (TypeDoc-generated)

@@ -65,21 +65,69 @@ export interface VerificationResult {
 }
 
 /**
+ * Retry a function with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelayMs: number = 2000,
+  description: string = 'operation'
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < maxRetries) {
+        const delayMs = initialDelayMs * Math.pow(2, attempt - 1);
+        console.log(`⚠️  ${description} failed (attempt ${attempt}/${maxRetries}): ${lastError.message}`);
+        console.log(`   Retrying in ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw new Error(`${description} failed after ${maxRetries} attempts: ${lastError?.message}`);
+}
+
+/**
  * Fetch and parse the KMS manifest
  */
 async function fetchManifest(baseUrl: string): Promise<KMSManifest> {
   const manifestUrl = `${baseUrl}/.well-known/kms-manifest.json`;
   console.log(`📥 Fetching manifest: ${manifestUrl}`);
 
-  const response = await fetch(manifestUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch manifest: HTTP ${response.status}`);
-  }
+  return retryWithBackoff(async () => {
+    const response = await fetch(manifestUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
 
-  const manifest = await response.json() as KMSManifest;
-  console.log(`✅ Manifest fetched (version: ${manifest.current.version})`);
+    const contentType = response.headers.get('content-type');
+    if (contentType && !contentType.includes('application/json')) {
+      throw new Error(`Expected JSON but got ${contentType} (CDN might still be propagating)`);
+    }
 
-  return manifest;
+    const text = await response.text();
+
+    // Try to parse as JSON
+    let manifest: KMSManifest;
+    try {
+      manifest = JSON.parse(text);
+    } catch (parseError) {
+      // Provide helpful error for HTML responses (404 pages, etc)
+      if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+        throw new Error('Received HTML instead of JSON (CDN propagation delay or 404)');
+      }
+      throw new Error(`Invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+    }
+
+    console.log(`✅ Manifest fetched (version: ${manifest.current.version})`);
+    return manifest;
+  }, 3, 2000, 'Manifest fetch');
 }
 
 /**

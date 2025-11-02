@@ -309,6 +309,14 @@ async function verifyReproducibleBuild(manifest: KMSManifest): Promise<Verificat
         expected: expectedHash,
         actual: actualHash,
         SOURCE_DATE_EPOCH: manifest.current.build.SOURCE_DATE_EPOCH,
+        workerFilename: manifest.current.files.worker.filename,
+        commands: [
+          `git fetch origin ${commit}`,
+          `git checkout ${commit}`,
+          `pnpm install --frozen-lockfile`,
+          `SOURCE_DATE_EPOCH=${manifest.current.build.SOURCE_DATE_EPOCH} pnpm build:reproducible`,
+          `sha256sum dist/enclave/${manifest.current.files.worker.filename}`,
+        ],
       },
     };
   } catch (error) {
@@ -359,10 +367,38 @@ async function verifyGitHubAttestation(baseUrl: string, manifest: KMSManifest): 
     // Verify attestation using gh CLI
     console.log(`  🔍 Verifying attestation with gh CLI...`);
     try {
-      execSync(`gh attestation verify ${tempWorkerPath} -R Lukium/ats-kms-enclave`, {
-        stdio: 'pipe',
+      const ghOutput = execSync(`gh attestation verify ${tempWorkerPath} -R Lukium/ats-kms-enclave --format json`, {
         encoding: 'utf-8'
       });
+
+      // Parse JSON output to extract URLs
+      const attestations = JSON.parse(ghOutput);
+      let rekorUrl: string | undefined;
+      let attestationId: string | undefined;
+
+      // Extract Rekor log index and attestation ID from first attestation
+      if (attestations && attestations.length > 0) {
+        const firstAttestation = attestations[0];
+        if (firstAttestation.verificationResult?.rekorEntry?.logIndex) {
+          rekorUrl = `https://search.sigstore.dev?logIndex=${firstAttestation.verificationResult.rekorEntry.logIndex}`;
+        }
+        // Extract attestation ID from bundle if available
+        if (firstAttestation.attestation) {
+          // Try to get attestation ID from the gh CLI - it's in the API but not always in JSON output
+          // We'll fetch it separately
+          try {
+            const listOutput = execSync(
+              `gh api /repos/Lukium/ats-kms-enclave/attestations --jq '.attestations[0].id'`,
+              { encoding: 'utf-8' }
+            ).trim();
+            if (listOutput) {
+              attestationId = listOutput;
+            }
+          } catch (e) {
+            // Fallback - attestation ID not critical
+          }
+        }
+      }
 
       console.log(`  ✅ Attestation verified successfully`);
 
@@ -374,6 +410,8 @@ async function verifyGitHubAttestation(baseUrl: string, manifest: KMSManifest): 
           artifact: manifest.current.files.worker.filename,
           commit: manifest.current.commit,
           verifiedVia: 'gh attestation verify',
+          rekorUrl,
+          attestationUrl: attestationId ? `https://github.com/Lukium/ats-kms-enclave/attestations/${attestationId}` : 'https://github.com/Lukium/ats-kms-enclave/attestations',
         },
       };
     } catch (verifyError: any) {

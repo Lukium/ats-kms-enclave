@@ -131,6 +131,43 @@ ${h.actual || '(missing)'}
 
 **Allowed Hashes:**
 ${check.details.allowed.map((hash: string) => `- \`${hash}\``).join('\n')}`;
+    } else if (check.name === 'Reproducible Build' && check.details) {
+      details = `
+
+**Commit:** \`${check.details.commit}\`
+
+**Expected Hash:** \`${check.details.expected}\`
+
+**Actual Hash:** \`${check.details.actual}\`
+
+**Reproduce This Build:**
+\`\`\`bash
+${check.details.commands ? check.details.commands.join('\n') : '# Commands not available'}
+\`\`\`
+
+The hash from the last command should match: \`${check.details.expected}\``;
+    } else if (check.name === 'GitHub Attestation' && check.details) {
+      let attestationDetails = `
+
+**Artifact:** \`${check.details.artifact}\`
+
+**Commit:** \`${check.details.commit}\``;
+
+      if (check.details.rekorUrl) {
+        attestationDetails += `
+
+**Rekor Transparency Log:**
+${check.details.rekorUrl}`;
+      }
+
+      if (check.details.attestationUrl) {
+        attestationDetails += `
+
+**Repository Attestations:**
+${check.details.attestationUrl}`;
+      }
+
+      details = attestationDetails;
     }
   }
 

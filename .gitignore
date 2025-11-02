@@ -83,3 +83,9 @@ docs/.vitepress/cache/
 # Demo build artifacts
 example/**/dist-*/
 .coverage-readme-data.json
+
+# Docker files (deployment-specific, not for public use)
+Dockerfile
+docker-compose.yml
+.dockerignore
+DOCKER.md

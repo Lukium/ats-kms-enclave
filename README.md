@@ -2,7 +2,8 @@
 
 **Browser-based verifiable Key Management System (KMS) enclave for AllTheServices**
 
-[![Status](https://img.shields.io/badge/status-Phase%201%20Complete-brightgreen)](docs/architecture/crypto/)
+[![Status](https://img.shields.io/badge/status-Phase%202%20Complete-brightgreen)](docs/architecture/crypto/)
+[![Verification](https://raw.githubusercontent.com/Lukium/ats-kms-enclave/attestation/verification-badge.svg)](https://github.com/Lukium/ats-kms-enclave/tree/attestation)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Overview
@@ -41,6 +42,18 @@ This repository contains a sandboxed, verifiable execution environment for crypt
 **[Try the Phase 1 demo →](example/phase-1/README.md)** (requires two terminals: `pnpm demo:phase-1:kms` and `pnpm demo:phase-1:parent`, or run `make demo` for instructions)
 
 This represents the bulk of the core KMS functionality. See [docs/architecture/crypto/plan.md](docs/architecture/crypto/plan.md) for the full roadmap.
+
+**Phase 2: Reproducible Builds & Verification** ✅ **COMPLETE** (2025-11-02)
+- ✅ **Reproducible Builds** - Deterministic build pipeline with SOURCE_DATE_EPOCH
+- ✅ **Content-Addressed Artifacts** - Hash-based filenames for immutable assets
+- ✅ **Subresource Integrity (SRI)** - SHA-384 hashes for all JavaScript/CSS
+- ✅ **GitHub Attestations** - Build provenance via actions/attest-build-provenance
+- ✅ **Sigstore/Rekor Integration** - Public transparency log for all builds
+- ✅ **Automated Verification** - 4x daily verification of deployed artifacts
+- ✅ **KMS Manifest** - Version metadata with attestation URLs
+- ✅ **Verification Reports** - Public audit trail on attestation branch
+
+**[View verification reports →](https://github.com/Lukium/ats-kms-enclave/tree/attestation)** | **[Verifier source code →](https://github.com/Lukium/ats-kms-enclave/tree/verifier)**
 
 
 ### Test Coverage & Statistics
@@ -141,6 +154,53 @@ Our approach takes a different path:
 **The tradeoff**: While native applications can leverage stronger OS-level isolation primitives, our model achieves **stronger global trust** through verifiability, transparency, and platform neutrality. In practice, this can yield a *higher trust ceiling* — not because the code is unbreakable, but because **it's impossible to hide a break**.
 
 This positions the KMS enclave as a forward-looking trust model: **shifting trust from authority to transparency**.
+
+## Verification & Transparency
+
+The KMS enclave is designed for **continuous public verification**. Every deployed version is automatically verified multiple times per day to ensure integrity and authenticity.
+
+### Automated Verification System
+
+**What gets verified** (4x daily):
+- ✅ **Manifest Integrity** - KMS manifest structure and accessibility
+- ✅ **Hash Verification** - SHA-256 and SRI hashes match for all artifacts
+- ✅ **Security Headers** - CSP, CORP, and other security policies are correct
+- ✅ **Allowed List** - Deployed version is in the approved versions list
+- ✅ **Reproducible Build** - Build can be reproduced from source
+- ✅ **GitHub Attestation** - Sigstore attestation verified via Rekor transparency log
+
+### Verification Reports
+
+All verification results are published to the **[attestation branch](https://github.com/Lukium/ats-kms-enclave/tree/attestation)** with:
+- Detailed verification reports for each check
+- Full manifest contents including attestation URLs
+- Links to Rekor transparency log entries
+- GitHub Actions workflow provenance
+
+**Latest verification status**: See the badge at the top of this README or [view all reports →](https://github.com/Lukium/ats-kms-enclave/tree/attestation)
+
+### Trust Model
+
+- **Verifier Code**: Frozen and auditable at [verifier branch](https://github.com/Lukium/ats-kms-enclave/tree/verifier)
+- **Verification Reports**: Auto-generated, constantly updated
+- **Transparency**: All results and attestation URLs are publicly accessible
+- **Reproducibility**: Anyone can reproduce builds and verify hashes independently
+
+### How to Verify Manually
+
+```bash
+# Clone the verifier
+git clone -b verifier https://github.com/Lukium/ats-kms-enclave.git
+cd ats-kms-enclave/verifier
+
+# Install dependencies
+pnpm install
+
+# Run verification
+pnpm verify
+```
+
+The verifier will check the deployed KMS enclave and generate a detailed report showing all verification results.
 
 ## Development
 
@@ -287,12 +347,14 @@ We will respond within 48 hours and work with you to address the issue.
 - 401+ tests passing (85%+ coverage)
 - **This phase represents the bulk of core KMS functionality**
 
-**Phase 2: Reproducible Builds & Verification** 📋 **PLANNED**
-- Content-addressed artifacts
-- Deterministic build pipeline
-- Subresource Integrity (SRI) verification
-- Sigstore/Rekor transparency logs
-- User verification UX
+**Phase 2: Reproducible Builds & Verification** ✅ **COMPLETE** (2025-11-02)
+- Reproducible builds with deterministic output
+- Content-addressed artifacts (hash-based filenames)
+- Subresource Integrity (SRI) for all JavaScript/CSS
+- GitHub Attestations with Sigstore/Rekor transparency logs
+- Automated verification system (4x daily)
+- Public verification reports on attestation branch
+- KMS manifest with attestation URLs
 
 See [plan.md](docs/architecture/crypto/plan.md) for complete roadmap.
 

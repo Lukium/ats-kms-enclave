@@ -101,3 +101,16 @@
 
   # Standard security headers
   X-Content-Type-Options: nosniff
+
+# Static image files
+/*.png
+  Content-Type: image/png
+
+  # Allow cross-origin loading for iframe embedding
+  Cross-Origin-Resource-Policy: cross-origin
+
+  # Cache for 1 hour
+  Cache-Control: public, max-age=3600
+
+  # Standard security headers
+  X-Content-Type-Options: nosniff

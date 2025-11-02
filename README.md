@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
-**Status:** ❌ FAILED
-**Timestamp:** Sun, 02 Nov 2025 13:09:18 GMT
+**Status:** ✅ VERIFIED
+**Timestamp:** Sun, 02 Nov 2025 13:23:08 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012739063)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19012909147)
 
 ---
 
@@ -119,9 +119,13 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 **Actual:** ✅ Matches
 
-### ❌ Verification
+### ✅ Reproducible Build
 
-Cannot read properties of undefined (reading 'substring')
+Build is reproducible - hash matches
+
+### ✅ Rekor Attestation
+
+⏭️  Skipped (Phase 2.2)
 
 
 ---
@@ -130,7 +134,7 @@ Cannot read properties of undefined (reading 'substring')
 
 
 - **Version:** 2.0.0
-- **Build Time:** Sun, 02 Nov 2025 12:56:16 GMT
+- **Build Time:** Sun, 02 Nov 2025 13:06:40 GMT
 - **Reproducible:** Yes
 - **Environment:** production
 
@@ -172,6 +176,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 13:09:18 GMT*
+*Last updated: Sun, 02 Nov 2025 13:23:08 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

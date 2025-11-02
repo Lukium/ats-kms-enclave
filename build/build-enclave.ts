@@ -938,6 +938,12 @@ async function main() {
     writeFileSync(distManifestPath, JSON.stringify(cfManifest, null, 2));
     console.log(`  ✅ ${distManifestPath}`);
 
+    // Copy _headers file to dist/enclave/ for CI deployment
+    const cfHeadersPath = join(cfPagesDir, '_headers');
+    const distHeadersPath = join(distDir, 'enclave/_headers');
+    writeFileSync(distHeadersPath, readFileSync(cfHeadersPath));
+    console.log(`  ✅ ${distHeadersPath}`);
+
     console.log(`\n🚀 Ready for deployment to kms.ats.run!`);
 
   } catch (error) {

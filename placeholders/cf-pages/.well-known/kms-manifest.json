@@ -19,11 +19,11 @@
         "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-02T12:44:17.955Z",
+    "timestamp": "2025-11-02T12:53:42.853Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1762086696"
+      "SOURCE_DATE_EPOCH": "1609459200"
     }
   },
   "allowed": [

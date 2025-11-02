@@ -25,9 +25,9 @@
   Permissions-Policy: geolocation=(), microphone=(), camera=(), usb=(), bluetooth=(), payment=()
 
   # Cross-Origin Policies - Enable for cross-origin isolation
-  # Using credentialless to allow embedding from parent without COEP
+  # KMS inherits cross-origin isolation from parent's COEP
+  # Don't set COEP on iframe itself - causes embedding issues
   Cross-Origin-Opener-Policy: same-origin-allow-popups
-  Cross-Origin-Embedder-Policy: credentialless
   Cross-Origin-Resource-Policy: cross-origin
 
   # Standard security headers

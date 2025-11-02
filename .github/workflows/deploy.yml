@@ -45,13 +45,34 @@ jobs:
           echo "✅ Worker hash: $WORKER_HASH"
 
       - name: Generate build attestation
+        id: attest
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             dist/enclave/kms-worker.*.js
             dist/enclave/enclave-client.js
             dist/enclave/enclave.css
-            dist/enclave/.well-known/kms-manifest.json
+
+      - name: Extract Rekor URL and update manifest
+        run: |
+          # Extract Rekor log index from attestation bundle
+          BUNDLE_PATH="${{ steps.attest.outputs.bundle-path }}"
+          LOG_INDEX=$(jq -r '.verificationMaterial.tlogEntries[0].logIndex' "$BUNDLE_PATH")
+          REKOR_URL="https://search.sigstore.dev?logIndex=$LOG_INDEX"
+
+          echo "✅ Rekor URL: $REKOR_URL"
+
+          # Add attestation metadata to manifest
+          MANIFEST="dist/enclave/.well-known/kms-manifest.json"
+          jq --arg rekor "$REKOR_URL" \
+             --arg attUrl "${{ steps.attest.outputs.attestation-url }}" \
+             '.current.attestation = {
+               "rekorUrl": $rekor,
+               "attestationUrl": $attUrl
+             }' "$MANIFEST" > "${MANIFEST}.tmp"
+
+          mv "${MANIFEST}.tmp" "$MANIFEST"
+          echo "✅ Updated manifest with attestation URLs"
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1

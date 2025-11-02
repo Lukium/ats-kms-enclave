@@ -1,9 +1,9 @@
 # 🔐 KMS Verification Report
 
 **Status:** ✅ VERIFIED
-**Timestamp:** Sun, 02 Nov 2025 14:30:54 GMT
+**Timestamp:** Sun, 02 Nov 2025 14:32:53 GMT
 **Worker Hash:** d5333940
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013682486)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19013706654)
 
 ---
 
@@ -123,7 +123,7 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 Build is reproducible - hash matches
 
-**Commit:** `ba6ea07a6d2688daa600def0ac5fa267f8cc8716`
+**Commit:** `a49f6923357e4a8ed9c3521958dfcabf62810f9b`
 
 **Expected Hash:** `d53339403d36cd9c58a896e0c1c856213e0c6ef9e3979d281564eccc18171423`
 
@@ -131,10 +131,10 @@ Build is reproducible - hash matches
 
 **Reproduce This Build:**
 ```bash
-git fetch origin ba6ea07a6d2688daa600def0ac5fa267f8cc8716
-git checkout ba6ea07a6d2688daa600def0ac5fa267f8cc8716
+git fetch origin a49f6923357e4a8ed9c3521958dfcabf62810f9b
+git checkout a49f6923357e4a8ed9c3521958dfcabf62810f9b
 pnpm install --frozen-lockfile
-SOURCE_DATE_EPOCH=1762091064 pnpm build:reproducible
+SOURCE_DATE_EPOCH=1762093706 pnpm build:reproducible
 sha256sum dist/enclave/kms-worker.d5333940.js
 ```
 
@@ -146,10 +146,13 @@ Attestation verified via GitHub CLI
 
 **Artifact:** `kms-worker.d5333940.js`
 
-**Commit:** `ba6ea07a6d2688daa600def0ac5fa267f8cc8716`
+**Commit:** `a49f6923357e4a8ed9c3521958dfcabf62810f9b`
+
+**Rekor Transparency Log:**
+https://search.sigstore.dev?logIndex=661285602
 
 **Repository Attestations:**
-https://github.com/Lukium/ats-kms-enclave/attestations
+https://github.com/Lukium/ats-kms-enclave/attestations/12775579
 
 
 ---
@@ -158,7 +161,7 @@ https://github.com/Lukium/ats-kms-enclave/attestations
 
 
 - **Version:** 2.0.0
-- **Build Time:** Sun, 02 Nov 2025 13:44:24 GMT
+- **Build Time:** Sun, 02 Nov 2025 14:28:26 GMT
 - **Reproducible:** Yes
 - **Environment:** production
 
@@ -200,6 +203,6 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 ---
 
-*Last updated: Sun, 02 Nov 2025 14:30:54 GMT*
+*Last updated: Sun, 02 Nov 2025 14:32:53 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

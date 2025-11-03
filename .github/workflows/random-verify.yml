@@ -1,7 +1,8 @@
 name: Random KMS Verification
 
 on:
-  # Run every 10 minutes with 4/144 probability (~4 verifications per day at random times)
+  # Run every 10 minutes with adaptive probability (targets 4 verifications per day)
+  # Probability increases if rolling average falls below target
   # This creates a 10-minute attack window
   # Note: GitHub Actions enforces minimum ~5-10 minute intervals for scheduled workflows
   schedule:
@@ -12,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read  # Required to fetch workflow run history
 
 jobs:
   maybe-trigger-verification:
@@ -19,18 +21,107 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Roll the dice (4/144 = 1/36 probability)
+      - name: Calculate adaptive probability
+        id: probability
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📊 Calculating adaptive probability based on recent verification history..."
+          echo ""
+
+          # Fetch last 50 verify.yml runs and filter for successful ones
+          RECENT_VERIFICATIONS=$(gh run list \
+            --workflow="verify.yml" \
+            --repo ${{ github.repository }} \
+            --json conclusion,createdAt,status \
+            --limit 50 \
+            | jq '[.[] | select(.conclusion == "success")] | .[0:12]')
+
+          # Count how many successful verifications we have
+          VERIFICATION_COUNT=$(echo "$RECENT_VERIFICATIONS" | jq 'length')
+          echo "Found $VERIFICATION_COUNT successful verifications in recent history"
+
+          # Default probability (1/36 = ~4 verifications per day)
+          DENOMINATOR=36
+
+          if [ "$VERIFICATION_COUNT" -eq 0 ]; then
+            # No verifications yet - use aggressive probability
+            DENOMINATOR=4
+            echo "⚠️  No recent verifications found - using aggressive probability (1/$DENOMINATOR)"
+          elif [ "$VERIFICATION_COUNT" -ge 2 ]; then
+            # Get oldest and newest timestamps
+            OLDEST=$(echo "$RECENT_VERIFICATIONS" | jq -r '.[-1].createdAt')
+            NEWEST=$(echo "$RECENT_VERIFICATIONS" | jq -r '.[0].createdAt')
+
+            # Convert to epoch seconds
+            OLDEST_EPOCH=$(date -d "$OLDEST" +%s)
+            NEWEST_EPOCH=$(date -d "$NEWEST" +%s)
+            CURRENT_EPOCH=$(date +%s)
+
+            # Calculate timespan in hours
+            TIMESPAN_SECONDS=$((NEWEST_EPOCH - OLDEST_EPOCH))
+            TIMESPAN_HOURS=$(echo "scale=2; $TIMESPAN_SECONDS / 3600" | bc)
+
+            # Calculate rolling rate (verifications per day)
+            if (( $(echo "$TIMESPAN_HOURS > 0" | bc -l) )); then
+              ROLLING_RATE=$(echo "scale=2; $VERIFICATION_COUNT / ($TIMESPAN_HOURS / 24)" | bc)
+            else
+              # All verifications within same hour - assume we're doing fine
+              ROLLING_RATE=4.0
+            fi
+
+            echo "Timespan: $TIMESPAN_HOURS hours"
+            echo "Rolling rate: $ROLLING_RATE verifications/day (target: 4.0/day)"
+
+            # Adjust probability based on rolling rate
+            if (( $(echo "$ROLLING_RATE >= 4.0" | bc -l) )); then
+              DENOMINATOR=36
+              echo "✅ On target or above - using default probability (1/$DENOMINATOR)"
+            elif (( $(echo "$ROLLING_RATE >= 3.0" | bc -l) )); then
+              DENOMINATOR=27
+              echo "⚡ Slightly below target - boosting probability by 33% (1/$DENOMINATOR)"
+            elif (( $(echo "$ROLLING_RATE >= 2.0" | bc -l) )); then
+              DENOMINATOR=18
+              echo "⚡⚡ Below target - boosting probability by 100% (1/$DENOMINATOR)"
+            elif (( $(echo "$ROLLING_RATE >= 1.0" | bc -l) )); then
+              DENOMINATOR=9
+              echo "⚡⚡⚡ Well below target - boosting probability by 400% (1/$DENOMINATOR)"
+            else
+              DENOMINATOR=4
+              echo "🚨 Critically below target - using aggressive probability (1/$DENOMINATOR)"
+            fi
+
+            # Special case: if last verification was > 24h ago, force high probability
+            HOURS_SINCE_LAST=$(echo "scale=2; ($CURRENT_EPOCH - $NEWEST_EPOCH) / 3600" | bc)
+            echo "Hours since last verification: $HOURS_SINCE_LAST"
+
+            if (( $(echo "$HOURS_SINCE_LAST >= 24" | bc -l) )); then
+              DENOMINATOR=1
+              echo "🚨 CRITICAL: No verification in 24+ hours - FORCING verification (1/$DENOMINATOR)"
+            elif (( $(echo "$HOURS_SINCE_LAST >= 18" | bc -l) )); then
+              DENOMINATOR=4
+              echo "⚠️  No verification in 18+ hours - using aggressive probability (1/$DENOMINATOR)"
+            fi
+          else
+            # Only 1 verification - not enough data, use default
+            echo "ℹ️  Insufficient data (only 1 verification) - using default probability (1/$DENOMINATOR)"
+          fi
+
+          echo ""
+          echo "Final probability: 1/$DENOMINATOR"
+          echo "denominator=$DENOMINATOR" >> $GITHUB_OUTPUT
+
+      - name: Roll the dice
         id: dice
         run: |
-          # Generate random number 0-35 (36 possibilities)
-          # If 0, trigger verification (1/36 = 4/144 chance per 10 minutes)
-          # Expected: ~4 verifications per day at completely random times
-          ROLL=0  # TESTING: Force trigger to verify PAT works
-          # ROLL=$((RANDOM % 36))  # TODO: Uncomment after testing
-          echo "Dice roll: $ROLL (need 0 to trigger) [TESTING MODE - ALWAYS TRIGGERS]"
+          DENOMINATOR=${{ steps.probability.outputs.denominator }}
+
+          # Generate random number between 0 and (DENOMINATOR - 1)
+          ROLL=$((RANDOM % DENOMINATOR))
+          echo "🎲 Dice roll: $ROLL (need 0 to trigger, probability: 1/$DENOMINATOR)"
 
           if [ $ROLL -eq 0 ]; then
-            echo "🎲 Lucky roll! Triggering verification..."
+            echo "✅ Lucky roll! Triggering verification..."
             echo "trigger=true" >> $GITHUB_OUTPUT
           else
             echo "⏭️  Not this time. Next check in 10 minutes."
@@ -54,5 +145,6 @@ jobs:
       - name: Log skip
         if: steps.dice.outputs.trigger == 'false'
         run: |
-          echo "ℹ️  Skipped this time (1/36 probability per check)"
-          echo "Next check in 10 minutes"
+          DENOMINATOR=${{ steps.probability.outputs.denominator }}
+          echo "ℹ️  Skipped this time (probability was 1/$DENOMINATOR)"
+          echo "Next check in 10 minutes with adaptive probability"

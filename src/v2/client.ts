@@ -61,6 +61,7 @@ export class KMSClient {
   private transportPublicKey: string | null = null;
   private transportKeyId: string | null = null;
   private appSalt: string | null = null;
+  private userId: string | null = null; // User ID (email) from fullSetup/setupWithPopup params
   private popupState: string | null = null; // Anti-CSRF state token
   private messagePort: MessagePort | null = null; // For direct parent communication
   // Note: hkdfSalt from URL is not used directly in popup (sent to iframe via encrypted message)
@@ -1545,7 +1546,8 @@ export class KMSClient {
     this.hideSetupError();
 
     try {
-      const userId = 'demouser@ats.run';
+      // Use userId from parent (passed via fullSetup/setupWithPopup)
+      const userId = this.userId || 'demouser@ats.run'; // Fallback for backward compatibility
       const rpId = window.location.hostname; // kms.ats.run or localhost
 
       // Check if stateless popup mode
@@ -1883,11 +1885,13 @@ export class KMSClient {
     this.hideSetupError();
 
     try {
-      const userId = 'demouser@ats.run';
+      // Use userId from parent (passed via fullSetup/setupWithPopup)
+      const userId = this.userId || 'demouser@ats.run'; // Fallback for backward compatibility
 
       console.log('[KMS Client] handlePassphraseSetup - isStatelessPopup:', this.isStatelessPopup, {
         transportKey: this.transportPublicKey?.slice(0, 20) + '...',
-        keyId: this.transportKeyId
+        keyId: this.transportKeyId,
+        userId
       });
 
       // Check if stateless popup mode
@@ -2273,6 +2277,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 (client as any).transportKeyId = portData.transportKeyId!;
                 (client as any).appSalt = portData.appSalt!;
                 (client as any).hkdfSalt = portData.hkdfSalt!;
+                (client as any).userId = portData.userId!; // Store userId from parent
                 (client as any).isStatelessPopup = true;
 
                 // Store the MessagePort for sending credentials later

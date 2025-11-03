@@ -175,6 +175,24 @@ const pendingUnlockRequests = new Map<
 >();
 
 /**
+ * Pending fullSetup requests (multi-step orchestration).
+ * Maps requestId to promise resolvers for async operations (push subscription, test notification).
+ *
+ * - Key: requestId (UUID)
+ * - Value: { resolve, reject, timeout, state }
+ *
+ * Auto-cleanup on timeout (90 seconds for push, 30 seconds for notification)
+ */
+const pendingFullSetupRequests = new Map<
+  string,
+  {
+    resolve: (value: unknown) => void;
+    reject: (reason: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
+
+/**
  * Derive a SessionKEK from Master Secret and lease salt.
  *
  * Uses HKDF-SHA256 with:
@@ -308,7 +326,7 @@ async function setupWithEncryptedCredentials(params: {
   encryptedCredentials: string;
   userId: string;
   requestId: string;
-}): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string }> {
+}): Promise<{ success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string; credentials: AuthCredentials }> {
   // Step 1: Retrieve ephemeral transport key
   const transport = ephemeralTransportKeys.get(params.transportKeyId);
   if (!transport) {
@@ -384,6 +402,7 @@ async function setupWithEncryptedCredentials(params: {
 
     // Step 6: Call existing setup methods based on credential type
     let result: { success: true; enrollmentId: string; vapidPublicKey: string; vapidKid: string };
+    let authCredentials: AuthCredentials;
 
     if (params.method === 'passphrase') {
       // Call existing handleSetupPassphrase
@@ -395,20 +414,35 @@ async function setupWithEncryptedCredentials(params: {
         },
         params.requestId
       );
+
+      // Build AuthCredentials for return
+      authCredentials = {
+        method: 'passphrase',
+        passphrase: passphraseCredentials.passphrase,
+        userId: params.userId,
+      };
     } else if (params.method === 'passkey-prf') {
       // Call existing handleSetupPasskeyPRF with BOTH salts from transport key
       const prfCredentials = credentials as { credentialId: string; prfOutput: string; rpId?: string };
+      const prfOutputBuffer = base64urlToArrayBuffer(prfCredentials.prfOutput);
       result = await handleSetupPasskeyPRF(
         {
           userId: params.userId,
           credentialId: base64urlToArrayBuffer(prfCredentials.credentialId),
-          prfOutput: base64urlToArrayBuffer(prfCredentials.prfOutput),
+          prfOutput: prfOutputBuffer,
           ...(prfCredentials.rpId !== undefined && { rpId: prfCredentials.rpId }),
           appSalt: transport.appSalt,
           hkdfSalt: transport.hkdfSalt,
         },
         params.requestId
       );
+
+      // Build AuthCredentials for return
+      authCredentials = {
+        method: 'passkey-prf',
+        prfOutput: prfOutputBuffer,
+        userId: params.userId,
+      };
     } else if (params.method === 'passkey-gate') {
       // Call existing handleSetupPasskeyGate
       const gateCredentials = credentials as { credentialId: string; rpId?: string };
@@ -420,6 +454,12 @@ async function setupWithEncryptedCredentials(params: {
         },
         params.requestId
       );
+
+      // Build AuthCredentials for return
+      authCredentials = {
+        method: 'passkey-gate',
+        userId: params.userId,
+      };
     } else {
       const exhaustive: never = params.method;
       throw new Error(`Unknown method: ${String(exhaustive)}`);
@@ -428,7 +468,10 @@ async function setupWithEncryptedCredentials(params: {
   // Step 7: Delete ephemeral transport key (one-time use, no longer needed)
   ephemeralTransportKeys.delete(params.transportKeyId);
 
-  return result;
+  return {
+    ...result,
+    credentials: authCredentials,
+  };
 }
 
 /**
@@ -521,6 +564,196 @@ async function handleSetupWithPopup(
   return result;
 }
 
+/**
+ * Complete onboarding flow in a single user action.
+ *
+ * Orchestrates the entire setup process:
+ * 1. User authentication setup (via popup)
+ * 2. Web Push subscription (via parent PWA)
+ * 3. VAPID lease creation (with autoExtend flag)
+ * 4. JWT packet issuance (5 tokens with staggered expirations)
+ * 5. Test notification (confirms setup working)
+ *
+ * @param params.userId - User ID
+ * @param params.autoExtend - Whether lease can be auto-extended without re-auth (default: true)
+ * @param params.ttlHours - Lease TTL in hours (default: 12, max: 720)
+ * @param requestId - Request ID for audit logging
+ * @returns Complete setup result with lease, JWTs, and subscription
+ */
+async function handleFullSetup(
+  params: {
+    userId: string;
+    autoExtend?: boolean;
+    ttlHours?: number;
+  },
+  requestId: string
+): Promise<{
+  success: true;
+  enrollmentId: string;
+  vapidPublicKey: string;
+  vapidKid: string;
+  leaseId: string;
+  leaseExp: number;
+  autoExtend: boolean;
+  jwts: Array<{ jwt: string; jti: string; exp: number }>;
+  subscription: StoredPushSubscription;
+}> {
+  const { userId, autoExtend = true, ttlHours = 12 } = params;
+
+  // Validate TTL
+  if (ttlHours <= 0 || ttlHours > 720) {
+    throw new Error('ttlHours must be between 0 and 720 (30 days)');
+  }
+
+  // STEP 1: Check if already setup
+  const setupCheck = await isSetup(userId);
+  if (setupCheck) {
+    throw new Error('User already has authentication setup. Use addEnrollment to add additional methods.');
+  }
+
+  // STEP 2: Setup authentication (via popup)
+  // This returns credentials for immediate lease creation (not exposed via RPC)
+  // Note: handleSetupWithPopup returns credentials internally, not via RPC
+  const setupResult = await handleSetupWithPopup({ userId }, `${requestId}-setup`) as {
+    success: true;
+    enrollmentId: string;
+    vapidPublicKey: string;
+    vapidKid: string;
+    credentials: AuthCredentials;
+  };
+
+  // Extract credentials and VAPID info
+  const credentials = setupResult.credentials;
+  const vapidPublicKey = setupResult.vapidPublicKey;
+  const vapidKid = setupResult.vapidKid;
+  const enrollmentId = setupResult.enrollmentId;
+
+  // STEP 3: Request push subscription from parent PWA
+  const subscription = await new Promise<StoredPushSubscription>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Push subscription timeout (60s)'));
+    }, 60000); // 60 second timeout
+
+    const subRequestId = `${requestId}-push-sub`;
+
+    // Store resolver in pending map
+    pendingFullSetupRequests.set(subRequestId, {
+      resolve: resolve as (value: unknown) => void,
+      reject,
+      timeout,
+    });
+
+    // Send message to client (main thread) to request push subscription
+    self.postMessage({
+      type: 'worker:request-push-subscription',
+      requestId: subRequestId,
+      vapidPublicKey,
+      userId,
+    });
+  });
+
+  // STEP 4: Store push subscription with VAPID key
+  await handleSetPushSubscription({ subscription });
+
+  // STEP 5: Create lease with saved credentials
+  // No re-authentication needed - we saved credentials from setup
+  const leaseResult = await handleCreateLease(
+    {
+      userId,
+      ttlHours,
+      credentials,
+      autoExtend,
+    },
+    `${requestId}-lease`
+  );
+
+  // STEP 6: Issue packet of 5 JWTs with staggered expirations
+  const jwtResults = await handleIssueVAPIDJWTs(
+    {
+      leaseId: leaseResult.leaseId,
+      count: 5,
+      kid: vapidKid,
+    },
+    `${requestId}-jwts`
+  );
+
+  // Extract JWTs without audit entries (cleaner return)
+  const jwts = jwtResults.map(r => ({
+    jwt: r.jwt,
+    jti: r.jti,
+    exp: r.exp,
+  }));
+
+  // STEP 7: Send test notification (best-effort, don't fail if it errors)
+  try {
+    const testJWT = jwts[0]!;
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Test notification timeout (30s)'));
+      }, 30000); // 30 second timeout
+
+      const notifRequestId = `${requestId}-test-notif`;
+
+      // Store resolver
+      pendingFullSetupRequests.set(notifRequestId, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeout,
+      });
+
+      // Send message to client to send test notification
+      self.postMessage({
+        type: 'worker:send-test-notification',
+        requestId: notifRequestId,
+        jwt: testJWT.jwt,
+        subscription,
+      });
+    });
+  } catch (err: unknown) {
+    // Log warning but don't fail fullSetup
+    console.warn('[KMS Worker] Test notification failed (non-fatal):', getErrorMessage(err));
+  }
+
+  // STEP 8: Clear credentials from memory (defense in depth)
+  if (credentials.method === 'passphrase') {
+    // Can't directly zero strings in JS, but reassign to empty
+    (credentials as { passphrase: string }).passphrase = '';
+  } else if (credentials.method === 'passkey-prf') {
+    // Zero PRF output buffer
+    new Uint8Array((credentials as { prfOutput: ArrayBuffer }).prfOutput).fill(0);
+  }
+  // passkey-gate has no sensitive material to clear
+
+  // Log operation
+  await logOperation({
+    op: 'full-setup',
+    kid: vapidKid,
+    requestId,
+    userId,
+    details: {
+      action: 'full-setup',
+      enrollmentId,
+      leaseId: leaseResult.leaseId,
+      autoExtend,
+      ttlHours,
+      jwtCount: jwts.length,
+    },
+  });
+
+  return {
+    success: true,
+    enrollmentId,
+    vapidPublicKey,
+    vapidKid,
+    leaseId: leaseResult.leaseId,
+    leaseExp: leaseResult.exp,
+    autoExtend: leaseResult.autoExtend ?? true,
+    jwts,
+    subscription,
+  };
+}
+
 // ============================================================================
 // Worker Message Listener
 // ============================================================================
@@ -602,6 +835,52 @@ self.addEventListener('message', (event: MessageEvent) => {
     return;
   }
 
+  // Handle push subscription result from client (fullSetup flow)
+  if ('type' in message && message.type === 'worker:push-subscription-result') {
+    const data = message as { type: string; requestId?: string; subscription?: StoredPushSubscription; error?: string };
+    const requestId = data.requestId;
+    const subscription = data.subscription;
+    const error = data.error;
+
+    if (requestId) {
+      const pending = pendingFullSetupRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingFullSetupRequests.delete(requestId);
+
+        if (subscription) {
+          pending.resolve(subscription);
+        } else {
+          pending.reject(new Error(error || 'Push subscription failed'));
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle test notification result from client (fullSetup flow)
+  if ('type' in message && message.type === 'worker:test-notification-result') {
+    const data = message as { type: string; requestId?: string; success?: boolean; error?: string };
+    const requestId = data.requestId;
+    const success = data.success;
+    const error = data.error;
+
+    if (requestId) {
+      const pending = pendingFullSetupRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingFullSetupRequests.delete(requestId);
+
+        if (success) {
+          pending.resolve(undefined);
+        } else {
+          pending.reject(new Error(error || 'Test notification failed'));
+        }
+      }
+    }
+    return;
+  }
+
   // Handle RPC requests
   void (async (): Promise<void> => {
     const request = event.data as RPCRequest;
@@ -638,8 +917,22 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
       // Legacy RPC methods removed: generateSetupTransportKey, setupWithEncryptedCredentials
       // These are now internal functions used by setupWithPopup
 
-      case 'setupWithPopup':
-        result = await handleSetupWithPopup(validators.validateSetupWithPopup(params), id);
+      case 'setupWithPopup': {
+        const setupResult = await handleSetupWithPopup(validators.validateSetupWithPopup(params), id) as {
+          success: true;
+          enrollmentId: string;
+          vapidPublicKey: string;
+          vapidKid: string;
+          credentials: AuthCredentials;
+        };
+        // Strip credentials from response for security (only used internally by fullSetup)
+        const { credentials: _credentials, ...publicResult } = setupResult;
+        result = publicResult;
+        break;
+      }
+
+      case 'fullSetup':
+        result = await handleFullSetup(validators.validateFullSetup(params), id);
         break;
 
       case 'setupPassphrase':

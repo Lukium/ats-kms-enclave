@@ -253,6 +253,41 @@ export function validateSetupWithPopup(params: unknown): {
   };
 }
 
+/**
+ * Validate fullSetup parameters
+ */
+export function validateFullSetup(params: unknown): {
+  userId: string;
+  autoExtend?: boolean;
+  ttlHours?: number;
+} {
+  const p = validateParamsObject('fullSetup', params);
+
+  const userId = validateString('fullSetup', 'userId', p.userId);
+
+  // Build result object, only including optional fields if they were provided
+  const result: { userId: string; autoExtend?: boolean; ttlHours?: number } = { userId };
+
+  // autoExtend is optional, defaults to true
+  if (p.autoExtend !== undefined) {
+    if (typeof p.autoExtend !== 'boolean') {
+      throw new RPCValidationError('fullSetup', 'autoExtend', 'boolean', typeof p.autoExtend);
+    }
+    result.autoExtend = p.autoExtend;
+  }
+
+  // ttlHours is optional, defaults to 12
+  if (p.ttlHours !== undefined) {
+    const ttlHours = validateNumber('fullSetup', 'ttlHours', p.ttlHours);
+    if (ttlHours <= 0 || ttlHours > 720) {
+      throw new RPCValidationError('fullSetup', 'ttlHours', '0 < ttlHours <= 720', ttlHours);
+    }
+    result.ttlHours = ttlHours;
+  }
+
+  return result;
+}
+
 export function validateSetupPasskeyGate(params: unknown): {
   userId: string;
   credentialId: ArrayBuffer;

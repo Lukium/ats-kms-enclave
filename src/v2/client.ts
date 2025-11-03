@@ -17,7 +17,7 @@
  *   worker.ts (Dedicated Worker)
  */
 
-import type { RPCRequest, RPCResponse, AuthCredentials } from './types.js';
+import type { RPCRequest, RPCResponse, AuthCredentials, StoredPushSubscription } from './types.js';
 import { formatError, getErrorMessage } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
 import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils.js';
@@ -263,6 +263,30 @@ export class KMSClient {
       return;
     }
 
+    // Handle push subscription result from parent (fullSetup flow)
+    if (eventData?.type === 'kms:push-subscription-result') {
+      const data = eventData as { type: string; requestId?: string; subscription?: StoredPushSubscription; error?: string };
+      this.worker?.postMessage({
+        type: 'worker:push-subscription-result',
+        requestId: data.requestId,
+        subscription: data.subscription,
+        error: data.error,
+      });
+      return;
+    }
+
+    // Handle test notification result from parent (fullSetup flow)
+    if (eventData?.type === 'kms:test-notification-result') {
+      const data = eventData as { type: string; requestId?: string; success?: boolean; error?: string };
+      this.worker?.postMessage({
+        type: 'worker:test-notification-result',
+        requestId: data.requestId,
+        success: data.success,
+        error: data.error,
+      });
+      return;
+    }
+
     // Validate client is initialized
     if (!this.isInitialized || !this.worker) {
       console.error('[KMS Client] Received message before initialization');
@@ -339,6 +363,26 @@ export class KMSClient {
         void this.handleUnlockRequest({
           requestId: data.requestId as string,
           userId: data.userId as string,
+        });
+        return;
+      }
+
+      // Intercept push subscription request from worker (for fullSetup)
+      if ('type' in data && data.type === 'worker:request-push-subscription') {
+        void this.handlePushSubscriptionRequest({
+          requestId: data.requestId as string,
+          vapidPublicKey: data.vapidPublicKey as string,
+          userId: data.userId as string,
+        });
+        return;
+      }
+
+      // Intercept test notification request from worker (for fullSetup)
+      if ('type' in data && data.type === 'worker:send-test-notification') {
+        void this.handleTestNotification({
+          requestId: data.requestId as string,
+          jwt: data.jwt as string,
+          subscription: data.subscription as StoredPushSubscription,
         });
         return;
       }
@@ -607,6 +651,87 @@ export class KMSClient {
         type: 'worker:unlock-error',
         requestId: params.requestId,
         reason: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Handle push subscription request from worker (for fullSetup).
+   * Asks parent PWA to subscribe to push notifications with the VAPID public key.
+   *
+   * @param params - Parameters from worker push subscription request
+   */
+  private async handlePushSubscriptionRequest(params: {
+    requestId: string;
+    vapidPublicKey: string;
+    userId: string;
+  }): Promise<void> {
+    try {
+      // Ask parent to subscribe to push
+      const targetWindow = window.parent && window.parent !== window ? window.parent : null;
+      if (!targetWindow) {
+        throw new Error('No parent window available');
+      }
+
+      targetWindow.postMessage(
+        {
+          type: 'kms:request-push-subscription',
+          requestId: params.requestId,
+          vapidPublicKey: params.vapidPublicKey,
+          userId: params.userId,
+        },
+        this.parentOrigin
+      );
+
+      // Parent will respond with kms:push-subscription-result
+      // which handleParentMessage will receive and forward to worker
+    } catch (err: unknown) {
+      console.error('[KMS Client] Push subscription request failed:', err);
+      this.worker?.postMessage({
+        type: 'worker:push-subscription-result',
+        requestId: params.requestId,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Handle test notification request from worker (for fullSetup).
+   * Asks parent PWA to send a test push notification.
+   *
+   * @param params - Parameters from worker test notification request
+   */
+  private async handleTestNotification(params: {
+    requestId: string;
+    jwt: string;
+    subscription: StoredPushSubscription;
+  }): Promise<void> {
+    try {
+      // Ask parent to send test notification
+      const targetWindow = window.parent && window.parent !== window ? window.parent : null;
+      if (!targetWindow) {
+        throw new Error('No parent window available');
+      }
+
+      targetWindow.postMessage(
+        {
+          type: 'kms:send-test-notification',
+          requestId: params.requestId,
+          jwt: params.jwt,
+          subscription: params.subscription,
+        },
+        this.parentOrigin
+      );
+
+      // Parent will respond with kms:test-notification-result
+      // which handleParentMessage will receive and forward to worker
+    } catch (err: unknown) {
+      console.error('[KMS Client] Test notification request failed:', err);
+      this.worker?.postMessage({
+        type: 'worker:test-notification-result',
+        requestId: params.requestId,
+        success: false,
+        error: err instanceof Error ? err.message : 'Unknown error',
       });
     }
   }

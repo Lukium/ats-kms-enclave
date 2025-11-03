@@ -905,6 +905,42 @@ export class KMSUser {
     return this.sendRequest<SetupResult>('setupWithPopup', params);
   }
 
+  /**
+   * Full Setup - Complete onboarding in one action.
+   *
+   * Orchestrates:
+   * 1. User authentication setup (via popup)
+   * 2. Web Push subscription (via parent PWA)
+   * 3. VAPID lease creation (with autoExtend flag)
+   * 4. JWT packet issuance (5 tokens with staggered expirations)
+   * 5. Test notification (confirms setup working)
+   *
+   * All with a single user authentication!
+   *
+   * @param params - Setup parameters
+   * @param params.userId - User ID
+   * @param params.autoExtend - Whether lease can be auto-extended (default: true)
+   * @param params.ttlHours - Lease TTL in hours (default: 12, max: 720)
+   * @returns Complete setup result with lease, JWTs, and subscription
+   */
+  async fullSetup(params: {
+    userId: string;
+    autoExtend?: boolean;
+    ttlHours?: number;
+  }): Promise<{
+    success: true;
+    enrollmentId: string;
+    vapidPublicKey: string;
+    vapidKid: string;
+    leaseId: string;
+    leaseExp: number;
+    autoExtend: boolean;
+    jwts: Array<{ jwt: string; jti: string; exp: number }>;
+    subscription: StoredPushSubscription;
+  }> {
+    return this.sendRequest('fullSetup', params);
+  }
+
   // ========================================================================
   // Unlock Operations
   // ========================================================================

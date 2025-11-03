@@ -402,6 +402,7 @@ export type RPCMethod =
   | 'setupPasskeyGate'
   // Legacy methods removed: generateSetupTransportKey, setupWithEncryptedCredentials
   | 'setupWithPopup'
+  | 'fullSetup'
   | 'unlockWithPassphrase'
   | 'unlockWithPasskey'
   | 'addEnrollment'

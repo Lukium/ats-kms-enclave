@@ -2,13 +2,13 @@
 
 ## Verification Summary
 
-**Status:** ❌ FAILED
+**Status:** ✅ VERIFIED
 
-**Timestamp:** Mon, 03 Nov 2025 14:07:26 GMT
+**Timestamp:** Mon, 03 Nov 2025 14:15:19 GMT
 
 **Worker Hash:** d298b1ab
 
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19037381567)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19037613253)
 
 ---
 
@@ -57,13 +57,13 @@ Attestation verified via GitHub CLI
 
 **Artifact:** `kms-worker.d298b1ab.js`
 
-**Commit:** `ff4588ebda3cb4b1d7d429b3e1f99f7e8bcf0119`
+**Commit:** `85b182a84a7408169d800da792a0f818e82cc20d`
 
 **Rekor Transparency Log:**
-https://search.sigstore.dev?logIndex=662602457
+https://search.sigstore.dev?logIndex=662667899
 
 **Repository Attestations:**
-https://github.com/Lukium/ats-kms-enclave/attestations/12811795
+https://github.com/Lukium/ats-kms-enclave/attestations/12812361
 
 ### ✅ Allowed List
 
@@ -74,23 +74,24 @@ Current version is in allowed list
 **Allowed Hashes:**
 - `d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913`
 
-### ❌ Security Headers
+### ✅ Security Headers
 
-Some headers failed
+All headers verified
 
-#### content-security-policy ❌
+#### content-security-policy ✅
 
-**Expected:**
-```
-default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'
-```
+**Expected:** `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://raw.githubusercontent.com/Lukium/ats-kms-enclave/attestation/verification-badge.svg; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'`
 
-**Actual:**
-```
-default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://raw.githubusercontent.com; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'
-```
+**Actual:** ✅ Matches
 
-**Issue:** Mismatch
+**Frame Ancestors Explanation:**
+The `frame-ancestors` directive controls which origins can embed the KMS enclave in an iframe:
+
+- `https://alpha.allthe.services` - Development build of the AllTheServices app
+- `https://beta.allthe.services` - Beta build (not yet available)
+- `https://allthe.services` - Production build (not yet available)
+- `https://phase2-demo.allthe.services` - Demo for the KMS enclave itself
+- `http://localhost:5173` - Local development counterpart of the dev build
 
 #### permissions-policy ✅
 
@@ -126,7 +127,7 @@ default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://
 
 Build is reproducible - hash matches
 
-**Commit:** `ff4588ebda3cb4b1d7d429b3e1f99f7e8bcf0119`
+**Commit:** `85b182a84a7408169d800da792a0f818e82cc20d`
 
 **Expected Hash:** `d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913`
 
@@ -134,10 +135,10 @@ Build is reproducible - hash matches
 
 **Reproduce This Build:**
 ```bash
-git fetch origin ff4588ebda3cb4b1d7d429b3e1f99f7e8bcf0119
-git checkout ff4588ebda3cb4b1d7d429b3e1f99f7e8bcf0119
+git fetch origin 85b182a84a7408169d800da792a0f818e82cc20d
+git checkout 85b182a84a7408169d800da792a0f818e82cc20d
 pnpm install --frozen-lockfile
-SOURCE_DATE_EPOCH=1762178481 pnpm build:reproducible
+SOURCE_DATE_EPOCH=1762179202 pnpm build:reproducible
 sha256sum dist/enclave/kms-worker.d298b1ab.js
 ```
 
@@ -153,7 +154,7 @@ The hash from the last command should match: `d298b1abbbe7f2d4a570701ca27bdaefbb
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "ff4588ebda3cb4b1d7d429b3e1f99f7e8bcf0119",
+    "commit": "85b182a84a7408169d800da792a0f818e82cc20d",
     "artifact": "kms-worker.d298b1ab.js",
     "sha256": "d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913",
     "files": {
@@ -171,15 +172,15 @@ The hash from the last command should match: `d298b1abbbe7f2d4a570701ca27bdaefbb
         "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-03T14:01:43.738Z",
+    "timestamp": "2025-11-03T14:13:44.903Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1762178481"
+      "SOURCE_DATE_EPOCH": "1762179202"
     },
     "attestation": {
-      "rekorUrl": "https://search.sigstore.dev?logIndex=662602457",
-      "attestationUrl": "https://github.com/Lukium/ats-kms-enclave/attestations/12811795"
+      "rekorUrl": "https://search.sigstore.dev?logIndex=662667899",
+      "attestationUrl": "https://github.com/Lukium/ats-kms-enclave/attestations/12812361"
     }
   },
   "allowed": [
@@ -192,6 +193,6 @@ The hash from the last command should match: `d298b1abbbe7f2d4a570701ca27bdaefbb
 
 ---
 
-*Last updated: Mon, 03 Nov 2025 14:07:26 GMT*
+*Last updated: Mon, 03 Nov 2025 14:15:19 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

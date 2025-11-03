@@ -334,6 +334,122 @@ async function handleSetupComplete(event: MessageEvent): Promise<void> {
     return;
   }
 
+  // Handle push subscription request (fullSetup flow)
+  if (event.data?.type === 'kms:request-push-subscription') {
+    const requestId = event.data.requestId as string;
+    const vapidPublicKey = event.data.vapidPublicKey as string;
+
+    console.log('[Full Demo] Received push subscription request from KMS');
+
+    try {
+      // Get service worker registration
+      const registration = await navigator.serviceWorker.ready;
+
+      // Subscribe to push with VAPID key
+      const rawSub = await subscribeToPush(
+        registration,
+        base64UrlToUint8Array(vapidPublicKey)
+      );
+
+      // Convert to stored format
+      const eid = 'demo-device-fullsetup';
+      const storedSub = convertPushSubscriptionToStored(rawSub, eid);
+
+      console.log('[Full Demo] Push subscription created, sending to KMS');
+
+      // Send success response to KMS iframe
+      const iframe = document.querySelector('iframe');
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: 'kms:push-subscription-result',
+            requestId,
+            subscription: storedSub,
+          },
+          KMS_ORIGIN
+        );
+      }
+    } catch (error) {
+      console.error('[Full Demo] Push subscription failed:', error);
+
+      // Send error response to KMS iframe
+      const iframe = document.querySelector('iframe');
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: 'kms:push-subscription-result',
+            requestId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          KMS_ORIGIN
+        );
+      }
+    }
+
+    return;
+  }
+
+  // Handle test notification request (fullSetup flow)
+  if (event.data?.type === 'kms:send-test-notification') {
+    const requestId = event.data.requestId as string;
+    const jwt = event.data.jwt as string;
+    const subscription = event.data.subscription;
+
+    console.log('[Full Demo] Received test notification request from KMS');
+
+    try {
+      // Send test push notification
+      const response = await fetch(subscription.endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `vapid t=${jwt}, k=${event.data.vapidPublicKey || ''}`,
+          'Content-Type': 'application/octet-stream',
+          'TTL': '60',
+        },
+        body: JSON.stringify({
+          title: '🎉 Full Setup Complete!',
+          body: 'Your KMS is fully configured with push notifications enabled.',
+          timestamp: Date.now(),
+        }),
+      });
+
+      const success = response.ok;
+      console.log('[Full Demo] Test notification result:', success ? 'success' : 'failed');
+
+      // Send result to KMS iframe
+      const iframe = document.querySelector('iframe');
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: 'kms:test-notification-result',
+            requestId,
+            success,
+            error: success ? undefined : `HTTP ${response.status}: ${response.statusText}`,
+          },
+          KMS_ORIGIN
+        );
+      }
+    } catch (error) {
+      console.error('[Full Demo] Test notification failed:', error);
+
+      // Send error response to KMS iframe
+      const iframe = document.querySelector('iframe');
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: 'kms:test-notification-result',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          KMS_ORIGIN
+        );
+      }
+    }
+
+    return;
+  }
+
   // Check message type
   if (event.data?.type === 'kms:setup-complete') {
     console.log('[Full Demo] Setup complete notification received:', event.data);
@@ -592,9 +708,41 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
     const buttonLabel = hasAnyMethod ? 'Add' : 'Setup';
     html += '<div class="setup-choice">';
 
-    // Show button for both initial setup and adding enrollment
-    html += `<button id="setup-popup-btn" class="operation-btn primary">🚀 ${buttonLabel} Authentication Method</button>`;
-    html += `<p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Secure flow: Parent never sees credentials or transport keys</p>`;
+    // For initial setup, show both options with clear descriptions
+    if (!hasAnyMethod) {
+      html += '<h4 style="margin-bottom: 0.75rem; color: #2d3748;">Choose your setup method:</h4>';
+
+      // Option 1: Basic Setup (auth only)
+      html += `
+        <div style="margin-bottom: 1rem;">
+          <button id="setup-popup-btn" class="operation-btn primary">🚀 Setup Authentication Only</button>
+          <p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Sets up passphrase or WebAuthn authentication. You'll configure push notifications separately.</p>
+        </div>
+      `;
+
+      // Option 2: Full Setup (auth + push + lease + JWTs)
+      html += `
+        <div style="border: 2px solid #10b981; border-radius: 8px; padding: 1rem; background-color: #f0fdf4;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <span style="background-color: #10b981; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75em; font-weight: bold;">RECOMMENDED</span>
+            <span style="color: #059669; font-weight: bold;">⚡ All-in-One Setup</span>
+          </div>
+          <button id="full-setup-btn" class="operation-btn primary" style="background-color: #10b981; width: 100%;">⚡ Full Setup (Complete in One Click)</button>
+          <p style="font-size: 0.85em; color: #059669; margin-top: 0.5rem; margin-bottom: 0;">
+            <strong>Includes:</strong> Authentication + Push Notifications + Lease + 5 JWTs + Test Notification
+          </p>
+          <p style="font-size: 0.75em; color: #047857; margin-top: 0.25rem;">
+            Everything you need to start using the KMS immediately!
+          </p>
+        </div>
+      `;
+
+      html += `<p style="font-size: 0.85em; color: #718096; margin-top: 1rem;">🔒 Secure flow: Parent never sees credentials or transport keys</p>`;
+    } else {
+      // For adding enrollment, just show the add button
+      html += `<button id="setup-popup-btn" class="operation-btn primary">🚀 ${buttonLabel} Authentication Method</button>`;
+      html += `<p style="font-size: 0.85em; color: #718096; margin-top: 0.5rem;">Add an additional authentication method to your existing setup</p>`;
+    }
 
     html += '</div>';
   } else {
@@ -619,6 +767,7 @@ async function renderSetupUI(status: { isSetup: boolean; methods: string[] }): P
     } else {
       // Initial setup - call setupWithPopup
       document.getElementById('setup-popup-btn')?.addEventListener('click', setupWithPopupKMSOnly);
+      document.getElementById('full-setup-btn')?.addEventListener('click', fullSetupAction);
     }
   }
 }
@@ -675,6 +824,95 @@ async function setupWithPopupKMSOnly(): Promise<void> {
     setupOperationEl.innerHTML = `
       <div class="error-message">
         <p>❌ <strong>Setup failed</strong></p>
+        <p>${error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    `;
+  }
+}
+
+/**
+ * Full Setup - Complete onboarding in one action.
+ *
+ * This function calls the new fullSetup RPC method which orchestrates:
+ * 1. User authentication setup (via popup)
+ * 2. Web Push subscription (via parent PWA)
+ * 3. VAPID lease creation (with autoExtend flag)
+ * 4. JWT packet issuance (5 tokens with staggered expirations)
+ * 5. Test notification (confirms setup working)
+ *
+ * All with a single user authentication!
+ */
+async function fullSetupAction(): Promise<void> {
+  console.log('[Full Demo] Starting full setup (all-in-one)...');
+
+  try {
+    setupOperationEl.innerHTML = '<p class="loading">🚀 Running full setup... (this will take a few moments)</p>';
+
+    // Call the new fullSetup RPC method
+    const result = await kmsUser.fullSetup({
+      userId: 'demouser@ats.run',
+      autoExtend: true,
+      ttlHours: 12,
+    });
+
+    console.log('[Full Demo] Full setup complete!', result);
+
+    // Show success message with all the details
+    setupOperationEl.innerHTML = `
+      <div class="success-message">
+        <h4>✅ Full Setup Complete!</h4>
+        <p style="margin-top: 0.5rem;">Everything is configured and ready to use!</p>
+
+        <div class="artifact-card" style="margin-top: 1rem;">
+          <div class="artifact-title">Enrollment</div>
+          <div class="artifact-data"><code>${result.enrollmentId}</code></div>
+        </div>
+
+        <div class="artifact-card">
+          <div class="artifact-title">VAPID Key</div>
+          <div class="artifact-data"><code>${result.vapidKid}</code></div>
+        </div>
+
+        <div class="artifact-card">
+          <div class="artifact-title">Lease</div>
+          <div class="artifact-data">
+            <div>ID: <code>${result.leaseId}</code></div>
+            <div>Expires: ${new Date(result.leaseExp).toLocaleString()}</div>
+            <div>Auto-extend: ${result.autoExtend ? '✅ Yes' : '❌ No'}</div>
+          </div>
+        </div>
+
+        <div class="artifact-card">
+          <div class="artifact-title">JWT Packet</div>
+          <div class="artifact-data">
+            <div>Issued: ${result.jwts.length} tokens</div>
+            <div>First expires: ${new Date(result.jwts[0]!.exp * 1000).toLocaleTimeString()}</div>
+            <div>Last expires: ${new Date(result.jwts[result.jwts.length - 1]!.exp * 1000).toLocaleTimeString()}</div>
+          </div>
+        </div>
+
+        <div class="artifact-card">
+          <div class="artifact-title">Push Subscription</div>
+          <div class="artifact-data">
+            <div>Endpoint: <code>${result.subscription.eid}</code></div>
+            <div>Service: ${new URL(result.subscription.endpoint).hostname}</div>
+          </div>
+        </div>
+
+        <div class="info-message" style="margin-top: 1rem;">
+          🎉 <strong>Test notification sent!</strong> Check your browser notifications.
+        </div>
+      </div>
+    `;
+
+    // Reload UI to reflect new state
+    await refreshUI();
+
+  } catch (error) {
+    console.error('[Full Demo] Full setup failed:', error);
+    setupOperationEl.innerHTML = `
+      <div class="error-message">
+        <p>❌ <strong>Full setup failed</strong></p>
         <p>${error instanceof Error ? error.message : String(error)}</p>
       </div>
     `;

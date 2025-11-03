@@ -1,4 +1,4 @@
-.PHONY: help install test test-coverage test-coverage-lines typecheck lint pre-commit clean demo demo-phase-0 demo-phase-1 demo-phase-2
+.PHONY: help install test test-coverage test-coverage-lines typecheck lint pre-commit clean demo demo-phase-0 demo-phase-1 demo-phase-2 docker-build docker-push docker-build-and-push
 
 # Default target - show help
 help:
@@ -20,6 +20,9 @@ help:
 	@echo "  demo-phase-1   Run Phase 1 demo in browser"
 	@echo "  demo-phase-2   Run Phase 2 demo in browser"
 	@echo "  clean          Remove generated files"
+	@echo "  docker-build-and-push  Build and push Docker image with version bump"
+	@echo "  docker-build           Build Docker image (no push, no version bump)"
+	@echo "  docker-push            Push Docker image (assumes already built)"
 	@echo ""
 	@echo "Pre-commit workflow:"
 	@echo "  1. make pre-commit"
@@ -114,3 +117,58 @@ clean:
 	rm -rf coverage
 	rm -rf .vitest
 	@echo "✨ Clean complete"
+
+# Docker build and push with automatic versioning
+docker-build-and-push:
+	@echo "🐳 Building and pushing KMS Phase 2 Demo Docker image..."
+	@echo ""
+	@# Read current version and calculate next version (but don't write yet)
+	@CURRENT_VERSION=$$(cat VERSION) && \
+	REPO=$$(cat DOCKER_REPO) && \
+	MAJOR=$$(echo $$CURRENT_VERSION | cut -d. -f1) && \
+	MINOR=$$(echo $$CURRENT_VERSION | cut -d. -f2) && \
+	PATCH=$$(echo $$CURRENT_VERSION | cut -d. -f3) && \
+	NEW_PATCH=$$((PATCH + 1)) && \
+	NEW_VERSION="$$MAJOR.$$MINOR.$$NEW_PATCH" && \
+	echo "📦 Current version: $$CURRENT_VERSION" && \
+	echo "📦 Building version: $$NEW_VERSION" && \
+	echo "📦 Target repository: $$REPO" && \
+	echo "" && \
+	echo "🔨 Building Docker image with version $$NEW_VERSION..." && \
+	docker build \
+		--provenance=true \
+		--sbom=true \
+		--build-arg VERSION=$$NEW_VERSION \
+		-t $$REPO:$$NEW_VERSION \
+		-t $$REPO:latest \
+		. && \
+	echo "" && \
+	echo "✅ Build successful! Updating version file..." && \
+	echo "$$NEW_VERSION" > VERSION && \
+	echo "📤 Pushing to Docker Hub..." && \
+	docker push $$REPO:$$NEW_VERSION && \
+	docker push $$REPO:latest && \
+	echo "" && \
+	echo "✅ Successfully built and pushed $$REPO:$$NEW_VERSION and $$REPO:latest"
+
+# Build only (no push, no version bump)
+docker-build:
+	@echo "🐳 Building KMS Phase 2 Demo Docker image (no push)..."
+	@VERSION=$$(cat VERSION) && \
+	REPO=$$(cat DOCKER_REPO) && \
+	echo "Building $$REPO:$$VERSION" && \
+	docker build \
+		--provenance=true \
+		--sbom=true \
+		--build-arg VERSION=$$VERSION \
+		-t $$REPO:$$VERSION \
+		-t $$REPO:latest \
+		.
+
+# Push only (assumes image is already built)
+docker-push:
+	@echo "📤 Pushing KMS Phase 2 Demo Docker image..."
+	@VERSION=$$(cat VERSION) && \
+	REPO=$$(cat DOCKER_REPO) && \
+	docker push $$REPO:$$VERSION && \
+	docker push $$REPO:latest

@@ -39,17 +39,17 @@ jobs:
 
       - name: Trigger verification workflow
         if: steps.dice.outputs.trigger == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.VERIFICATION_TRIGGER_TOKEN }}
         run: |
-          # Note: GITHUB_TOKEN cannot trigger repository_dispatch events
-          # We use a PAT with public_repo scope stored in VERIFICATION_TRIGGER_TOKEN
-          curl -X POST \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Authorization: token ${{ secrets.VERIFICATION_TRIGGER_TOKEN }}" \
-            https://api.github.com/repos/${{ github.repository }}/dispatches \
-            -d '{"event_type":"verify-deployment"}'
+          # Note: repository_dispatch only works on default branch
+          # We use gh workflow run to trigger verify.yml on verifier branch
+          gh workflow run verify.yml \
+            --ref verifier \
+            -R ${{ github.repository }}
 
           echo "✅ Verification workflow triggered on verifier branch"
-          echo "Check: https://github.com/${{ github.repository }}/actions"
+          echo "Check: https://github.com/${{ github.repository }}/actions/workflows/verify.yml"
 
       - name: Log skip
         if: steps.dice.outputs.trigger == 'false'

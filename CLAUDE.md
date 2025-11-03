@@ -263,14 +263,20 @@ pnpm typecheck
 pnpm lint
 ```
 
-### Building (To Be Implemented)
+### Building
 ```bash
-# Development build (not reproducible)
-pnpm build:dev
+# Standard build (reproducible)
+pnpm build
 
-# Reproducible build (deterministic output)
+# Reproducible build (explicit - same as above)
 pnpm build:reproducible
+
+# Legacy aliases (kept for historical purposes - all now reproducible)
+pnpm build:enclave  # Same as build:reproducible
+pnpm build:dev      # Same as build:reproducible
 ```
+
+**Note**: As of Phase 2.1, all build commands now use reproducible builds with git commit timestamps (`SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)`). The separate `build:enclave`, `build:dev`, and `build:reproducible` commands are now functionally identical but kept as aliases for backward compatibility and historical purposes.
 
 ## Commit Guidelines
 

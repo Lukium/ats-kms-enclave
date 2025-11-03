@@ -926,8 +926,12 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           credentials: AuthCredentials;
         };
         // Strip credentials from response for security (only used internally by fullSetup)
-        const { credentials: _credentials, ...publicResult } = setupResult;
-        result = publicResult;
+        result = {
+          success: setupResult.success,
+          enrollmentId: setupResult.enrollmentId,
+          vapidPublicKey: setupResult.vapidPublicKey,
+          vapidKid: setupResult.vapidKid,
+        };
         break;
       }
 

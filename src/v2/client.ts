@@ -661,11 +661,11 @@ export class KMSClient {
    *
    * @param params - Parameters from worker push subscription request
    */
-  private async handlePushSubscriptionRequest(params: {
+  private handlePushSubscriptionRequest(params: {
     requestId: string;
     vapidPublicKey: string;
     userId: string;
-  }): Promise<void> {
+  }): void {
     try {
       // Ask parent to subscribe to push
       const targetWindow = window.parent && window.parent !== window ? window.parent : null;
@@ -701,11 +701,11 @@ export class KMSClient {
    *
    * @param params - Parameters from worker test notification request
    */
-  private async handleTestNotification(params: {
+  private handleTestNotification(params: {
     requestId: string;
     jwt: string;
     subscription: StoredPushSubscription;
-  }): Promise<void> {
+  }): void {
     try {
       // Ask parent to send test notification
       const targetWindow = window.parent && window.parent !== window ? window.parent : null;

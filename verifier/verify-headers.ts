@@ -33,7 +33,7 @@ interface HeaderVerificationResult {
  */
 const EXPECTED_HEADERS = {
   'content-security-policy':
-    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'",
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://raw.githubusercontent.com/Lukium/ats-kms-enclave/attestation/verification-badge.svg; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https://alpha.allthe.services https://beta.allthe.services https://allthe.services https://phase2-demo.allthe.services http://localhost:5173; form-action 'none'",
 
   'permissions-policy':
     'accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()',

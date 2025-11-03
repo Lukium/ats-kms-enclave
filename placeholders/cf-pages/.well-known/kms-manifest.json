@@ -2,7 +2,7 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "d533a48205c760b2a363c0fbdf112f886a5f8237",
+    "commit": "3310a5e9fcd8ffa4c202cc9c485155cc0583a6b2",
     "artifact": "kms-worker.d298b1ab.js",
     "sha256": "d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913",
     "files": {
@@ -13,18 +13,18 @@
       },
       "client": {
         "filename": "enclave-client.js",
-        "sri": "sha384-M+QOIxTjQSyRNL6s+N4NIJfLAAjCCyCacKrRqj8EFpAOmk9Hp4kQMIBoLcBngdOQ"
+        "sri": "sha384-ZfdlzkqPxkytL32aTY8uRbv77+z89mNWgBOYWbbDh39maXG5Q6FwvCweSOW9Mbd7"
       },
       "css": {
         "filename": "enclave.css",
         "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-03T12:10:52.336Z",
+    "timestamp": "2025-11-03T13:13:24.241Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1762171613"
+      "SOURCE_DATE_EPOCH": "1762173821"
     }
   },
   "allowed": [

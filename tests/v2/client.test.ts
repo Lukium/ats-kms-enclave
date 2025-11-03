@@ -844,3 +844,288 @@ describe('client integration', () => {
     expect(postMessageSpy).toHaveBeenCalledWith(request1);
   });
 });
+
+// ============================================================================
+// Setup UI Helper Functions
+// ============================================================================
+
+describe('setup UI helpers', () => {
+  let client: KMSClient;
+  let env: ReturnType<typeof setupTestEnvironment>;
+
+  beforeEach(() => {
+    env = setupTestEnvironment();
+    client = new KMSClient({
+      parentOrigin: 'https://allthe.services',
+    });
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  describe('showSetupError', () => {
+    it('should display error message and remove hidden class', () => {
+      const errorDiv = document.createElement('div');
+      errorDiv.id = 'kms-setup-error';
+      errorDiv.classList.add('hidden');
+      document.body.appendChild(errorDiv);
+
+      // Access private method via any cast
+      (client as any).showSetupError('Test error message');
+
+      expect(errorDiv.textContent).toBe('Test error message');
+      expect(errorDiv.classList.contains('hidden')).toBe(false);
+
+      document.body.removeChild(errorDiv);
+    });
+
+    it('should handle missing error div gracefully', () => {
+      // Should not throw when element doesn't exist
+      expect(() => {
+        (client as any).showSetupError('Test error');
+      }).not.toThrow();
+    });
+  });
+
+  describe('hideSetupError', () => {
+    it('should add hidden class to error div', () => {
+      const errorDiv = document.createElement('div');
+      errorDiv.id = 'kms-setup-error';
+      errorDiv.textContent = 'Some error';
+      document.body.appendChild(errorDiv);
+
+      (client as any).hideSetupError();
+
+      expect(errorDiv.classList.contains('hidden')).toBe(true);
+
+      document.body.removeChild(errorDiv);
+    });
+
+    it('should handle missing error div gracefully', () => {
+      expect(() => {
+        (client as any).hideSetupError();
+      }).not.toThrow();
+    });
+  });
+
+  describe('showSetupLoading', () => {
+    it('should remove hidden class from loading div', () => {
+      const loadingDiv = document.createElement('div');
+      loadingDiv.id = 'kms-setup-loading';
+      loadingDiv.classList.add('hidden');
+      document.body.appendChild(loadingDiv);
+
+      (client as any).showSetupLoading();
+
+      expect(loadingDiv.classList.contains('hidden')).toBe(false);
+
+      document.body.removeChild(loadingDiv);
+    });
+
+    it('should handle missing loading div gracefully', () => {
+      expect(() => {
+        (client as any).showSetupLoading();
+      }).not.toThrow();
+    });
+  });
+
+  describe('hideSetupLoading', () => {
+    it('should add hidden class to loading div', () => {
+      const loadingDiv = document.createElement('div');
+      loadingDiv.id = 'kms-setup-loading';
+      document.body.appendChild(loadingDiv);
+
+      (client as any).hideSetupLoading();
+
+      expect(loadingDiv.classList.contains('hidden')).toBe(true);
+
+      document.body.removeChild(loadingDiv);
+    });
+
+    it('should handle missing loading div gracefully', () => {
+      expect(() => {
+        (client as any).hideSetupLoading();
+      }).not.toThrow();
+    });
+  });
+
+  describe('showSetupSuccess', () => {
+    it('should remove hidden class from success div', () => {
+      const successDiv = document.createElement('div');
+      successDiv.id = 'kms-setup-success';
+      successDiv.classList.add('hidden');
+      document.body.appendChild(successDiv);
+
+      (client as any).showSetupSuccess();
+
+      expect(successDiv.classList.contains('hidden')).toBe(false);
+
+      document.body.removeChild(successDiv);
+    });
+
+    it('should handle missing success div gracefully', () => {
+      expect(() => {
+        (client as any).showSetupSuccess();
+      }).not.toThrow();
+    });
+  });
+
+  describe('hideSetupSuccess', () => {
+    it('should add hidden class to success div', () => {
+      const successDiv = document.createElement('div');
+      successDiv.id = 'kms-setup-success';
+      document.body.appendChild(successDiv);
+
+      (client as any).hideSetupSuccess();
+
+      expect(successDiv.classList.contains('hidden')).toBe(true);
+
+      document.body.removeChild(successDiv);
+    });
+
+    it('should handle missing success div gracefully', () => {
+      expect(() => {
+        (client as any).hideSetupSuccess();
+      }).not.toThrow();
+    });
+  });
+});
+
+// ============================================================================
+// notifySetupComplete
+// ============================================================================
+
+describe('notifySetupComplete', () => {
+  let client: KMSClient;
+  let env: ReturnType<typeof setupTestEnvironment>;
+
+  beforeEach(() => {
+    env = setupTestEnvironment();
+    client = new KMSClient({
+      parentOrigin: 'https://allthe.services',
+    });
+  });
+
+  afterEach(() => {
+    env.cleanup();
+    localStorage.clear();
+  });
+
+  it('should send message via window.opener if available', () => {
+    const mockOpener = {
+      postMessage: vi.fn(),
+    };
+    Object.defineProperty(window, 'opener', {
+      value: mockOpener,
+      writable: true,
+      configurable: true,
+    });
+
+    const data = { method: 'setup', result: { success: true } };
+    (client as any).notifySetupComplete(data);
+
+    expect(mockOpener.postMessage).toHaveBeenCalledWith(
+      {
+        type: 'kms:setup-complete',
+        method: 'setup',
+        result: { success: true },
+      },
+      'https://allthe.services'
+    );
+
+    // Cleanup
+    Object.defineProperty(window, 'opener', {
+      value: null,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('should set localStorage flag with timestamp', () => {
+    const data = { method: 'setup', result: { enrollmentId: 'test-123' } };
+    const beforeTime = Date.now();
+
+    (client as any).notifySetupComplete(data);
+
+    const stored = localStorage.getItem('kms:setup-complete');
+    expect(stored).toBeTruthy();
+
+    const parsed = JSON.parse(stored!);
+    expect(parsed.type).toBe('kms:setup-complete');
+    expect(parsed.method).toBe('setup');
+    expect(parsed.result).toEqual({ enrollmentId: 'test-123' });
+    expect(parsed.timestamp).toBeGreaterThanOrEqual(beforeTime);
+    expect(parsed.timestamp).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('should use BroadcastChannel if available', () => {
+    const mockChannel = {
+      postMessage: vi.fn(),
+      close: vi.fn(),
+    };
+
+    // Mock BroadcastChannel constructor
+    const OriginalBroadcastChannel = global.BroadcastChannel;
+    global.BroadcastChannel = vi.fn().mockImplementation(() => mockChannel) as any;
+
+    const data = { method: 'setup', result: { success: true } };
+    (client as any).notifySetupComplete(data);
+
+    expect(global.BroadcastChannel).toHaveBeenCalledWith('kms-setup');
+    expect(mockChannel.postMessage).toHaveBeenCalledWith({
+      type: 'kms:setup-complete',
+      method: 'setup',
+      result: { success: true },
+    });
+    expect(mockChannel.close).toHaveBeenCalled();
+
+    // Restore
+    global.BroadcastChannel = OriginalBroadcastChannel;
+  });
+
+  it('should handle localStorage errors gracefully', () => {
+    // Mock localStorage.setItem to throw
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = vi.fn().mockImplementation(() => {
+      throw new Error('Storage quota exceeded');
+    });
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const data = { method: 'setup', result: { success: true } };
+
+    // Should not throw
+    expect(() => {
+      (client as any).notifySetupComplete(data);
+    }).not.toThrow();
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '[KMS Client] Failed to set localStorage flag:',
+      expect.any(Error)
+    );
+
+    // Restore
+    Storage.prototype.setItem = originalSetItem;
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('should handle missing BroadcastChannel gracefully', () => {
+    // Remove BroadcastChannel
+    const OriginalBroadcastChannel = global.BroadcastChannel;
+    (global as any).BroadcastChannel = undefined;
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const data = { method: 'setup', result: { success: true } };
+
+    // Should not throw
+    expect(() => {
+      (client as any).notifySetupComplete(data);
+    }).not.toThrow();
+
+    // Restore
+    global.BroadcastChannel = OriginalBroadcastChannel;
+    consoleWarnSpy.mockRestore();
+  });
+});

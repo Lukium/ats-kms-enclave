@@ -38,7 +38,7 @@ export default defineConfig({
         "default-src 'self'",
         "script-src 'self'",
         "frame-src https://kms.ats.run", // Allow KMS iframe from production
-        "connect-src 'self' ws://localhost:5173 wss://phase2-demo.allthe.services", // Allow Vite HMR (both http and https)
+        "connect-src 'self' ws://localhost:5173 wss://phase2-demo.allthe.services https://fcm.googleapis.com https://updates.push.services.mozilla.com https://*.notify.windows.com https://*.push.apple.com", // Allow Vite HMR and push services
         "worker-src 'self' blob:", // Allow Vite HMR workers
         "style-src 'self' 'unsafe-inline'", // TODO: Remove unsafe-inline in production
       ].join('; '),

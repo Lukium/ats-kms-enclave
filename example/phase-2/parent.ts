@@ -405,48 +405,36 @@ async function handleSetupComplete(event: MessageEvent): Promise<void> {
     console.log('[Full Demo] Received test notification request from KMS');
 
     try {
-      // Send mock push notification via service worker (avoids CSP violation)
-      const registration = await navigator.serviceWorker.ready;
-      if (!registration.active) {
-        throw new Error('No active service worker');
-      }
+      // Extract VAPID public key from JWT header
+      const vapidPublicKey = event.data.vapidPublicKey as string;
 
-      const messageChannel = new MessageChannel();
-      const pushPromise = new Promise<void>((resolve, reject) => {
-        messageChannel.port1.onmessage = (msgEvent) => {
-          if (msgEvent.data.success) {
-            resolve();
-          } else {
-            reject(new Error(msgEvent.data.error));
-          }
-        };
+      // Send REAL push notification through the actual push service
+      const response = await fetch(subscription.endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `vapid t=${jwt}, k=${vapidPublicKey}`,
+          'Content-Type': 'application/octet-stream',
+          'TTL': '60',
+        },
+        body: JSON.stringify({
+          title: '🎉 Full Setup Complete!',
+          body: 'Your KMS is fully configured with push notifications enabled.',
+          timestamp: Date.now(),
+        }),
       });
 
-      registration.active.postMessage(
-        {
-          type: 'mock-push',
-          jwt,
-          subscription,
-          payload: {
-            title: '🎉 Full Setup Complete!',
-            body: 'Your KMS is fully configured with push notifications enabled.',
-            timestamp: Date.now(),
-          },
-        },
-        [messageChannel.port2]
-      );
+      const success = response.ok;
+      console.log('[Full Demo] Real push notification result:', success ? 'sent successfully' : `failed: ${response.status}`);
 
-      await pushPromise;
-      console.log('[Full Demo] Test notification sent successfully');
-
-      // Send success result to KMS iframe
+      // Send result to KMS iframe
       const iframe = document.querySelector('iframe');
       if (iframe && iframe.contentWindow) {
         iframe.contentWindow.postMessage(
           {
             type: 'kms:test-notification-result',
             requestId,
-            success: true,
+            success,
+            error: success ? undefined : `HTTP ${response.status}: ${response.statusText}`,
           },
           KMS_ORIGIN
         );

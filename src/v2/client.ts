@@ -705,6 +705,7 @@ export class KMSClient {
     requestId: string;
     jwt: string;
     subscription: StoredPushSubscription;
+    vapidPublicKey: string;
   }): void {
     try {
       // Ask parent to send test notification
@@ -719,6 +720,7 @@ export class KMSClient {
           requestId: params.requestId,
           jwt: params.jwt,
           subscription: params.subscription,
+          vapidPublicKey: params.vapidPublicKey,
         },
         this.parentOrigin
       );

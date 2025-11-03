@@ -708,6 +708,7 @@ async function handleFullSetup(
         requestId: notifRequestId,
         jwt: testJWT.jwt,
         subscription,
+        vapidPublicKey,
       });
     });
   } catch (err: unknown) {

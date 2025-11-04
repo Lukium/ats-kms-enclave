@@ -2,33 +2,33 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "5925d7075d9dc4c84ea74f26dfbb5cfa2e894400",
-    "artifact": "kms-worker.d298b1ab.js",
-    "sha256": "d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913",
+    "commit": "b0fe4d8bb48d17746ed85074c8a294c6daeccce4",
+    "artifact": "kms-worker.c67864ff.js",
+    "sha256": "c67864ff7bc17ae48e4900170d997478249239ad5010ea1dae0c9da6d5808233",
     "files": {
       "worker": {
-        "filename": "kms-worker.d298b1ab.js",
-        "sha256": "d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913",
-        "sri": "sha384-iC4WetazEk+lt84GY4Hmm3eGtidyWBJb/76GZxnhE1lNIZthysoAlhznaiExW6zG"
+        "filename": "kms-worker.c67864ff.js",
+        "sha256": "c67864ff7bc17ae48e4900170d997478249239ad5010ea1dae0c9da6d5808233",
+        "sri": "sha384-pUXFqdojZdi2lQBHmEmzzRW/+guYGqj+Z0P7+GxNFRRRuUJsZxot0wAJLK2Mp2if"
       },
       "client": {
         "filename": "enclave-client.js",
-        "sri": "sha384-UzJj3nL1tWKtbakzd9IQ0oWo7L7pFryJulSoFNWWMyIDYoyp+kQ9p3Lq8xYIfJ1W"
+        "sri": "sha384-tJO7KuTe6q3+TriZ/tiZdq4ST770xRF+6o1n5C0/aRtbMYpo2egOeWlYiTr0WbT6"
       },
       "css": {
         "filename": "enclave.css",
         "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-03T18:22:34.483Z",
+    "timestamp": "2025-11-04T06:09:53.112Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1762180368"
+      "SOURCE_DATE_EPOCH": "1762194181"
     }
   },
   "allowed": [
-    "d298b1abbbe7f2d4a570701ca27bdaefbbc7cc6a16869cb51191496ae9f8b913"
+    "c67864ff7bc17ae48e4900170d997478249239ad5010ea1dae0c9da6d5808233"
   ],
   "deprecated": [],
   "comment": "Phase 2.1: Deterministic builds with SRI (Subresource Integrity)"

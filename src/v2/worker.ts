@@ -2397,7 +2397,7 @@ async function handleIssueVAPIDJWT(
 
   const payload: VAPIDPayload = {
     aud,
-    sub: 'mailto:kms@example.com', // Should come from config
+    sub: 'mailto:admin@allthe.services',
     exp,
     jti,
     uid: lease.userId,

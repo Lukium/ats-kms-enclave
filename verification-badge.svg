@@ -21,11 +21,11 @@
     <text x="54" y="14">KMS Verified</text>
 
     <!-- Timestamp -->
-    <text x="185" y="15" fill="#000" fill-opacity=".3">Nov 3, 14:28 UTC</text>
-    <text x="184" y="14">Nov 3, 14:28 UTC</text>
+    <text x="185" y="15" fill="#000" fill-opacity=".3">Nov 4, 09:44 UTC</text>
+    <text x="184" y="14">Nov 4, 09:44 UTC</text>
 
     <!-- Hash -->
-    <text x="300" y="15" fill="#fff" fill-opacity=".8">d298b1ab</text>
-    <text x="299" y="14" fill="#fff" fill-opacity=".9">d298b1ab</text>
+    <text x="300" y="15" fill="#fff" fill-opacity=".8">c67864ff</text>
+    <text x="299" y="14" fill="#fff" fill-opacity=".9">c67864ff</text>
   </g>
 </svg>

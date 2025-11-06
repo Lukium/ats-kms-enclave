@@ -83,6 +83,34 @@ jobs:
           directory: dist/enclave
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Purge Cloudflare cache
+        run: |
+          echo "🧹 Purging Cloudflare cache for kms.ats.run..."
+
+          # Get zone ID for kms.ats.run
+          ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=ats.run" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" | jq -r '.result[0].id')
+
+          echo "Zone ID: $ZONE_ID"
+
+          # Purge everything on the zone
+          PURGE_RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+
+          echo "Purge response: $PURGE_RESPONSE"
+
+          # Check if purge was successful
+          SUCCESS=$(echo $PURGE_RESPONSE | jq -r '.success')
+          if [ "$SUCCESS" = "true" ]; then
+            echo "✅ Cache purged successfully"
+          else
+            echo "❌ Cache purge failed: $PURGE_RESPONSE"
+            exit 1
+          fi
+
       - name: Summary
         run: |
           echo "## 🚀 KMS Enclave Deployment" >> $GITHUB_STEP_SUMMARY

@@ -4,11 +4,11 @@
 
 **Status:** ✅ VERIFIED
 
-**Timestamp:** Thu, 06 Nov 2025 08:25:23 GMT
+**Timestamp:** Thu, 06 Nov 2025 09:39:49 GMT
 
 **Worker Hash:** dcdb17b1
 
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19129376417)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19131305987)
 
 ---
 
@@ -57,13 +57,13 @@ Attestation verified via GitHub CLI
 
 **Artifact:** `kms-worker.dcdb17b1.js`
 
-**Commit:** `3558d30b7a35f0848a6b2c092c4c992312814fcc`
+**Commit:** `32de9c743fe83f8ab1fb6e19b89e9e3f23157ef7`
 
 **Rekor Transparency Log:**
-https://search.sigstore.dev?logIndex=675222842
+https://search.sigstore.dev?logIndex=675358515
 
 **Repository Attestations:**
-https://github.com/Lukium/ats-kms-enclave/attestations/12981956
+https://github.com/Lukium/ats-kms-enclave/attestations/12983177
 
 ### ✅ Allowed List
 
@@ -127,7 +127,7 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 Build is reproducible - hash matches
 
-**Commit:** `3558d30b7a35f0848a6b2c092c4c992312814fcc`
+**Commit:** `32de9c743fe83f8ab1fb6e19b89e9e3f23157ef7`
 
 **Expected Hash:** `dcdb17b1b1003e36a5fdb3759e905f502dd93038b31643e12358cb452b2d1548`
 
@@ -135,10 +135,10 @@ Build is reproducible - hash matches
 
 **Reproduce This Build:**
 ```bash
-git fetch origin 3558d30b7a35f0848a6b2c092c4c992312814fcc
-git checkout 3558d30b7a35f0848a6b2c092c4c992312814fcc
+git fetch origin 32de9c743fe83f8ab1fb6e19b89e9e3f23157ef7
+git checkout 32de9c743fe83f8ab1fb6e19b89e9e3f23157ef7
 pnpm install --frozen-lockfile
-SOURCE_DATE_EPOCH=1762415470 pnpm build:reproducible
+SOURCE_DATE_EPOCH=1762417782 pnpm build:reproducible
 sha256sum dist/enclave/kms-worker.dcdb17b1.js
 ```
 
@@ -154,7 +154,7 @@ The hash from the last command should match: `dcdb17b1b1003e36a5fdb3759e905f502d
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "3558d30b7a35f0848a6b2c092c4c992312814fcc",
+    "commit": "32de9c743fe83f8ab1fb6e19b89e9e3f23157ef7",
     "artifact": "kms-worker.dcdb17b1.js",
     "sha256": "dcdb17b1b1003e36a5fdb3759e905f502dd93038b31643e12358cb452b2d1548",
     "files": {
@@ -172,15 +172,15 @@ The hash from the last command should match: `dcdb17b1b1003e36a5fdb3759e905f502d
         "sri": "sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ"
       }
     },
-    "timestamp": "2025-11-06T07:52:28.926Z",
+    "timestamp": "2025-11-06T08:31:09.802Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1762415470"
+      "SOURCE_DATE_EPOCH": "1762417782"
     },
     "attestation": {
-      "rekorUrl": "https://search.sigstore.dev?logIndex=675222842",
-      "attestationUrl": "https://github.com/Lukium/ats-kms-enclave/attestations/12981956"
+      "rekorUrl": "https://search.sigstore.dev?logIndex=675358515",
+      "attestationUrl": "https://github.com/Lukium/ats-kms-enclave/attestations/12983177"
     }
   },
   "allowed": [
@@ -193,6 +193,6 @@ The hash from the last command should match: `dcdb17b1b1003e36a5fdb3759e905f502d
 
 ---
 
-*Last updated: Thu, 06 Nov 2025 08:25:23 GMT*
+*Last updated: Thu, 06 Nov 2025 09:39:49 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

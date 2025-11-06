@@ -1504,17 +1504,17 @@ describe('issueVAPIDJWTs', () => {
       expect(item.exp).toBeGreaterThan(Date.now() / 1000);
     }
 
-    // Verify expirations are staggered (each should be ~9 minutes apart)
+    // Verify expirations are staggered (each should be ~60 minutes apart)
     expect(result[1]!.exp).toBeGreaterThan(result[0]!.exp);
     expect(result[2]!.exp).toBeGreaterThan(result[1]!.exp);
 
-    // Check stagger interval is approximately 540 seconds (9 minutes = 60% of 15 min TTL)
+    // Check stagger interval is approximately 3600 seconds (60 minutes = 60% of 100 min TTL)
     const stagger1 = result[1]!.exp - result[0]!.exp;
     const stagger2 = result[2]!.exp - result[1]!.exp;
-    expect(stagger1).toBeGreaterThan(500);
-    expect(stagger1).toBeLessThan(600);
-    expect(stagger2).toBeGreaterThan(500);
-    expect(stagger2).toBeLessThan(600);
+    expect(stagger1).toBeGreaterThan(3500);
+    expect(stagger1).toBeLessThan(3700);
+    expect(stagger2).toBeGreaterThan(3500);
+    expect(stagger2).toBeLessThan(3700);
   });
 
   it('should validate count is between 1 and 10', async () => {

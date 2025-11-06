@@ -59,7 +59,7 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ### Test Coverage & Statistics
 
 <!-- AUTO-GENERATED: Do not edit manually -->
-*Last updated: 2025-11-03 13:13:16 UTC*
+*Last updated: 2025-11-06 07:50:33 UTC*
 
 **Test Results:**
 - Test Files: 10 passed (10)
@@ -70,18 +70,18 @@ This represents the bulk of the core KMS functionality. See [docs/architecture/c
 ```
 File                    │ Lines   │ % Stmts │ % Branch │ % Funcs │ % Lines │ Uncovered
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-All files               │ 11186   │   80.31│    84.05 │   88.66│   80.31 │
+All files               │ 11191   │   80.28│    83.98 │   88.66│   80.28 │
  v2/audit.ts            │ 615     │   99.34│    96.22 │     100│   99.34 │ 4 lines
- v2/client.ts           │ 2471    │   40.38│    68.85 │   82.92│   40.38 │ 1035 lines
+ v2/client.ts           │ 2476    │   40.32│    68.85 │   82.92│   40.32 │ 1039 lines
  v2/crypto-utils.ts     │ 417     │     100│    95.71 │     100│     100 │ 
  v2/error-utils.ts      │ 95      │     100│      100 │     100│     100 │ 
  v2/kms-user.ts         │ 2088    │   90.51│    70.17 │   60.00│   90.51 │ 198 lines
  v2/rpc-validation.ts   │ 678     │   89.06│    88.54 │   90.00│   89.06 │ 74 lines
  v2/storage-types.ts    │ 50      │     100│      100 │     100│     100 │ 
  v2/storage.ts          │ 649     │   97.05│    86.74 │     100│   97.05 │ 18 lines
- v2/unlock.ts           │ 485     │   98.76│    92.45 │     100│   98.76 │ 6 lines
+ v2/unlock.ts           │ 485     │   98.76│    92.00 │     100│   98.76 │ 6 lines
  v2/webauthn-types.ts   │ 105     │     100│    68.42 │     100│     100 │ 
- v2/worker.ts           │ 2892    │   79.73│    83.39 │   91.17│   79.73 │ 586 lines
+ v2/worker.ts           │ 2892    │   79.73│    83.33 │   91.17│   79.73 │ 586 lines
 ```
 <!-- END AUTO-GENERATED -->
 

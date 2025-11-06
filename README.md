@@ -2,13 +2,13 @@
 
 ## Verification Summary
 
-**Status:** ❌ FAILED
+**Status:** ✅ VERIFIED
 
-**Timestamp:** Thu, 06 Nov 2025 08:19:39 GMT
+**Timestamp:** Thu, 06 Nov 2025 08:25:23 GMT
 
 **Worker Hash:** dcdb17b1
 
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19129239951)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/19129376417)
 
 ---
 
@@ -39,15 +39,15 @@ The verifier runs approximately **4 times per day** at random times to check tha
 
 Manifest fetched (v2.0.0)
 
-### ❌ Hash Verification
+### ✅ Hash Verification
 
-Some hash verifications failed
+All hashes verified
 
 | Artifact | Status | Expected | Actual |
 |----------|--------|----------|--------|
 | **Worker SHA256** | ✅ | `dcdb17b1b1003e36a5fdb3759e905f502dd93038b31643e12358cb452b2d1548` | `dcdb17b1b1003e36a5fdb3759e905f502dd93038b31643e12358cb452b2d1548` |
 | **Worker SRI** | ✅ | `sha384-xqXzVuZiljz2HpTEs4lkNyGCTZ0sCfELjLymarEYHAxOLxoO8HSIAmTwe8DHypxm` | `sha384-xqXzVuZiljz2HpTEs4lkNyGCTZ0sCfELjLymarEYHAxOLxoO8HSIAmTwe8DHypxm` |
-| **Client.js SRI** | ❌ | `sha384-qu4sQ0KraOAlFctYQ+8P1TPYDxZeJIRF9lk3bFm/ZEKSxqq5nPnfw9QdEosjCG9T` | `sha384-tJO7KuTe6q3+TriZ/tiZdq4ST770xRF+6o1n5C0/aRtbMYpo2egOeWlYiTr0WbT6` |
+| **Client.js SRI** | ✅ | `sha384-qu4sQ0KraOAlFctYQ+8P1TPYDxZeJIRF9lk3bFm/ZEKSxqq5nPnfw9QdEosjCG9T` | `sha384-qu4sQ0KraOAlFctYQ+8P1TPYDxZeJIRF9lk3bFm/ZEKSxqq5nPnfw9QdEosjCG9T` |
 | **Enclave.css SRI** | ✅ | `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ` | `sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ` |
 
 
@@ -193,6 +193,6 @@ The hash from the last command should match: `dcdb17b1b1003e36a5fdb3759e905f502d
 
 ---
 
-*Last updated: Thu, 06 Nov 2025 08:19:39 GMT*
+*Last updated: Thu, 06 Nov 2025 08:25:23 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

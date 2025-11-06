@@ -9,7 +9,7 @@
 
   <!-- Section 1: Status -->
   <rect width="110" height="20" fill="#555"/>
-  <rect x="110" width="150" height="20" fill="#F44336"/>
+  <rect x="110" width="150" height="20" fill="#4CAF50"/>
   <rect x="260" width="80" height="20" fill="#444"/>
 
   <rect width="340" height="20" fill="url(#bg)"/>
@@ -17,12 +17,12 @@
   <!-- Text -->
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
     <!-- "KMS Verified" text -->
-    <text x="55" y="15" fill="#000" fill-opacity=".3">KMS FAILED</text>
-    <text x="54" y="14">KMS FAILED</text>
+    <text x="55" y="15" fill="#000" fill-opacity=".3">KMS Verified</text>
+    <text x="54" y="14">KMS Verified</text>
 
     <!-- Timestamp -->
-    <text x="185" y="15" fill="#000" fill-opacity=".3">Nov 6, 08:19 UTC</text>
-    <text x="184" y="14">Nov 6, 08:19 UTC</text>
+    <text x="185" y="15" fill="#000" fill-opacity=".3">Nov 6, 08:25 UTC</text>
+    <text x="184" y="14">Nov 6, 08:25 UTC</text>
 
     <!-- Hash -->
     <text x="300" y="15" fill="#fff" fill-opacity=".8">dcdb17b1</text>

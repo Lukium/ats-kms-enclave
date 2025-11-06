@@ -1433,11 +1433,11 @@ export class KMSUser {
    * pre-fetches multiple JWTs to avoid needing to call the KMS for every push notification.
    *
    * **Staggered Expirations:**
-   * - JWT[0]: expires at T+15min (900s)
-   * - JWT[1]: expires at T+24min (900s + 540s stagger)
-   * - JWT[2]: expires at T+33min (900s + 1080s stagger)
+   * - JWT[0]: expires at T+100min (6000s)
+   * - JWT[1]: expires at T+160min (6000s + 3600s stagger)
+   * - JWT[2]: expires at T+220min (6000s + 7200s stagger)
    *
-   * The stagger interval is 60% of the JWT TTL (540s for 900s TTL), ensuring seamless
+   * The stagger interval is 60% of the JWT TTL (3600s for 6000s TTL), ensuring seamless
    * rotation: when JWT[0] reaches 60% TTL, JWT[1] is already valid.
    *
    * **Automatic Verification:** Automatically verifies the lease is valid before issuing JWTs.

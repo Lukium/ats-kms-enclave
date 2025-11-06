@@ -2474,13 +2474,13 @@ async function handleIssueVAPIDJWT(
  * Issue multiple VAPID JWTs with staggered expirations (batch issuance for JWT stashing).
  *
  * STAGGERING STRATEGY:
- * - TTL = 900s (15 minutes)
- * - Stagger interval = 60% of TTL = 540s (9 minutes)
- * - JWT[0]: exp = now + 900s (T+15min)
- * - JWT[1]: exp = now + 1440s (T+24min, staggered by 9min)
- * - JWT[2]: exp = now + 1980s (T+33min, staggered by 9min)
+ * - TTL = 6000s (100 minutes)
+ * - Stagger interval = 60% of TTL = 3600s (60 minutes)
+ * - JWT[0]: exp = now + 6000s (T+100min)
+ * - JWT[1]: exp = now + 9600s (T+160min, staggered by 60min)
+ * - JWT[2]: exp = now + 13200s (T+220min, staggered by 60min)
  *
- * This ensures seamless rotation: when JWT[0] reaches 60% TTL (9min), JWT[1] is already valid.
+ * This ensures seamless rotation: when JWT[0] reaches 60% TTL (60min), JWT[1] is already valid.
  *
  * IMPLEMENTATION: Calls handleIssueVAPIDJWT sequentially for each JWT to ensure proper
  * serialization and avoid race conditions in audit logging.
@@ -2503,8 +2503,8 @@ async function handleIssueVAPIDJWTs(
   }
 
   // Constants for staggering
-  const TTL = 900; // 15 minutes in seconds
-  const STAGGER_INTERVAL = Math.floor(TTL * 0.6); // 60% of TTL = 540s (9 minutes)
+  const TTL = 6000; // 100 minutes in seconds
+  const STAGGER_INTERVAL = Math.floor(TTL * 0.6); // 60% of TTL = 3600s (60 minutes)
   const baseTime = Math.floor(Date.now() / 1000);
 
   // Generate JWTs sequentially by calling handleIssueVAPIDJWT

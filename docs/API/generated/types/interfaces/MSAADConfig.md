@@ -6,7 +6,7 @@
 
 # Interface: MSAADConfig
 
-Defined in: [types.ts:607](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L607)
+Defined in: [types.ts:614](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L614)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [types.ts:607](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **algVersion**: `number`
 
-Defined in: [types.ts:610](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L610)
+Defined in: [types.ts:617](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L617)
 
 ***
 
@@ -22,7 +22,7 @@ Defined in: [types.ts:610](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > `optional` **credentialId**: `ArrayBuffer`
 
-Defined in: [types.ts:612](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L612)
+Defined in: [types.ts:619](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L619)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [types.ts:612](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **kmsVersion**: `number`
 
-Defined in: [types.ts:608](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L608)
+Defined in: [types.ts:615](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L615)
 
 ***
 
@@ -38,7 +38,7 @@ Defined in: [types.ts:608](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **method**: `"passphrase"` \| `"passkey-prf"` \| `"passkey-gate"`
 
-Defined in: [types.ts:609](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L609)
+Defined in: [types.ts:616](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L616)
 
 ***
 
@@ -46,4 +46,4 @@ Defined in: [types.ts:609](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **purpose**: `string`
 
-Defined in: [types.ts:611](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L611)
+Defined in: [types.ts:618](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L618)

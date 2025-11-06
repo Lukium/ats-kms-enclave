@@ -6,7 +6,7 @@
 
 # Interface: AuditVerificationResult
 
-Defined in: [kms-user.ts:126](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L126)
+Defined in: [kms-user.ts:158](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L158)
 
 Audit verification result
 
@@ -16,7 +16,7 @@ Audit verification result
 
 > **entries**: `number`
 
-Defined in: [kms-user.ts:128](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L128)
+Defined in: [kms-user.ts:160](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L160)
 
 ***
 
@@ -24,4 +24,4 @@ Defined in: [kms-user.ts:128](https://github.com/your-org/ats-kms/blob/main/src/
 
 > **valid**: `boolean`
 
-Defined in: [kms-user.ts:127](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L127)
+Defined in: [kms-user.ts:159](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L159)

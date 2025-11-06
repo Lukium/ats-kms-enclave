@@ -12,6 +12,14 @@ Lease result
 
 ## Properties
 
+### autoExtend?
+
+> `optional` **autoExtend**: `boolean`
+
+Defined in: [kms-user.ts:103](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L103)
+
+***
+
 ### exp
 
 > **exp**: `number`

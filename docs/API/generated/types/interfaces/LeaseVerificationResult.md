@@ -6,7 +6,7 @@
 
 # Interface: LeaseVerificationResult
 
-Defined in: [types.ts:552](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L552)
+Defined in: [types.ts:559](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L559)
 
 Result of lease verification check.
 
@@ -35,7 +35,7 @@ const result: LeaseVerificationResult = {
 
 > **kid**: `string`
 
-Defined in: [types.ts:560](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L560)
+Defined in: [types.ts:567](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L567)
 
 Key ID from the lease
 
@@ -45,7 +45,7 @@ Key ID from the lease
 
 > **leaseId**: `string`
 
-Defined in: [types.ts:554](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L554)
+Defined in: [types.ts:561](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L561)
 
 Lease ID being verified (echoed from input)
 
@@ -55,7 +55,7 @@ Lease ID being verified (echoed from input)
 
 > `optional` **reason**: `string`
 
-Defined in: [types.ts:558](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L558)
+Defined in: [types.ts:565](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L565)
 
 Reason for invalidity if `valid: false` ("expired" | "wrong-key" | "not-found")
 
@@ -65,6 +65,6 @@ Reason for invalidity if `valid: false` ("expired" | "wrong-key" | "not-found")
 
 > **valid**: `boolean`
 
-Defined in: [types.ts:556](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L556)
+Defined in: [types.ts:563](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L563)
 
 Whether the lease is valid

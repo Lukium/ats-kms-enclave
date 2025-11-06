@@ -6,7 +6,7 @@
 
 # Interface: VAPIDPayload
 
-Defined in: [types.ts:587](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L587)
+Defined in: [types.ts:594](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L594)
 
 VAPID JWT payload structure (RFC 8292 compliant).
 
@@ -44,7 +44,7 @@ Additional custom claims
 
 > **aud**: `string`
 
-Defined in: [types.ts:589](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L589)
+Defined in: [types.ts:596](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L596)
 
 Audience - push service origin (e.g., "https://fcm.googleapis.com")
 
@@ -54,7 +54,7 @@ Audience - push service origin (e.g., "https://fcm.googleapis.com")
 
 > **exp**: `number`
 
-Defined in: [types.ts:591](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L591)
+Defined in: [types.ts:598](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L598)
 
 Expiration time in seconds since epoch
 
@@ -64,7 +64,7 @@ Expiration time in seconds since epoch
 
 > **jti**: `string`
 
-Defined in: [types.ts:595](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L595)
+Defined in: [types.ts:602](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L602)
 
 JWT ID - unique identifier for this token
 
@@ -74,6 +74,6 @@ JWT ID - unique identifier for this token
 
 > **sub**: `string`
 
-Defined in: [types.ts:593](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L593)
+Defined in: [types.ts:600](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L600)
 
 Subject - typically "mailto:admin@example.com" or origin URL

@@ -6,7 +6,7 @@
 
 # Class: KMSUser
 
-Defined in: [kms-user.ts:136](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L136)
+Defined in: [kms-user.ts:168](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L168)
 
 KMS User API
 
@@ -18,7 +18,7 @@ Main entry point for PWA to interact with KMS.
 
 > **new KMSUser**(`config`): `KMSUser`
 
-Defined in: [kms-user.ts:150](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L150)
+Defined in: [kms-user.ts:182](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L182)
 
 Create a new KMS user API instance
 
@@ -40,9 +40,9 @@ Configuration
 
 #### addEnrollment()
 
-> **addEnrollment**(`userId`, `method`, `credentials`, `newCredentials`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
+> **addEnrollment**(`userId`, `credentials`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
 
-Defined in: [kms-user.ts:700](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L700)
+Defined in: [kms-user.ts:740](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L740)
 
 Add an additional authentication method (multi-enrollment).
 
@@ -63,23 +63,11 @@ can be used. Requires authentication with an existing method to add a new one.
 
 User ID for the enrollment
 
-###### method
-
-Type of method to add ('passphrase', 'passkey-prf', or 'passkey-gate')
-
-`"passphrase"` | `"passkey-prf"` | `"passkey-gate"`
-
 ###### credentials
 
 [`AuthCredentials`](../../types/type-aliases/AuthCredentials.md)
 
 Current credentials to authenticate (proves ownership)
-
-###### newCredentials
-
-`unknown`
-
-New credentials for the method being added
 
 ##### Returns
 
@@ -105,17 +93,17 @@ KMS not initialized
 // Add passkey PRF after initial passphrase setup
 const result = await kmsUser.addEnrollment(
   'user@example.com',
-  'passkey-prf',
-  { passphrase: 'my-current-passphrase' },  // Existing auth
-  {  // New WebAuthn credentials
-    credentialId: rawId,
-    prfOutput: prfData,
-    rpId: 'ats.run',
-  }
+  { passphrase: 'my-current-passphrase' }  // Existing auth - used to unlock
 );
 
-console.log('Added passkey PRF:', result.enrollmentId);
+console.log('Added enrollment:', result.enrollmentId);
 ```
+
+This method uses the stateless popup flow:
+1. Unlocks with existing credentials to get Master Secret
+2. Opens popup to collect new authentication method
+3. Re-wraps Master Secret with new KEK from popup
+4. Returns enrollment ID for the newly added method
 
 ##### See
 
@@ -128,7 +116,7 @@ console.log('Added passkey PRF:', result.enrollmentId);
 
 > **setupPasskeyGate**(`config`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
 
-Defined in: [kms-user.ts:609](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L609)
+Defined in: [kms-user.ts:649](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L649)
 
 Setup KMS with WebAuthn gate authentication.
 
@@ -218,7 +206,7 @@ console.log('Enrollment ID:', result.enrollmentId);
 
 > **setupPasskeyPRF**(`config`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
 
-Defined in: [kms-user.ts:485](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L485)
+Defined in: [kms-user.ts:525](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L525)
 
 Setup KMS with WebAuthn PRF (Pseudo-Random Function) authentication.
 
@@ -318,7 +306,7 @@ try {
 
 > **setupPassphrase**(`userId`, `passphrase`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
 
-Defined in: [kms-user.ts:420](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L420)
+Defined in: [kms-user.ts:460](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L460)
 
 Setup KMS with passphrase authentication.
 
@@ -386,13 +374,93 @@ console.log('Enrollment ID:', result.enrollmentId);
  - [setupPasskeyGate](#setuppasskeygate) for WebAuthn gate setup
  - [addEnrollment](#addenrollment) to add additional auth methods
 
+***
+
+#### setupWithPopup()
+
+> **setupWithPopup**(`params`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
+
+Defined in: [kms-user.ts:902](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L902)
+
+Setup user authentication via popup (iframe-managed flow).
+
+This method allows the iframe KMS to directly manage popup communication.
+Parent only assists with window.open() - all cryptographic operations
+and credential exchange bypass the parent entirely.
+
+**Security Benefits:**
+- Parent never sees transport parameters
+- Parent never receives encrypted credentials
+- Direct same-origin communication between iframe and popup
+- Reduced attack surface (parent out of credential path)
+
+**Flow:**
+1. Parent calls this method (RPC to iframe)
+2. Iframe requests parent to open popup (kms:request-popup)
+3. Parent opens popup with minimal URL and notifies iframe (kms:popup-opened)
+4. Popup signals ready to iframe (kms:popup-ready, same-origin)
+5. Iframe establishes MessageChannel with popup (kms:connect + transport params)
+6. Popup collects and encrypts credentials
+7. Popup sends credentials to iframe directly (via MessagePort)
+8. Iframe processes setup and returns result to parent
+
+**Parent Visibility:**
+- Parent only sees minimal popup URL: `https://kms.ats.run/?mode=setup`
+- Parent does NOT see: transport keys, salts, credentials, setup method
+
+**Comparison with setupWithEncryptedCredentials:**
+- Old: Parent mediates all communication (parent ↔ popup ↔ iframe)
+- New: Direct communication (popup ↔ iframe), parent only opens window
+
+##### Parameters
+
+###### params
+
+###### userId
+
+`string`
+
+User ID to setup authentication for
+
+##### Returns
+
+`Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
+
+Setup result with enrollment ID and VAPID key info
+
+##### Throws
+
+If popup is blocked by browser
+
+##### Throws
+
+If popup never responds (timeout)
+
+##### Throws
+
+If credential collection fails in popup
+
+##### Throws
+
+If setup processing fails in iframe
+
+##### Example
+
+```typescript
+// In parent PWA:
+const result = await kmsUser.setupWithPopup({
+  userId: 'user@example.com'
+});
+console.log('Setup complete:', result.enrollmentId);
+```
+
 ### VAPID Key Management
 
 #### getPublicKey()
 
 > **getPublicKey**(`kid`): `Promise`\<\{ `publicKey`: `string`; \}\>
 
-Defined in: [kms-user.ts:857](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L857)
+Defined in: [kms-user.ts:1087](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1087)
 
 Get public key for a specific VAPID key by key ID.
 
@@ -450,7 +518,7 @@ const subscription = await registration.pushManager.subscribe({
 
 > **getVAPIDPublicKey**(`_userId`): `Promise`\<\{ `kid`: `string`; `publicKey`: `string`; \}\>
 
-Defined in: [kms-user.ts:921](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L921)
+Defined in: [kms-user.ts:1151](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1151)
 
 Get VAPID public key for the current user (convenience method).
 
@@ -533,7 +601,7 @@ await kmsUser.setPushSubscription({
 
 > **regenerateVAPID**(`params`): `Promise`\<[`VAPIDKeyResult`](../interfaces/VAPIDKeyResult.md)\>
 
-Defined in: [kms-user.ts:795](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L795)
+Defined in: [kms-user.ts:1025](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1025)
 
 Unlock KMS with passphrase
 
@@ -639,7 +707,7 @@ await kmsUser.createLease({ userId: 'user@example.com', subs: [...], ttlHours: 1
 
 > **createLease**(`params`): `Promise`\<[`LeaseResult`](../interfaces/LeaseResult.md)\>
 
-Defined in: [kms-user.ts:1010](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1010)
+Defined in: [kms-user.ts:1240](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1240)
 
 Create VAPID lease for long-lived JWT issuance authorization.
 
@@ -756,11 +824,95 @@ const jwt = await kmsUser.issueVAPIDJWT({
 
 ***
 
+#### extendLeases()
+
+> **extendLeases**(`leaseIds`, `userId`, `options?`): `Promise`\<[`ExtendLeasesResult`](../interfaces/ExtendLeasesResult.md)\>
+
+Defined in: [kms-user.ts:1318](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1318)
+
+Extend one or more existing leases.
+
+Updates lease expirations to 30 days from now. This method accepts an array of lease IDs
+and processes them in batch, returning detailed results for each lease.
+
+**Auto-Extend Behavior:**
+- `autoExtend=true` (default): Extension works without authentication
+- `autoExtend=false`: Requires authentication OR will be skipped if `requestAuth` not set
+
+**Smart Skipping:** If `requestAuth` is not set, the worker will automatically skip
+non-extendable leases (autoExtend=false) and return them with status='skipped'. This
+allows "Extend All Leases" to gracefully handle mixed lease types.
+
+**Single Authentication:** When `requestAuth=true`, the user authenticates once and
+all leases (both extendable and non-extendable) are processed with credentials.
+
+**Security Note:** Leases must be for the current VAPID key. If the VAPID key has
+been regenerated, extensions will fail and new leases must be created.
+
+##### Parameters
+
+###### leaseIds
+
+`string`[]
+
+Array of lease IDs to extend
+
+###### userId
+
+`string`
+
+The user ID who owns the leases
+
+###### options?
+
+Extension options
+
+###### requestAuth?
+
+`boolean`
+
+Set to true to request user authentication for all leases
+
+##### Returns
+
+`Promise`\<[`ExtendLeasesResult`](../interfaces/ExtendLeasesResult.md)\>
+
+Promise resolving to batch result with per-lease details
+
+##### Throws
+
+KMS not initialized
+
+##### Example
+
+```typescript
+// Extend multiple auto-extendable leases (skips non-extendable)
+const result = await kmsUser.extendLeases(
+  ['lease-abc-123', 'lease-def-456', 'lease-ghi-789'],
+  'user@example.com'
+);
+console.log(`Extended: ${result.extended}, Skipped: ${result.skipped}`);
+
+// Extend with authentication (processes all leases)
+const result = await kmsUser.extendLeases(
+  ['lease-abc-123', 'lease-def-456'],
+  'user@example.com',
+  { requestAuth: true }
+);
+```
+
+##### See
+
+ - [createLease](#createlease) to create a new lease
+ - [verifyLease](#verifylease) to verify lease validity
+
+***
+
 #### getUserLeases()
 
 > **getUserLeases**(`userId`): `Promise`\<\{ `leases`: [`LeaseRecord`](../../types/interfaces/LeaseRecord.md)[]; \}\>
 
-Defined in: [kms-user.ts:1439](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1439)
+Defined in: [kms-user.ts:1750](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1750)
 
 Get all leases for a user.
 
@@ -832,7 +984,7 @@ for (const lease of leases) {
 
 > **issueVAPIDJWT**(`params`): `Promise`\<[`JWTResult`](../interfaces/JWTResult.md)\>
 
-Defined in: [kms-user.ts:1102](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1102)
+Defined in: [kms-user.ts:1413](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1413)
 
 Issue a single VAPID JWT for an endpoint using lease authorization.
 
@@ -956,7 +1108,7 @@ const vapidHeader = `vapid t=${jwt.jwt}, k=${vapidPublicKey}`;
 
 > **issueVAPIDJWTs**(`params`): `Promise`\<[`JWTResult`](../interfaces/JWTResult.md)[]\>
 
-Defined in: [kms-user.ts:1182](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1182)
+Defined in: [kms-user.ts:1493](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1493)
 
 Issue multiple VAPID JWTs with staggered expirations for JWT rotation.
 
@@ -965,11 +1117,11 @@ seamless JWT rotation without gaps. This is useful for "JWT stashing" where the 
 pre-fetches multiple JWTs to avoid needing to call the KMS for every push notification.
 
 **Staggered Expirations:**
-- JWT[0]: expires at T+15min (900s)
-- JWT[1]: expires at T+24min (900s + 540s stagger)
-- JWT[2]: expires at T+33min (900s + 1080s stagger)
+- JWT[0]: expires at T+100min (6000s)
+- JWT[1]: expires at T+160min (6000s + 3600s stagger)
+- JWT[2]: expires at T+220min (6000s + 7200s stagger)
 
-The stagger interval is 60% of the JWT TTL (540s for 900s TTL), ensuring seamless
+The stagger interval is 60% of the JWT TTL (3600s for 6000s TTL), ensuring seamless
 rotation: when JWT[0] reaches 60% TTL, JWT[1] is already valid.
 
 **Automatic Verification:** Automatically verifies the lease is valid before issuing JWTs.
@@ -1088,7 +1240,7 @@ localStorage.setItem('jwt-stash', JSON.stringify(jwts));
 
 > **verifyLease**(`leaseId`, `deleteIfInvalid?`): `Promise`\<[`LeaseVerificationResult`](../../types/interfaces/LeaseVerificationResult.md)\>
 
-Defined in: [kms-user.ts:1500](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1500)
+Defined in: [kms-user.ts:1811](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1811)
 
 Verify lease validity against current VAPID key.
 
@@ -1168,7 +1320,7 @@ for (const lease of leases) {
 
 > **getPushSubscription**(): `Promise`\<\{ `subscription`: [`StoredPushSubscription`](../../types/interfaces/StoredPushSubscription.md) \| `null`; \}\>
 
-Defined in: [kms-user.ts:1773](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1773)
+Defined in: [kms-user.ts:2084](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L2084)
 
 Get the push subscription stored on the VAPID key.
 
@@ -1232,7 +1384,7 @@ if (subscription) {
 
 > **removePushSubscription**(): `Promise`\<\{ `success`: `boolean`; \}\>
 
-Defined in: [kms-user.ts:1723](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1723)
+Defined in: [kms-user.ts:2034](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L2034)
 
 Remove the Web Push subscription from the VAPID key.
 
@@ -1294,7 +1446,7 @@ console.log('Subscription is now:', stored);  // null
 
 > **setPushSubscription**(`subscription`): `Promise`\<\{ `success`: `boolean`; \}\>
 
-Defined in: [kms-user.ts:1673](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1673)
+Defined in: [kms-user.ts:1984](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1984)
 
 Store or update Web Push subscription on VAPID key.
 
@@ -1387,7 +1539,7 @@ await kmsUser.setPushSubscription({
 
 > **getAuditLog**(): `Promise`\<\{ `entries`: [`AuditEntryV2`](../../types/interfaces/AuditEntryV2.md)[]; \}\>
 
-Defined in: [kms-user.ts:1355](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1355)
+Defined in: [kms-user.ts:1666](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1666)
 
 Get all audit log entries.
 
@@ -1429,7 +1581,7 @@ entries.forEach(entry => {
 
 > **getAuditPublicKey**(): `Promise`\<\{ `publicKey`: `string`; \}\>
 
-Defined in: [kms-user.ts:1384](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1384)
+Defined in: [kms-user.ts:1695](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1695)
 
 Get the audit log's Ed25519 public key.
 
@@ -1466,7 +1618,7 @@ console.log('Audit Public Key:', publicKey);
 
 > **getEnrollments**(): `Promise`\<\{ `enrollments`: `string`[]; \}\>
 
-Defined in: [kms-user.ts:1287](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1287)
+Defined in: [kms-user.ts:1598](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1598)
 
 Get list of all enrolled authentication methods.
 
@@ -1512,7 +1664,7 @@ enrollments.forEach(eid => {
 
 > **isSetup**(`userId?`): `Promise`\<[`StatusResult`](../interfaces/StatusResult.md)\>
 
-Defined in: [kms-user.ts:1249](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1249)
+Defined in: [kms-user.ts:1560](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1560)
 
 Check if KMS is setup for the current user.
 
@@ -1575,7 +1727,7 @@ if (statusWithLeases.leases) {
 
 > **verifyAuditChain**(): `Promise`\<[`AuditVerificationResult`](../interfaces/AuditVerificationResult.md)\>
 
-Defined in: [kms-user.ts:1321](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1321)
+Defined in: [kms-user.ts:1632](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1632)
 
 Verify the integrity of the audit log chain.
 
@@ -1616,7 +1768,7 @@ if (result.valid) {
 
 > **removeEnrollment**(`enrollmentId`, `credentials`): `Promise`\<\{ `success`: `boolean`; \}\>
 
-Defined in: [kms-user.ts:1594](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1594)
+Defined in: [kms-user.ts:1905](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1905)
 
 Remove a specific enrollment method.
 
@@ -1692,7 +1844,7 @@ console.log('Remaining methods:', enrollments);
 
 > **resetKMS**(): `Promise`\<\{ `success`: `boolean`; \}\>
 
-Defined in: [kms-user.ts:1546](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1546)
+Defined in: [kms-user.ts:1857](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L1857)
 
 Reset KMS and delete all data.
 
@@ -1739,11 +1891,145 @@ await kmsUser.setupPassphrase('user@example.com', 'new-passphrase');
 
 ### Other
 
+#### addEnrollmentWithPopup()
+
+> **addEnrollmentWithPopup**(`userId`): `Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
+
+Defined in: [kms-user.ts:829](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L829)
+
+Add additional authentication method using popup flow (reversed order).
+Opens popup FIRST to collect new credentials, then unlocks with existing.
+This method preserves the user gesture for popup opening.
+
+Multi-enrollment enables:
+- Multiple authentication methods for same Master Secret
+- Add passkey after initial passphrase setup
+- Add additional passkey on new device
+
+**Required**: KMS must already be set up (see [isSetup](#issetup))
+
+**Flow**:
+1. Opens popup to collect NEW authentication credentials (user gesture preserved)
+2. Shows unlock modal to collect EXISTING credentials
+3. Unlocks with existing credentials to get Master Secret
+4. Re-wraps Master Secret with new KEK from popup
+5. Returns enrollment ID
+
+**Popup Window**: The method opens a popup window (`kms.ats.run`) for credential
+collection. The popup must not be blocked by the browser. Call this method
+directly from a user gesture (button click) to ensure popup success.
+
+##### Parameters
+
+###### userId
+
+`string`
+
+User identifier (must match existing setup)
+
+##### Returns
+
+`Promise`\<[`SetupResult`](../interfaces/SetupResult.md)\>
+
+Promise resolving to setup result
+
+##### Throws
+
+Popup was blocked by browser
+
+##### Throws
+
+Authentication failed with existing credentials
+
+##### Throws
+
+Method already enrolled
+
+##### Throws
+
+KMS not initialized
+
+##### Example
+
+```typescript
+// Add passkey after initial passphrase setup
+async function addPasskey() {
+  try {
+    const result = await kmsUser.addEnrollmentWithPopup('user@example.com');
+    console.log('Added enrollment:', result.enrollmentId);
+  } catch (error) {
+    if (error.message.includes('blocked')) {
+      alert('Please allow popups for this site');
+    }
+  }
+}
+
+// Call from button click to preserve user gesture
+button.addEventListener('click', addPasskey);
+```
+
+##### See
+
+ - [addEnrollment](#addenrollment) for credential-first flow (may be blocked)
+ - [getEnrollments](#getenrollments) to list all enrolled methods
+ - [removeEnrollment](#removeenrollment) to remove a method
+
+***
+
+#### fullSetup()
+
+> **fullSetup**(`params`): `Promise`\<\{ `autoExtend`: `boolean`; `enrollmentId`: `string`; `jwts`: `object`[]; `leaseExp`: `number`; `leaseId`: `string`; `subscription`: [`StoredPushSubscription`](../../types/interfaces/StoredPushSubscription.md); `success`: `true`; `vapidKid`: `string`; `vapidPublicKey`: `string`; \}\>
+
+Defined in: [kms-user.ts:926](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L926)
+
+Full Setup - Complete onboarding in one action.
+
+Orchestrates:
+1. User authentication setup (via popup)
+2. Web Push subscription (via parent PWA)
+3. VAPID lease creation (with autoExtend flag)
+4. JWT packet issuance (5 tokens with staggered expirations)
+5. Test notification (confirms setup working)
+
+All with a single user authentication!
+
+##### Parameters
+
+###### params
+
+Setup parameters
+
+###### autoExtend?
+
+`boolean`
+
+Whether lease can be auto-extended (default: true)
+
+###### ttlHours?
+
+`number`
+
+Lease TTL in hours (default: 12, max: 720)
+
+###### userId
+
+`string`
+
+User ID
+
+##### Returns
+
+`Promise`\<\{ `autoExtend`: `boolean`; `enrollmentId`: `string`; `jwts`: `object`[]; `leaseExp`: `number`; `leaseId`: `string`; `subscription`: [`StoredPushSubscription`](../../types/interfaces/StoredPushSubscription.md); `success`: `true`; `vapidKid`: `string`; `vapidPublicKey`: `string`; \}\>
+
+Complete setup result with lease, JWTs, and subscription
+
+***
+
 #### init()
 
 > **init**(): `Promise`\<`void`\>
 
-Defined in: [kms-user.ts:170](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L170)
+Defined in: [kms-user.ts:202](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L202)
 
 Initialize the KMS by creating and loading the iframe
 
@@ -1761,7 +2047,7 @@ If already initialized or iframe creation fails
 
 > **terminate**(): `void`
 
-Defined in: [kms-user.ts:265](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L265)
+Defined in: [kms-user.ts:297](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L297)
 
 Terminate the KMS iframe
 Clears all pending requests without rejecting them to avoid unhandled rejection errors

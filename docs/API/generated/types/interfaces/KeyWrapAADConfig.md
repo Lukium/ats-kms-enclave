@@ -6,7 +6,7 @@
 
 # Interface: KeyWrapAADConfig
 
-Defined in: [types.ts:615](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L615)
+Defined in: [types.ts:622](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L622)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [types.ts:615](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **alg**: `string`
 
-Defined in: [types.ts:618](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L618)
+Defined in: [types.ts:625](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L625)
 
 ***
 
@@ -22,7 +22,7 @@ Defined in: [types.ts:618](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **createdAt**: `number`
 
-Defined in: [types.ts:620](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L620)
+Defined in: [types.ts:627](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L627)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [types.ts:620](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **keyType**: `string`
 
-Defined in: [types.ts:621](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L621)
+Defined in: [types.ts:628](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L628)
 
 ***
 
@@ -38,7 +38,7 @@ Defined in: [types.ts:621](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **kid**: `string`
 
-Defined in: [types.ts:617](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L617)
+Defined in: [types.ts:624](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L624)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: [types.ts:617](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **kmsVersion**: `number`
 
-Defined in: [types.ts:616](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L616)
+Defined in: [types.ts:623](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L623)
 
 ***
 
@@ -54,4 +54,4 @@ Defined in: [types.ts:616](https://github.com/your-org/ats-kms/blob/main/src/v2/
 
 > **purpose**: `string`
 
-Defined in: [types.ts:619](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L619)
+Defined in: [types.ts:626](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L626)

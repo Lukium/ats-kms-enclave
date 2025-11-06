@@ -6,7 +6,7 @@
 
 # Interface: QuotaState
 
-Defined in: [types.ts:520](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L520)
+Defined in: [types.ts:527](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L527)
 
 Rate limit quotas enforced by the KMS worker for lease operations.
 
@@ -24,7 +24,7 @@ memory using token bucket and sliding window algorithms.
 
 > **burstSends**: `number`
 
-Defined in: [types.ts:526](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L526)
+Defined in: [types.ts:533](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L533)
 
 Maximum burst sends (allows short bursts above sustained rate)
 
@@ -34,7 +34,7 @@ Maximum burst sends (allows short bursts above sustained rate)
 
 > **sendsPerMinute**: `number`
 
-Defined in: [types.ts:524](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L524)
+Defined in: [types.ts:531](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L531)
 
 Maximum push sends per minute (sustained rate)
 
@@ -44,7 +44,7 @@ Maximum push sends per minute (sustained rate)
 
 > **sendsPerMinutePerEid**: `number`
 
-Defined in: [types.ts:528](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L528)
+Defined in: [types.ts:535](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L535)
 
 Maximum sends per minute per endpoint ID (prevents single endpoint abuse)
 
@@ -54,6 +54,6 @@ Maximum sends per minute per endpoint ID (prevents single endpoint abuse)
 
 > **tokensPerHour**: `number`
 
-Defined in: [types.ts:522](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L522)
+Defined in: [types.ts:529](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L529)
 
 Maximum tokens that can be issued per hour (global limit)

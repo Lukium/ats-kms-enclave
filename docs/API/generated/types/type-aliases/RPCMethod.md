@@ -6,6 +6,6 @@
 
 # Type Alias: RPCMethod
 
-> **RPCMethod** = `"setupPassphrase"` \| `"setupPasskey"` \| `"setupPasskeyPRF"` \| `"setupPasskeyGate"` \| `"unlockWithPassphrase"` \| `"unlockWithPasskey"` \| `"addEnrollment"` \| `"removeEnrollment"` \| `"getEnrollments"` \| `"generateVAPID"` \| `"regenerateVAPID"` \| `"signJWT"` \| `"getPublicKey"` \| `"getVAPIDKid"` \| `"createLease"` \| `"issueVAPIDJWT"` \| `"issueVAPIDJWTs"` \| `"getUserLeases"` \| `"verifyLease"` \| `"getAuditLog"` \| `"verifyAuditChain"` \| `"getAuditPublicKey"` \| `"isSetup"` \| `"resetKMS"` \| `"setPushSubscription"` \| `"removePushSubscription"` \| `"getPushSubscription"`
+> **RPCMethod** = `"setupPassphrase"` \| `"setupPasskey"` \| `"setupPasskeyPRF"` \| `"setupPasskeyGate"` \| `"setupWithPopup"` \| `"fullSetup"` \| `"unlockWithPassphrase"` \| `"unlockWithPasskey"` \| `"addEnrollment"` \| `"addEnrollmentWithPopup"` \| `"removeEnrollment"` \| `"getEnrollments"` \| `"generateVAPID"` \| `"regenerateVAPID"` \| `"signJWT"` \| `"getPublicKey"` \| `"getVAPIDKid"` \| `"createLease"` \| `"extendLeases"` \| `"issueVAPIDJWT"` \| `"issueVAPIDJWTs"` \| `"getUserLeases"` \| `"verifyLease"` \| `"getAuditLog"` \| `"verifyAuditChain"` \| `"getAuditPublicKey"` \| `"isSetup"` \| `"resetKMS"` \| `"setPushSubscription"` \| `"removePushSubscription"` \| `"getPushSubscription"`
 
 Defined in: [types.ts:398](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L398)

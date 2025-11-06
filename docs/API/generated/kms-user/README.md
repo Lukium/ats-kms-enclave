@@ -13,6 +13,9 @@
 ## Interfaces
 
 - [AuditVerificationResult](interfaces/AuditVerificationResult.md)
+- [ExtendLeaseResult](interfaces/ExtendLeaseResult.md)
+- [ExtendLeasesItemResult](interfaces/ExtendLeasesItemResult.md)
+- [ExtendLeasesResult](interfaces/ExtendLeasesResult.md)
 - [JWTResult](interfaces/JWTResult.md)
 - [KMSUserConfig](interfaces/KMSUserConfig.md)
 - [LeaseResult](interfaces/LeaseResult.md)

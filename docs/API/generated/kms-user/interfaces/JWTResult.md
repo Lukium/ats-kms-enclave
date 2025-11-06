@@ -6,7 +6,7 @@
 
 # Interface: JWTResult
 
-Defined in: [kms-user.ts:108](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L108)
+Defined in: [kms-user.ts:140](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L140)
 
 JWT result
 
@@ -16,7 +16,7 @@ JWT result
 
 > `optional` **exp**: `number`
 
-Defined in: [kms-user.ts:111](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L111)
+Defined in: [kms-user.ts:143](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L143)
 
 ***
 
@@ -24,7 +24,7 @@ Defined in: [kms-user.ts:111](https://github.com/your-org/ats-kms/blob/main/src/
 
 > `optional` **jti**: `string`
 
-Defined in: [kms-user.ts:110](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L110)
+Defined in: [kms-user.ts:142](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L142)
 
 ***
 
@@ -32,4 +32,4 @@ Defined in: [kms-user.ts:110](https://github.com/your-org/ats-kms/blob/main/src/
 
 > **jwt**: `string`
 
-Defined in: [kms-user.ts:109](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L109)
+Defined in: [kms-user.ts:141](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L141)

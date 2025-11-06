@@ -6,7 +6,7 @@
 
 # Interface: StatusResult
 
-Defined in: [kms-user.ts:117](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L117)
+Defined in: [kms-user.ts:149](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L149)
 
 Status result
 
@@ -16,7 +16,7 @@ Status result
 
 > **isSetup**: `boolean`
 
-Defined in: [kms-user.ts:118](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L118)
+Defined in: [kms-user.ts:150](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L150)
 
 ***
 
@@ -24,7 +24,7 @@ Defined in: [kms-user.ts:118](https://github.com/your-org/ats-kms/blob/main/src/
 
 > `optional` **leases**: [`LeaseRecord`](../../types/interfaces/LeaseRecord.md)[]
 
-Defined in: [kms-user.ts:120](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L120)
+Defined in: [kms-user.ts:152](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L152)
 
 ***
 
@@ -32,4 +32,4 @@ Defined in: [kms-user.ts:120](https://github.com/your-org/ats-kms/blob/main/src/
 
 > **methods**: `string`[]
 
-Defined in: [kms-user.ts:119](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L119)
+Defined in: [kms-user.ts:151](https://github.com/your-org/ats-kms/blob/main/src/v2/kms-user.ts#L151)

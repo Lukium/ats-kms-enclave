@@ -6,7 +6,7 @@
 
 # Interface: LeaseRecord
 
-Defined in: [types.ts:480](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L480)
+Defined in: [types.ts:485](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L485)
 
 VAPID lease record for credential-free JWT issuance.
 
@@ -56,11 +56,21 @@ const lease: LeaseRecord = {
 
 ## Properties
 
+### autoExtend?
+
+> `optional` **autoExtend**: `boolean`
+
+Defined in: [types.ts:499](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L499)
+
+Whether the lease can be auto-extended without re-authentication (default: false for backward compatibility)
+
+***
+
 ### createdAt
 
 > **createdAt**: `number`
 
-Defined in: [types.ts:490](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L490)
+Defined in: [types.ts:495](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L495)
 
 Creation timestamp in milliseconds
 
@@ -70,7 +80,7 @@ Creation timestamp in milliseconds
 
 > **exp**: `number`
 
-Defined in: [types.ts:492](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L492)
+Defined in: [types.ts:497](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L497)
 
 Expiration timestamp in milliseconds
 
@@ -80,7 +90,7 @@ Expiration timestamp in milliseconds
 
 > **kid**: `string`
 
-Defined in: [types.ts:503](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L503)
+Defined in: [types.ts:510](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L510)
 
 Key ID (JWK thumbprint) of the VAPID keypair
 
@@ -90,7 +100,7 @@ Key ID (JWK thumbprint) of the VAPID keypair
 
 > **lakDelegationCert**: [`AuditDelegationCert`](AuditDelegationCert.md)
 
-Defined in: [types.ts:506](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L506)
+Defined in: [types.ts:513](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L513)
 
 LAK delegation certificate authorizing this lease to sign audit entries
 
@@ -100,7 +110,7 @@ LAK delegation certificate authorizing this lease to sign audit entries
 
 > **leaseId**: `string`
 
-Defined in: [types.ts:482](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L482)
+Defined in: [types.ts:487](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L487)
 
 Unique lease identifier (format: "lease-{uuid}")
 
@@ -110,7 +120,7 @@ Unique lease identifier (format: "lease-{uuid}")
 
 > **leaseSalt**: `ArrayBuffer`
 
-Defined in: [types.ts:501](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L501)
+Defined in: [types.ts:508](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L508)
 
 Random salt used to derive SessionKEK from Master Secret via HKDF
 
@@ -120,7 +130,7 @@ Random salt used to derive SessionKEK from Master Secret via HKDF
 
 > **quotas**: [`QuotaState`](QuotaState.md)
 
-Defined in: [types.ts:494](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L494)
+Defined in: [types.ts:501](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L501)
 
 Rate limit quotas for this lease
 
@@ -130,7 +140,7 @@ Rate limit quotas for this lease
 
 > **ttlHours**: `number`
 
-Defined in: [types.ts:488](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L488)
+Defined in: [types.ts:493](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L493)
 
 Lease time-to-live in hours (max 720 hours / 30 days)
 
@@ -140,7 +150,7 @@ Lease time-to-live in hours (max 720 hours / 30 days)
 
 > **userId**: `string`
 
-Defined in: [types.ts:484](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L484)
+Defined in: [types.ts:489](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L489)
 
 User ID associated with this lease
 
@@ -150,7 +160,7 @@ User ID associated with this lease
 
 > **wrappedLeaseKey**: `ArrayBuffer`
 
-Defined in: [types.ts:497](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L497)
+Defined in: [types.ts:504](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L504)
 
 VAPID private key wrapped with SessionKEK (AES-GCM)
 
@@ -160,6 +170,6 @@ VAPID private key wrapped with SessionKEK (AES-GCM)
 
 > **wrappedLeaseKeyIV**: `ArrayBuffer`
 
-Defined in: [types.ts:499](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L499)
+Defined in: [types.ts:506](https://github.com/your-org/ats-kms/blob/main/src/v2/types.ts#L506)
 
 IV used for AES-GCM encryption of wrappedLeaseKey

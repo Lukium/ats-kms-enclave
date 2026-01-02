@@ -1,9 +1,9 @@
 {
   "status": "verified",
-  "timestamp": "2026-01-01T23:51:56Z",
+  "timestamp": "2026-01-02T11:43:01Z",
   "hash": "dcdb17b1b1003e36a5fdb3759e905f502dd93038b31643e12358cb452b2d1548",
   "shortHash": "dcdb17b1",
-  "verifiedTime": "Jan 1, 23:51 UTC",
-  "runUrl": "https://github.com/Lukium/ats-kms-enclave/actions/runs/20647682018",
-  "generatedAt": "2026-01-01T23:51:57.711Z"
+  "verifiedTime": "Jan 2, 11:43 UTC",
+  "runUrl": "https://github.com/Lukium/ats-kms-enclave/actions/runs/20657141505",
+  "generatedAt": "2026-01-02T11:43:02.497Z"
 }

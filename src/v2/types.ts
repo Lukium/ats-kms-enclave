@@ -352,6 +352,24 @@ export interface SignalTrustedIdentityRecord {
   updatedAt: number;
 }
 
+/**
+ * Public prekey bundle (public bytes only — no unlock required) returned by the
+ * messaging RPCs (setupMessaging / getMessagingBundle / rotatePrekeys) for upload
+ * to the directory server. Defined here rather than in signal.ts so the vendored
+ * KMS client (kms-user.ts) can import it without pulling in signal.ts and its
+ * fork/storage dependencies.
+ */
+export interface PublicPreKeyBundle {
+  registrationId: number;
+  /** X25519 DH identity public key (33 bytes, 0x05-prefixed). */
+  identityKey: ArrayBuffer;
+  /** Ed25519 identity signing public key (32 bytes). */
+  identitySigningKey: ArrayBuffer;
+  signedPreKey: { keyId: number; publicKey: ArrayBuffer; signature: ArrayBuffer };
+  /** Unconsumed one-time prekey publics for upload to the directory. */
+  oneTimePreKeys: { keyId: number; publicKey: ArrayBuffer }[];
+}
+
 /* ------------------------------------------------------------------
  * Audit types
  *

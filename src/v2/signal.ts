@@ -52,6 +52,7 @@ import type {
   SignalIdentityRecord,
   SignalSignedPrekeyRecord,
   SignalOnetimePrekeyRecord,
+  PublicPreKeyBundle,
 } from './types';
 import {
   arrayBufferToBase64url,
@@ -255,16 +256,10 @@ export async function generateOneTimePrekeys(
 // Public bundle (public bytes only — no unlock required)
 // ============================================================================
 
-export interface PublicPreKeyBundle {
-  registrationId: number;
-  /** X25519 DH identity public key (33 bytes, 0x05-prefixed). */
-  identityKey: ArrayBuffer;
-  /** Ed25519 identity signing public key (32 bytes). */
-  identitySigningKey: ArrayBuffer;
-  signedPreKey: { keyId: number; publicKey: ArrayBuffer; signature: ArrayBuffer };
-  /** Unconsumed one-time prekey publics for upload to the directory. */
-  oneTimePreKeys: { keyId: number; publicKey: ArrayBuffer }[];
-}
+// `PublicPreKeyBundle` now lives in ./types (a fork/storage-free module the PWA
+// vendors), so the vendored kms-user client can import it without pulling in this
+// file. Re-exported here for enclave-side consumers (worker.ts, getPublicBundle).
+export type { PublicPreKeyBundle };
 
 /**
  * Assemble the public prekey bundle the directory server's upload expects. Reads

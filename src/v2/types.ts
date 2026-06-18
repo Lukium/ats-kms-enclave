@@ -508,7 +508,16 @@ export type RPCMethod =
   | 'resetKMS'
   | 'setPushSubscription'
   | 'removePushSubscription'
-  | 'getPushSubscription';
+  | 'getPushSubscription'
+  // === Signal messaging (Phase 2) ===
+  | 'setupMessaging'
+  | 'getMessagingBundle'
+  | 'getPrekeyCount'
+  | 'openMessaging'
+  | 'closeMessaging'
+  | 'encryptMessage'
+  | 'decryptMessage'
+  | 'rotatePrekeys';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)

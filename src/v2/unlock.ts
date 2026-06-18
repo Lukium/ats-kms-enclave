@@ -433,6 +433,33 @@ export async function deriveMKEKFromMS(ms: Uint8Array): Promise<CryptoKey> {
 }
 
 /**
+ * Derive the messaging-scoped key-encryption-key from the Master Secret.
+ *
+ * This is a SEPARATE HKDF leg from {@link deriveMKEKFromMS} (different `info`),
+ * so the key it returns can wrap/unwrap only Signal messaging blobs — never the
+ * VAPID or audit keys, which are wrapped under the master MKEK. A live messaging
+ * session caches *this* key (memory-only, per session id) rather than the master
+ * MKEK, so one authentication grants the PWA messaging access and nothing more:
+ * the master key leaves memory when the unlock window closes.
+ *
+ * Like the MKEK it is a non-extractable AES-GCM `CryptoKey` (a handle, not bytes),
+ * so it may be held in a JS `Map` for the session's lifetime.
+ */
+export async function deriveMessagingKEK(ms: Uint8Array): Promise<CryptoKey> {
+  const salt = await deriveDeterministicSalt('ATS/KMS/MMKEK/salt/v1');
+  const info = new TextEncoder().encode('ATS/KMS/messaging/v1');
+  const ikm = await crypto.subtle.importKey('raw', ms as BufferSource, 'HKDF', false, ['deriveKey']);
+  const mmkek = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt, info },
+    ikm,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
+  );
+  return mmkek;
+}
+
+/**
  * Execute an operation within an unlocked context. Accepts
  * credentials, unlocks the MS and derives the MKEK. The provided
  * operation callback receives the MKEK and may perform any

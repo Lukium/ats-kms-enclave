@@ -37,6 +37,7 @@ import {
   setupPasskeyGate,
   withUnlock,
   deriveMKEKFromMS,
+  deriveMessagingKEK,
   isSetup,
   isPassphraseSetup,
   isPasskeySetup,
@@ -71,6 +72,9 @@ import {
   setPushSubscription,
   removePushSubscription,
   getPushSubscription,
+  withSessionLock,
+  countUnconsumedOnetimePrekeys,
+  getSignalIdentity,
 } from './storage';
 import {
   rawP256ToJwk,
@@ -81,6 +85,20 @@ import {
 import { getErrorMessage } from './error-utils';
 import * as validators from './rpc-validation';
 import { loadRateLimitState } from './storage-types';
+import {
+  createSignalProtocolStore,
+  generateIdentity,
+  generateSignedPrekey,
+  generateOneTimePrekeys,
+  getPublicBundle,
+  type PublicPreKeyBundle,
+} from './signal';
+import {
+  SessionBuilder,
+  SessionCipher,
+  SignalProtocolAddress,
+} from '@lukium/libsignal-protocol-typescript';
+import type { DeviceType } from '@lukium/libsignal-protocol-typescript';
 
 // ============================================================================
 // Session Key Cache (Lease-Scoped)
@@ -111,6 +129,129 @@ import { loadRateLimitState } from './storage-types';
  * - Cleared when lease expires
  */
 const sessionKEKCache = new Map<string, CryptoKey>();
+
+// ============================================================================
+// Messaging Capability Sessions (memory-only, per-session id)
+// ============================================================================
+
+/**
+ * Sliding idle timeout: a messaging session is dropped this long after its last
+ * use, so keys leave memory promptly when the user steps away.
+ */
+const MESSAGING_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+/**
+ * Absolute session cap: one authentication grants at most this much messaging
+ * time. After it the PWA must re-authenticate via `openMessaging`. The capability
+ * token's `exp` mirrors this value.
+ */
+const MESSAGING_ABSOLUTE_MAX_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+/**
+ * One live messaging session. Created by `openMessaging` after a single unlock,
+ * dropped by `closeMessaging` / idle / absolute expiry.
+ *
+ * SECURITY: `messagingKEK` is the messaging-scoped sub-key (see
+ * {@link deriveMessagingKEK}), NOT the master MKEK — a leaked/abused session can
+ * only touch Signal blobs, never the VAPID or audit keys. `capPubKey` verifies
+ * the capability token the PWA presents on each call; the matching private key is
+ * used once at mint time and then discarded (per-session keypair, never stored).
+ */
+interface MessagingSession {
+  messagingKEK: CryptoKey;
+  userId: string;
+  capPubKey: CryptoKey;
+  /** Absolute hard cap (ms epoch). */
+  absoluteExp: number;
+  /** Sliding idle deadline (ms epoch); refreshed on each authorized call. */
+  idleExp: number;
+}
+
+/**
+ * Memory-only map of live messaging sessions keyed by `sid`. Never persisted to
+ * IndexedDB (unlike `sessionKEKCache`): messaging is foreground/user-present, so
+ * a worker restart legitimately ends the session and forces a re-unlock.
+ */
+const messagingSessions = new Map<string, MessagingSession>();
+
+/**
+ * Mint an Ed25519 capability token (compact JWS, `alg: EdDSA`) binding a `sid`
+ * and the `messaging` scope to an expiry. Signed by the per-session private key;
+ * verified later against the session's stored public key.
+ */
+async function mintCapabilityToken(
+  sid: string,
+  privateKey: CryptoKey,
+  iat: number,
+  exp: number
+): Promise<string> {
+  const header = { typ: 'JWT', alg: 'EdDSA' };
+  const payload = { sid, scope: ['messaging'], iat, exp };
+  const headerB64 = arrayBufferToBase64url(new TextEncoder().encode(JSON.stringify(header)).buffer);
+  const payloadB64 = arrayBufferToBase64url(new TextEncoder().encode(JSON.stringify(payload)).buffer);
+  const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+  const signature = await crypto.subtle.sign('Ed25519', privateKey, signingInput);
+  return `${headerB64}.${payloadB64}.${arrayBufferToBase64url(signature)}`;
+}
+
+/**
+ * Authorize a messaging RPC: the call must carry a live `sid` and a valid
+ * capability `token`. Enforces (in order) session existence, idle + absolute
+ * expiry, token structure, `sid`/scope/`exp` claims, and an Ed25519 signature
+ * check against the session's public key. On success it slides the idle deadline
+ * and returns the session's messaging-scoped key + user. Throws on any failure
+ * (an expired session is evicted first).
+ */
+async function requireCapability(
+  sid: string,
+  token: string
+): Promise<{ messagingKEK: CryptoKey; userId: string }> {
+  const session = messagingSessions.get(sid);
+  if (!session) {
+    throw new Error('Messaging session not found (closed, expired, or never opened)');
+  }
+  const now = Date.now();
+  if (now >= session.absoluteExp || now >= session.idleExp) {
+    messagingSessions.delete(sid);
+    throw new Error('Messaging session expired; re-authenticate with openMessaging');
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Malformed capability token');
+  }
+  const [headerB64, payloadB64, signatureB64] = parts as [string, string, string];
+
+  let payload: { sid?: unknown; scope?: unknown; exp?: unknown };
+  try {
+    payload = JSON.parse(new TextDecoder().decode(base64urlToArrayBuffer(payloadB64))) as typeof payload;
+  } catch {
+    throw new Error('Malformed capability token payload');
+  }
+  if (payload.sid !== sid) {
+    throw new Error('Capability token sid mismatch');
+  }
+  if (!Array.isArray(payload.scope) || !payload.scope.includes('messaging')) {
+    throw new Error('Capability token missing messaging scope');
+  }
+  if (typeof payload.exp !== 'number' || now / 1000 >= payload.exp) {
+    throw new Error('Capability token expired');
+  }
+
+  const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+  const valid = await crypto.subtle.verify(
+    'Ed25519',
+    session.capPubKey,
+    base64urlToArrayBuffer(signatureB64),
+    signingInput
+  );
+  if (!valid) {
+    throw new Error('Capability token signature invalid');
+  }
+
+  // Slide the idle window (absolute cap is untouched).
+  session.idleExp = now + MESSAGING_IDLE_TIMEOUT_MS;
+  return { messagingKEK: session.messagingKEK, userId: session.userId };
+}
 
 // ============================================================================
 // Ephemeral Transport Keys (Setup Flow)
@@ -774,7 +915,7 @@ async function handleFullSetup(
  * Main worker message handler. Receives RPC requests and internal messages from client,
  * processes them, and sends back responses.
  */
-self.addEventListener('message', (event: MessageEvent) => {
+const handleWorkerMessage = (event: MessageEvent): void => {
   const message = event.data as RPCRequest | {
     type: string;
     requestId?: string;
@@ -907,7 +1048,14 @@ self.addEventListener('message', (event: MessageEvent) => {
       error: err instanceof Error ? err.message : 'Unknown error',
     });
   });
-});
+};
+
+// Register the message listener only in a real Worker context. In unit tests
+// (node / happy-dom without a Worker global) `self.addEventListener` is absent;
+// those tests drive `handleMessage` directly instead.
+if (typeof self !== 'undefined' && typeof self.addEventListener === 'function') {
+  self.addEventListener('message', handleWorkerMessage);
+}
 
 // ============================================================================
 // RPC Request Handler (Entry Point)
@@ -1057,6 +1205,39 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'getPushSubscription':
         result = await handleGetPushSubscription();
+        break;
+
+      // === Signal Messaging Operations ===
+      case 'setupMessaging':
+        result = await handleSetupMessaging(validators.validateSetupMessaging(params), id);
+        break;
+
+      case 'getMessagingBundle':
+        result = await handleGetMessagingBundle(validators.validateGetMessagingBundle(params));
+        break;
+
+      case 'getPrekeyCount':
+        result = await handleGetPrekeyCount(validators.validateGetPrekeyCount(params));
+        break;
+
+      case 'openMessaging':
+        result = await handleOpenMessaging(validators.validateOpenMessaging(params), id);
+        break;
+
+      case 'closeMessaging':
+        result = await handleCloseMessaging(validators.validateCloseMessaging(params), id);
+        break;
+
+      case 'encryptMessage':
+        result = await handleEncryptMessage(validators.validateEncryptMessage(params), id);
+        break;
+
+      case 'decryptMessage':
+        result = await handleDecryptMessage(validators.validateDecryptMessage(params), id);
+        break;
+
+      case 'rotatePrekeys':
+        result = await handleRotatePrekeys(validators.validateRotatePrekeys(params), id);
         break;
 
       default:
@@ -2799,6 +2980,265 @@ async function handleGetPushSubscription(): Promise<{
 }> {
   const subscription = await getPushSubscription();
   return { subscription };
+}
+
+// ============================================================================
+// Signal Messaging Operations (Phase 2)
+// ============================================================================
+
+/**
+ * Provision a user's Signal identity, signed prekey, and one-time prekeys (one
+ * full unlock), and return the public bundle for upload to the directory server.
+ * Idempotent on the identity; intended to run once at messaging onboarding.
+ */
+async function handleSetupMessaging(
+  params: {
+    credentials: AuthCredentials;
+    signedPreKeyId: number;
+    oneTimePrekeyCount: number;
+  },
+  requestId: string
+): Promise<{ bundle: PublicPreKeyBundle }> {
+  const { credentials, signedPreKeyId, oneTimePrekeyCount } = params;
+
+  const result = await withUnlock(credentials, async (mkek, ms) => {
+    await ensureAuditKey(mkek);
+    const messagingKEK = await deriveMessagingKEK(ms);
+    await generateIdentity(credentials.userId, messagingKEK);
+    await generateSignedPrekey(credentials.userId, messagingKEK, signedPreKeyId);
+    await generateOneTimePrekeys(credentials.userId, messagingKEK, 1, oneTimePrekeyCount);
+    return getPublicBundle(credentials.userId);
+  });
+
+  await logOperation({
+    op: 'messaging.setup',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+    details: { signedPreKeyId, oneTimePrekeyCount },
+  });
+
+  return { bundle: result.result };
+}
+
+/**
+ * Return a user's public prekey bundle. Public bytes only — no unlock required.
+ */
+async function handleGetMessagingBundle(params: {
+  userId: string;
+}): Promise<{ bundle: PublicPreKeyBundle }> {
+  return { bundle: await getPublicBundle(params.userId) };
+}
+
+/**
+ * Return the count of unconsumed one-time prekeys (for low-count top-up polling).
+ * Public/count read — no unlock required.
+ */
+async function handleGetPrekeyCount(params: { userId: string }): Promise<{ count: number }> {
+  return { count: await countUnconsumedOnetimePrekeys(params.userId) };
+}
+
+/**
+ * Open a messaging session: one unlock, derive the messaging-scoped KEK, mint a
+ * per-session Ed25519 capability token, and cache the session in memory. The
+ * master MKEK is NOT retained — only the messaging KEK lives on past this call.
+ */
+async function handleOpenMessaging(
+  params: { credentials: AuthCredentials },
+  requestId: string
+): Promise<{ sid: string; token: string; exp: number }> {
+  const { credentials } = params;
+  const sid = crypto.randomUUID();
+
+  const result = await withUnlock(credentials, async (mkek, ms) => {
+    await ensureAuditKey(mkek);
+
+    // Messaging must be provisioned first (setupMessaging).
+    const identity = await getSignalIdentity(credentials.userId);
+    if (!identity) {
+      throw new Error('Messaging not set up for this user; call setupMessaging first');
+    }
+
+    const messagingKEK = await deriveMessagingKEK(ms);
+    const capKeyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+
+    const nowMs = Date.now();
+    const iat = Math.floor(nowMs / 1000);
+    const exp = iat + Math.floor(MESSAGING_ABSOLUTE_MAX_MS / 1000);
+    const token = await mintCapabilityToken(sid, capKeyPair.privateKey, iat, exp);
+
+    messagingSessions.set(sid, {
+      messagingKEK,
+      userId: credentials.userId,
+      capPubKey: capKeyPair.publicKey,
+      absoluteExp: nowMs + MESSAGING_ABSOLUTE_MAX_MS,
+      idleExp: nowMs + MESSAGING_IDLE_TIMEOUT_MS,
+    });
+
+    return { token, exp };
+  });
+
+  await logOperation({
+    op: 'messaging.open',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+    details: { sid },
+  });
+
+  return { sid, token: result.result.token, exp: result.result.exp };
+}
+
+/**
+ * Close a messaging session: drop its keys from memory and audit. Requires a
+ * valid capability so a session can only be closed by its holder.
+ */
+async function handleCloseMessaging(
+  params: { sid: string; token: string },
+  requestId: string
+): Promise<{ closed: true }> {
+  const { sid, token } = params;
+  const { userId } = await requireCapability(sid, token);
+  messagingSessions.delete(sid);
+
+  await logOperation({
+    op: 'messaging.close',
+    kid: `messaging:${userId}`,
+    requestId,
+    userId,
+    details: { sid },
+  });
+
+  return { closed: true };
+}
+
+/**
+ * Encrypt a message to a peer. Establishes the session from `deviceBundle` if
+ * none exists yet (the first message is a type-3 prekey message). The
+ * read-modify-write runs under the per-peer session lock so concurrent sends
+ * cannot corrupt the ratchet.
+ */
+async function handleEncryptMessage(
+  params: {
+    sid: string;
+    token: string;
+    peerName: string;
+    peerDeviceId: number;
+    plaintext: ArrayBuffer;
+    deviceBundle?: DeviceType;
+  },
+  requestId: string
+): Promise<{ type: 1 | 3; body: string }> {
+  const { sid, token, peerName, peerDeviceId, plaintext, deviceBundle } = params;
+  const { messagingKEK, userId } = await requireCapability(sid, token);
+
+  const address = new SignalProtocolAddress(peerName, peerDeviceId);
+  const peerAddress = address.toString();
+
+  const out = await withSessionLock(userId, peerAddress, async () => {
+    const store = createSignalProtocolStore(userId, messagingKEK);
+    const existing = await store.loadSession(peerAddress);
+    if (!existing) {
+      if (!deviceBundle) {
+        throw new Error('No existing session with peer; deviceBundle is required to start one');
+      }
+      const builder = new SessionBuilder(store, address);
+      await builder.processPreKey(deviceBundle);
+    }
+    const cipher = new SessionCipher(store, address);
+    const message = await cipher.encrypt(plaintext);
+    return { type: message.type as 1 | 3, body: message.body as string };
+  });
+
+  await logOperation({
+    op: 'messaging.encrypt',
+    kid: `messaging:${userId}`,
+    requestId,
+    userId,
+    details: { peer: peerAddress, messageType: out.type, establishedSession: out.type === 3 },
+  });
+
+  return out;
+}
+
+/**
+ * Decrypt a message from a peer. A type-3 (prekey) message establishes the
+ * inbound session and consumes a one-time prekey; type-1 advances an existing
+ * ratchet. Runs under the per-peer session lock.
+ */
+async function handleDecryptMessage(
+  params: {
+    sid: string;
+    token: string;
+    peerName: string;
+    peerDeviceId: number;
+    messageType: 1 | 3;
+    body: string;
+  },
+  requestId: string
+): Promise<{ plaintext: ArrayBuffer }> {
+  const { sid, token, peerName, peerDeviceId, messageType, body } = params;
+  const { messagingKEK, userId } = await requireCapability(sid, token);
+
+  const address = new SignalProtocolAddress(peerName, peerDeviceId);
+  const peerAddress = address.toString();
+
+  const plaintext = await withSessionLock(userId, peerAddress, async () => {
+    const store = createSignalProtocolStore(userId, messagingKEK);
+    const cipher = new SessionCipher(store, address);
+    if (messageType === 3) {
+      return cipher.decryptPreKeyWhisperMessage(body, 'binary');
+    }
+    return cipher.decryptWhisperMessage(body, 'binary');
+  });
+
+  await logOperation({
+    op: 'messaging.decrypt',
+    kid: `messaging:${userId}`,
+    requestId,
+    userId,
+    details: { peer: peerAddress, messageType },
+  });
+
+  return { plaintext };
+}
+
+/**
+ * Rotate the signed prekey and top up one-time prekeys, returning the refreshed
+ * public bundle for re-upload. Runs under a live session (uses the messaging KEK).
+ */
+async function handleRotatePrekeys(
+  params: {
+    sid: string;
+    token: string;
+    signedPreKeyId: number;
+    startKeyId: number;
+    count: number;
+  },
+  requestId: string
+): Promise<{ bundle: PublicPreKeyBundle }> {
+  const { sid, token, signedPreKeyId, startKeyId, count } = params;
+  const { messagingKEK, userId } = await requireCapability(sid, token);
+
+  await generateSignedPrekey(userId, messagingKEK, signedPreKeyId);
+  await generateOneTimePrekeys(userId, messagingKEK, startKeyId, count);
+  const bundle = await getPublicBundle(userId);
+
+  await logOperation({
+    op: 'messaging.rotate',
+    kid: `messaging:${userId}`,
+    requestId,
+    userId,
+    details: { signedPreKeyId, startKeyId, count },
+  });
+
+  return { bundle };
 }
 
 // ============================================================================

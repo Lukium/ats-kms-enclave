@@ -675,3 +675,257 @@ export function validateGetPushSubscription(_params: unknown): Record<string, ne
   // No params required
   return {};
 }
+
+// ============================================================================
+// Signal Messaging Validation (Phase 2)
+// ============================================================================
+
+/** Upper bounds for messaging inputs (reject oversized payloads at the boundary). */
+const MAX_PLAINTEXT_BYTES = 64 * 1024; // 64 KiB cleartext per message
+const MAX_CIPHERTEXT_CHARS = 256 * 1024; // type-3 prekey messages carry the bundle
+const MAX_PEER_NAME_CHARS = 256;
+const MAX_ONETIME_PREKEY_COUNT = 100;
+/** Signal key ids live in the 24-bit medium-id space (1..0xFFFFFF). */
+const MAX_KEY_ID = 0xffffff;
+
+/** Validate a Signal key id: an integer in [1, 0xFFFFFF]. */
+function validateKeyId(method: string, paramName: string, value: unknown): number {
+  const n = validateNumber(method, paramName, value);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_KEY_ID) {
+    throw new RPCValidationError(method, paramName, `integer in [1, ${MAX_KEY_ID}]`, value);
+  }
+  return n;
+}
+
+/** Validate a bounded-length string. */
+function validateBoundedString(
+  method: string,
+  paramName: string,
+  value: unknown,
+  maxChars: number
+): string {
+  const s = validateString(method, paramName, value);
+  if (s.length === 0 || s.length > maxChars) {
+    throw new RPCValidationError(method, paramName, `non-empty string ≤ ${maxChars} chars`, value);
+  }
+  return s;
+}
+
+/** Validate an ArrayBuffer of an exact byte length. */
+function validateBufferOfLength(
+  method: string,
+  paramName: string,
+  value: unknown,
+  expectedBytes: number
+): ArrayBuffer {
+  const buf = validateBuffer(method, paramName, value);
+  if (buf.byteLength !== expectedBytes) {
+    throw new RPCValidationError(method, paramName, `ArrayBuffer of ${expectedBytes} bytes`, value);
+  }
+  return buf;
+}
+
+/**
+ * A peer's public prekey bundle, shaped to the fork's `DeviceType`. The `preKey`
+ * (one-time prekey) is optional: X3DH proceeds with the signed prekey alone when
+ * the directory has no unconsumed one-time prekey left.
+ */
+export interface MessagingDeviceBundle {
+  registrationId: number;
+  identityKey: ArrayBuffer;
+  identitySigningKey: ArrayBuffer;
+  signedPreKey: { keyId: number; publicKey: ArrayBuffer; signature: ArrayBuffer };
+  preKey?: { keyId: number; publicKey: ArrayBuffer };
+}
+
+/** Validate a peer device bundle (public bytes only) used to start a session. */
+function validateDeviceBundle(method: string, value: unknown): MessagingDeviceBundle {
+  if (typeof value !== 'object' || value === null) {
+    throw new RPCValidationError(method, 'deviceBundle', 'object', value);
+  }
+  const d = value as Record<string, unknown>;
+
+  const signed = d.signedPreKey;
+  if (typeof signed !== 'object' || signed === null) {
+    throw new RPCValidationError(method, 'deviceBundle.signedPreKey', 'object', signed);
+  }
+  const sp = signed as Record<string, unknown>;
+
+  const bundle: MessagingDeviceBundle = {
+    registrationId: validateNumber(method, 'deviceBundle.registrationId', d.registrationId),
+    identityKey: validateBufferOfLength(method, 'deviceBundle.identityKey', d.identityKey, 33),
+    identitySigningKey: validateBufferOfLength(
+      method,
+      'deviceBundle.identitySigningKey',
+      d.identitySigningKey,
+      32
+    ),
+    signedPreKey: {
+      keyId: validateKeyId(method, 'deviceBundle.signedPreKey.keyId', sp.keyId),
+      publicKey: validateBufferOfLength(method, 'deviceBundle.signedPreKey.publicKey', sp.publicKey, 33),
+      signature: validateBufferOfLength(method, 'deviceBundle.signedPreKey.signature', sp.signature, 64),
+    },
+  };
+
+  if (d.preKey !== undefined) {
+    if (typeof d.preKey !== 'object' || d.preKey === null) {
+      throw new RPCValidationError(method, 'deviceBundle.preKey', 'object', d.preKey);
+    }
+    const pk = d.preKey as Record<string, unknown>;
+    bundle.preKey = {
+      keyId: validateKeyId(method, 'deviceBundle.preKey.keyId', pk.keyId),
+      publicKey: validateBufferOfLength(method, 'deviceBundle.preKey.publicKey', pk.publicKey, 33),
+    };
+  }
+
+  return bundle;
+}
+
+export function validateSetupMessaging(params: unknown): {
+  credentials: AuthCredentials;
+  signedPreKeyId: number;
+  oneTimePrekeyCount: number;
+} {
+  const p = validateParamsObject('setupMessaging', params);
+  const credentials = validateAuthCredentials('setupMessaging', p.credentials);
+  const signedPreKeyId =
+    p.signedPreKeyId === undefined ? 1 : validateKeyId('setupMessaging', 'signedPreKeyId', p.signedPreKeyId);
+  let oneTimePrekeyCount = 20;
+  if (p.oneTimePrekeyCount !== undefined) {
+    oneTimePrekeyCount = validateNumber('setupMessaging', 'oneTimePrekeyCount', p.oneTimePrekeyCount);
+    if (
+      !Number.isInteger(oneTimePrekeyCount) ||
+      oneTimePrekeyCount < 1 ||
+      oneTimePrekeyCount > MAX_ONETIME_PREKEY_COUNT
+    ) {
+      throw new RPCValidationError(
+        'setupMessaging',
+        'oneTimePrekeyCount',
+        `integer in [1, ${MAX_ONETIME_PREKEY_COUNT}]`,
+        p.oneTimePrekeyCount
+      );
+    }
+  }
+  return { credentials, signedPreKeyId, oneTimePrekeyCount };
+}
+
+export function validateGetMessagingBundle(params: unknown): { userId: string } {
+  const p = validateParamsObject('getMessagingBundle', params);
+  return { userId: validateString('getMessagingBundle', 'userId', p.userId) };
+}
+
+export function validateGetPrekeyCount(params: unknown): { userId: string } {
+  const p = validateParamsObject('getPrekeyCount', params);
+  return { userId: validateString('getPrekeyCount', 'userId', p.userId) };
+}
+
+export function validateOpenMessaging(params: unknown): { credentials: AuthCredentials } {
+  const p = validateParamsObject('openMessaging', params);
+  return { credentials: validateAuthCredentials('openMessaging', p.credentials) };
+}
+
+export function validateCloseMessaging(params: unknown): { sid: string; token: string } {
+  const p = validateParamsObject('closeMessaging', params);
+  return {
+    sid: validateString('closeMessaging', 'sid', p.sid),
+    token: validateString('closeMessaging', 'token', p.token),
+  };
+}
+
+export function validateEncryptMessage(params: unknown): {
+  sid: string;
+  token: string;
+  peerName: string;
+  peerDeviceId: number;
+  plaintext: ArrayBuffer;
+  deviceBundle?: MessagingDeviceBundle;
+} {
+  const p = validateParamsObject('encryptMessage', params);
+  const plaintext = validateBuffer('encryptMessage', 'plaintext', p.plaintext);
+  if (plaintext.byteLength === 0 || plaintext.byteLength > MAX_PLAINTEXT_BYTES) {
+    throw new RPCValidationError(
+      'encryptMessage',
+      'plaintext',
+      `non-empty ArrayBuffer ≤ ${MAX_PLAINTEXT_BYTES} bytes`,
+      p.plaintext
+    );
+  }
+  const result: {
+    sid: string;
+    token: string;
+    peerName: string;
+    peerDeviceId: number;
+    plaintext: ArrayBuffer;
+    deviceBundle?: MessagingDeviceBundle;
+  } = {
+    sid: validateString('encryptMessage', 'sid', p.sid),
+    token: validateString('encryptMessage', 'token', p.token),
+    peerName: validateBoundedString('encryptMessage', 'peerName', p.peerName, MAX_PEER_NAME_CHARS),
+    peerDeviceId:
+      p.peerDeviceId === undefined ? 1 : validateNumber('encryptMessage', 'peerDeviceId', p.peerDeviceId),
+    plaintext,
+  };
+  if (p.deviceBundle !== undefined) {
+    result.deviceBundle = validateDeviceBundle('encryptMessage', p.deviceBundle);
+  }
+  return result;
+}
+
+export function validateDecryptMessage(params: unknown): {
+  sid: string;
+  token: string;
+  peerName: string;
+  peerDeviceId: number;
+  messageType: 1 | 3;
+  body: string;
+} {
+  const p = validateParamsObject('decryptMessage', params);
+  const messageType = validateNumber('decryptMessage', 'messageType', p.messageType);
+  if (messageType !== 1 && messageType !== 3) {
+    throw new RPCValidationError('decryptMessage', 'messageType', '1 or 3', p.messageType);
+  }
+  const body = validateString('decryptMessage', 'body', p.body);
+  if (body.length === 0 || body.length > MAX_CIPHERTEXT_CHARS) {
+    throw new RPCValidationError(
+      'decryptMessage',
+      'body',
+      `non-empty string ≤ ${MAX_CIPHERTEXT_CHARS} chars`,
+      p.body
+    );
+  }
+  return {
+    sid: validateString('decryptMessage', 'sid', p.sid),
+    token: validateString('decryptMessage', 'token', p.token),
+    peerName: validateBoundedString('decryptMessage', 'peerName', p.peerName, MAX_PEER_NAME_CHARS),
+    peerDeviceId:
+      p.peerDeviceId === undefined ? 1 : validateNumber('decryptMessage', 'peerDeviceId', p.peerDeviceId),
+    messageType,
+    body,
+  };
+}
+
+export function validateRotatePrekeys(params: unknown): {
+  sid: string;
+  token: string;
+  signedPreKeyId: number;
+  startKeyId: number;
+  count: number;
+} {
+  const p = validateParamsObject('rotatePrekeys', params);
+  const count = validateNumber('rotatePrekeys', 'count', p.count);
+  if (!Number.isInteger(count) || count < 1 || count > MAX_ONETIME_PREKEY_COUNT) {
+    throw new RPCValidationError(
+      'rotatePrekeys',
+      'count',
+      `integer in [1, ${MAX_ONETIME_PREKEY_COUNT}]`,
+      p.count
+    );
+  }
+  return {
+    sid: validateString('rotatePrekeys', 'sid', p.sid),
+    token: validateString('rotatePrekeys', 'token', p.token),
+    signedPreKeyId: validateKeyId('rotatePrekeys', 'signedPreKeyId', p.signedPreKeyId),
+    startKeyId: validateKeyId('rotatePrekeys', 'startKeyId', p.startKeyId),
+    count,
+  };
+}

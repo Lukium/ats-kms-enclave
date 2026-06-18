@@ -30,6 +30,8 @@ import type {
   LeaseVerificationResult,
   StoredPushSubscription,
 } from './types.js';
+import type { PublicPreKeyBundle } from './signal.js';
+import type { MessagingDeviceBundle } from './rpc-validation.js';
 import { formatError } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
 
@@ -2083,5 +2085,119 @@ export class KMSUser {
    */
   async getPushSubscription(): Promise<{ subscription: StoredPushSubscription | null }> {
     return this.sendRequest<{ subscription: StoredPushSubscription | null }>('getPushSubscription', {});
+  }
+
+  // ========================================================================
+  // Signal Messaging Operations (Phase 2)
+  // ========================================================================
+
+  /**
+   * Provision the user's Signal identity + prekeys (one authentication) and
+   * return the public bundle to upload to the directory server. Run once at
+   * messaging onboarding.
+   *
+   * @category Messaging Operations
+   */
+  async setupMessaging(
+    credentials: AuthCredentials,
+    options?: { signedPreKeyId?: number; oneTimePrekeyCount?: number }
+  ): Promise<{ bundle: PublicPreKeyBundle }> {
+    return this.sendRequest<{ bundle: PublicPreKeyBundle }>('setupMessaging', {
+      credentials,
+      ...options,
+    });
+  }
+
+  /**
+   * Fetch a user's public prekey bundle (public bytes only, no authentication).
+   *
+   * @category Messaging Operations
+   */
+  async getMessagingBundle(userId: string): Promise<{ bundle: PublicPreKeyBundle }> {
+    return this.sendRequest<{ bundle: PublicPreKeyBundle }>('getMessagingBundle', { userId });
+  }
+
+  /**
+   * Count a user's unconsumed one-time prekeys (for low-count top-up polling).
+   *
+   * @category Messaging Operations
+   */
+  async getPrekeyCount(userId: string): Promise<{ count: number }> {
+    return this.sendRequest<{ count: number }>('getPrekeyCount', { userId });
+  }
+
+  /**
+   * Open a messaging session with one authentication. Returns a session id and a
+   * capability token to carry on subsequent message operations until `exp`
+   * (8h absolute cap) or 15 minutes of inactivity, whichever comes first.
+   *
+   * @category Messaging Operations
+   */
+  async openMessaging(
+    credentials: AuthCredentials
+  ): Promise<{ sid: string; token: string; exp: number }> {
+    return this.sendRequest<{ sid: string; token: string; exp: number }>('openMessaging', {
+      credentials,
+    });
+  }
+
+  /**
+   * Close a messaging session, dropping its keys from enclave memory.
+   *
+   * @category Messaging Operations
+   */
+  async closeMessaging(sid: string, token: string): Promise<{ closed: true }> {
+    return this.sendRequest<{ closed: true }>('closeMessaging', { sid, token });
+  }
+
+  /**
+   * Encrypt a message to a peer within an open session. Pass `deviceBundle` (the
+   * peer's bundle from the directory) on the first message to a peer to establish
+   * the session; omit it once a session exists.
+   *
+   * @category Messaging Operations
+   */
+  async encryptMessage(args: {
+    sid: string;
+    token: string;
+    peerName: string;
+    peerDeviceId?: number;
+    plaintext: ArrayBuffer;
+    deviceBundle?: MessagingDeviceBundle;
+  }): Promise<{ type: 1 | 3; body: string }> {
+    return this.sendRequest<{ type: 1 | 3; body: string }>('encryptMessage', args);
+  }
+
+  /**
+   * Decrypt a message from a peer within an open session. `messageType` 3 is a
+   * prekey message (establishes the inbound session); 1 advances the ratchet.
+   *
+   * @category Messaging Operations
+   */
+  async decryptMessage(args: {
+    sid: string;
+    token: string;
+    peerName: string;
+    peerDeviceId?: number;
+    messageType: 1 | 3;
+    body: string;
+  }): Promise<{ plaintext: ArrayBuffer }> {
+    return this.sendRequest<{ plaintext: ArrayBuffer }>('decryptMessage', args);
+  }
+
+  /**
+   * Rotate the signed prekey and top up one-time prekeys within an open session,
+   * returning the refreshed bundle to re-upload.
+   *
+   * @category Messaging Operations
+   */
+  async rotatePrekeys(args: {
+    sid: string;
+    token: string;
+    signedPreKeyId: number;
+    startKeyId: number;
+    count: number;
+  }): Promise<{ bundle: PublicPreKeyBundle }> {
+    return this.sendRequest<{ bundle: PublicPreKeyBundle }>('rotatePrekeys', args);
   }
 }

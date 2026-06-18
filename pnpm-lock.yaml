@@ -4,13 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-neverBuiltDependencies:
-  - '@lukium/libsignal-protocol-typescript'
-
 dependencies:
   '@lukium/libsignal-protocol-typescript':
-    specifier: 0.2.0-beta.1
-    version: 0.2.0-beta.1
+    specifier: 0.2.0-beta.2
+    version: 0.2.0-beta.2
 
 devDependencies:
   '@eslint/js':
@@ -1167,8 +1164,8 @@ packages:
       '@jridgewell/sourcemap-codec': 1.5.5
     dev: true
 
-  /@lukium/libsignal-protocol-typescript@0.2.0-beta.1:
-    resolution: {integrity: sha512-+hpagk07uQQHV2h7nN7wZmk4IEDgMvxSBNfp5Vr+crPZac1DzNwYe1hXXByuPBY4hj4bnL5+3mXj6Dgrb+6K0A==}
+  /@lukium/libsignal-protocol-typescript@0.2.0-beta.2:
+    resolution: {integrity: sha512-6QFCi3V5IuenHTSzuRM3u5fJjKvD13mxgmvBCwVaY+u2uJxsMjUBDZunpEWh3dBVDFxfDb6Gtc7rSeihHgzKBw==}
     engines: {node: '>=20'}
     dependencies:
       base64-js: 1.5.1

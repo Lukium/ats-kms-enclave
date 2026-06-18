@@ -46,7 +46,7 @@
     "url": "https://github.com/Lukium/ats-kms-enclave.git"
   },
   "dependencies": {
-    "@lukium/libsignal-protocol-typescript": "0.2.0-beta.1"
+    "@lukium/libsignal-protocol-typescript": "0.2.0-beta.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.38.0",
@@ -77,11 +77,6 @@
     "pnpm": ">=8.0.0"
   },
   "packageManager": "pnpm@8.15.0",
-  "pnpm": {
-    "neverBuiltDependencies": [
-      "@lukium/libsignal-protocol-typescript"
-    ]
-  },
   "c8": {
     "all": true,
     "lines": 100,

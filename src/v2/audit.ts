@@ -30,7 +30,7 @@ import {
   getWrappedKey,
   wrapKey,
 } from './storage';
-import { arrayBufferToBase64url, buildKeyWrapAAD } from './crypto-utils';
+import { arrayBufferToBase64url, base64urlToArrayBuffer, buildKeyWrapAAD } from './crypto-utils';
 
 // Promise chain to serialize audit operations (prevents seqNum collisions in IndexedDB)
 // Sequence numbers are derived from the audit log itself (database is source of truth)
@@ -521,11 +521,67 @@ export async function logOperation(op: AuditOperation): Promise<AuditEntryV2> {
 }
 
 /**
- * Verify the integrity of the audit chain. Recomputes the chain hash
- * and verifies the signature for each entry using the signer's public key.
+ * Resolve the root-of-trust UAK public key from storage, importing it once.
+ * Returns null if no UAK has been provisioned yet.
+ */
+async function loadUAKPublicKey(): Promise<CryptoKey | null> {
+  const uakRecord = await getWrappedKey('audit-user');
+  if (!uakRecord || !uakRecord.publicKeyRaw) {
+    return null;
+  }
+  return crypto.subtle.importKey('raw', uakRecord.publicKeyRaw, { name: 'Ed25519' }, false, [
+    'verify',
+  ]);
+}
+
+/**
+ * Verify that a delegation certificate was genuinely signed by the UAK, and
+ * return the delegate's imported public key for verifying entry signatures.
  *
- * NOTE: This is a simplified verification that doesn't validate delegation
- * certificates or check that the correct signer was used for each operation.
+ * The cert binds the delegate public key (`delegatePub`) to the UAK's signature
+ * over the canonical, sig-excluded certificate. This is the root of the
+ * UAK -> LAK delegation trust chain.
+ */
+async function verifyDelegationCert(
+  cert: AuditDelegationCert,
+  uakPub: CryptoKey
+): Promise<CryptoKey> {
+  const { sig, ...certUnsigned } = cert;
+  const certCanonical = JSON.stringify(certUnsigned, Object.keys(certUnsigned).sort());
+  const certOk = await crypto.subtle.verify(
+    'Ed25519',
+    uakPub,
+    base64urlToArrayBuffer(sig),
+    new TextEncoder().encode(certCanonical)
+  );
+  if (!certOk) {
+    throw new Error('delegation certificate signature is invalid');
+  }
+  return crypto.subtle.importKey(
+    'raw',
+    base64urlToArrayBuffer(cert.delegatePub),
+    { name: 'Ed25519' },
+    false,
+    ['verify']
+  );
+}
+
+/**
+ * Verify the integrity of the audit chain. For every entry this:
+ *  1. recomputes and checks the SHA-256 hash chain, and
+ *  2. cryptographically verifies the entry's Ed25519 signature against the
+ *     signer's public key, resolving trust as:
+ *       - UAK/KIAK: the stored instance/user public key (signerId must match),
+ *       - LAK: the delegate key inside `cert`, whose cert must itself be signed
+ *         by the UAK (UAK -> LAK delegation chain).
+ *
+ * Without (2) the chain hash is an unkeyed digest over public fields, so any
+ * party able to write IndexedDB could recompute a self-consistent chain. The
+ * signatures are what make the log tamper-EVIDENT, so they must be checked.
+ *
+ * NOTE (deferred, see plan §0): this does not yet enforce delegation-cert
+ * policy (scope, notBefore/notAfter, codeHash/manifestHash) or that the op type
+ * is permitted for the signer kind. Those are Phase-4 hardening.
  *
  * Based on: 05-audit-log.md § "Verification Algorithm"
  */
@@ -533,6 +589,10 @@ export async function verifyAuditChain(): Promise<VerificationResult> {
   const entries = await getAllAuditEntries();
   const errors: string[] = [];
   let verified = 0;
+
+  // Root of trust + caches so we import each public key at most once.
+  const uakPub = await loadUAKPublicKey();
+  const signerKeyCache = new Map<string, CryptoKey>();
 
   for (const entry of entries) {
     // Reconstruct payload for hashing
@@ -564,9 +624,62 @@ export async function verifyAuditChain(): Promise<VerificationResult> {
       errors.push(`Chain hash mismatch at seq ${entry.seqNum}`);
     }
 
-    // Verify signature
-    // NOTE: Full verification would require importing the public key from signerId or cert
-    // For now, we only verify chain hash integrity
+    // Resolve the signer's public key and verify the entry signature.
+    try {
+      let signerPub = signerKeyCache.get(entry.signerId);
+
+      if (!signerPub) {
+        if (entry.signer === 'UAK') {
+          if (!uakPub) {
+            throw new Error('UAK public key not available');
+          }
+          signerPub = uakPub;
+        } else if (entry.signer === 'KIAK') {
+          const kiakRecord = await getWrappedKey('audit-instance');
+          if (!kiakRecord || !kiakRecord.publicKeyRaw) {
+            throw new Error('KIAK public key not available');
+          }
+          if ((await computeKeyId(kiakRecord.publicKeyRaw)) !== entry.signerId) {
+            throw new Error('KIAK signerId does not match stored instance key');
+          }
+          signerPub = await crypto.subtle.importKey(
+            'raw',
+            kiakRecord.publicKeyRaw,
+            { name: 'Ed25519' },
+            false,
+            ['verify']
+          );
+        } else {
+          // LAK: trust flows from a UAK-signed delegation certificate.
+          if (!entry.cert) {
+            throw new Error('LAK entry is missing its delegation certificate');
+          }
+          if (!uakPub) {
+            throw new Error('UAK public key not available to verify delegation');
+          }
+          const delegatePubRaw = base64urlToArrayBuffer(entry.cert.delegatePub);
+          if ((await computeKeyId(delegatePubRaw)) !== entry.signerId) {
+            throw new Error('LAK signerId does not match certificate delegate key');
+          }
+          signerPub = await verifyDelegationCert(entry.cert, uakPub);
+        }
+        signerKeyCache.set(entry.signerId, signerPub);
+      }
+
+      const sigOk = await crypto.subtle.verify(
+        'Ed25519',
+        signerPub,
+        base64urlToArrayBuffer(entry.sig),
+        new TextEncoder().encode(entry.chainHash)
+      );
+      if (!sigOk) {
+        errors.push(`Signature invalid at seq ${entry.seqNum}`);
+      }
+    } catch (err) {
+      errors.push(
+        `Signature verification failed at seq ${entry.seqNum}: ${(err as Error).message}`
+      );
+    }
 
     verified += 1;
   }

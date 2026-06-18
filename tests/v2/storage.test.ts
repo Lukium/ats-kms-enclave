@@ -33,8 +33,33 @@ import {
   getUserLeases,
   deleteLease,
   deleteExpiredLeases,
+  DB_NAME,
+  DB_VERSION,
+  migrateDatabase,
+  wrapBlob,
+  unwrapBlob,
+  getSignalIdentity,
+  putSignalIdentity,
+  getSignalSignedPrekey,
+  getSignalSignedPrekeys,
+  putSignalSignedPrekey,
+  getSignalOnetimePrekey,
+  getSignalOnetimePrekeys,
+  putSignalOnetimePrekeys,
+  countUnconsumedOnetimePrekeys,
+  getSignalSession,
+  putSignalSession,
+  deleteSignalSession,
+  withSessionLock,
+  getSignalTrustedIdentity,
+  putSignalTrustedIdentity,
 } from '@/v2/storage';
-import type { AuditEntryV2, LeaseRecord, AuditDelegationCert } from '@/v2/types';
+import type {
+  AuditEntryV2,
+  LeaseRecord,
+  AuditDelegationCert,
+  SignalOnetimePrekeyRecord,
+} from '@/v2/types';
 
 // ============================================================================
 // Test Helpers
@@ -881,5 +906,290 @@ describe('loadRateLimitState', () => {
       tokensIssued: 0,
       lastResetAt: expect.any(Number),
     });
+  });
+});
+
+// ============================================================================
+// Schema Migration Tests (v1 -> v2)
+// ============================================================================
+
+describe('schema migration', () => {
+  // Build a realistic v1 database (pre-Signal) containing a VAPID key, using
+  // the production migration logic, then close it. The next initDB() upgrades.
+  async function createV1DatabaseWithVapidKey(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const req = globalThis.indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = (): void => {
+        migrateDatabase(req.result, 0, 1); // v1 stores only — no Signal stores
+      };
+      req.onsuccess = (): void => {
+        const db = req.result;
+        const tx = db.transaction('keys', 'readwrite');
+        tx.objectStore('keys').put({
+          kid: 'vapid-existing',
+          kmsVersion: 2,
+          wrappedKey: new ArrayBuffer(8),
+          iv: new ArrayBuffer(12),
+          aad: new ArrayBuffer(4),
+          alg: 'ES256',
+          purpose: 'vapid',
+          createdAt: 1000,
+        });
+        tx.oncomplete = (): void => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = (): void => reject(tx.error ?? new Error('seed tx failed'));
+      };
+      req.onerror = (): void => reject(req.error ?? new Error('open v1 failed'));
+    });
+  }
+
+  it('DB_VERSION is 2', () => {
+    expect(DB_VERSION).toBe(2);
+  });
+
+  it('a v1 database has no Signal stores', async () => {
+    closeDB();
+    globalThis.indexedDB = new IDBFactory();
+    await createV1DatabaseWithVapidKey();
+
+    const names = await new Promise<DOMStringList>((resolve, reject) => {
+      const req = globalThis.indexedDB.open(DB_NAME, 1);
+      req.onsuccess = (): void => {
+        const names = req.result.objectStoreNames;
+        req.result.close();
+        resolve(names);
+      };
+      req.onerror = (): void => reject(req.error ?? new Error('open failed'));
+    });
+    expect(names.contains('keys')).toBe(true);
+    expect(names.contains('signal-identity')).toBe(false);
+  });
+
+  it('upgrading v1 -> v2 preserves existing VAPID data and adds Signal stores', async () => {
+    closeDB();
+    globalThis.indexedDB = new IDBFactory();
+    await createV1DatabaseWithVapidKey();
+
+    // initDB() opens at DB_VERSION (2): runs only the v2 migration step.
+    await initDB();
+
+    // Existing VAPID key survived the upgrade.
+    const vapid = await getWrappedKey('vapid-existing');
+    expect(vapid).not.toBeNull();
+    expect(vapid?.purpose).toBe('vapid');
+
+    // New Signal stores are present and usable.
+    await putSignalIdentity({
+      userId: 'alice',
+      registrationId: 42,
+      wrappedIdentity: { ciphertext: new ArrayBuffer(8), iv: new ArrayBuffer(12), aad: new ArrayBuffer(4) },
+      identityPubKey: new ArrayBuffer(33),
+      createdAt: 2000,
+    });
+    expect((await getSignalIdentity('alice'))?.registrationId).toBe(42);
+  });
+});
+
+// ============================================================================
+// wrapBlob / unwrapBlob Tests
+// ============================================================================
+
+describe('wrapBlob and unwrapBlob', () => {
+  let mkek: CryptoKey;
+
+  beforeEach(async () => {
+    mkek = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+      'encrypt',
+      'decrypt',
+    ]);
+  });
+
+  it('round-trips arbitrary bytes', async () => {
+    const plaintext = new TextEncoder().encode('ratchet-state-bytes').buffer;
+    const aad = new TextEncoder().encode('{"type":"signal-session"}').buffer;
+
+    const blob = await wrapBlob(plaintext, mkek, aad);
+    expect(blob.iv.byteLength).toBe(12);
+
+    const out = await unwrapBlob(blob, mkek);
+    expect(new TextDecoder().decode(out)).toBe('ratchet-state-bytes');
+  });
+
+  it('fails to decrypt when the expected AAD does not match (context binding)', async () => {
+    const plaintext = new TextEncoder().encode('secret').buffer;
+    const aadAlice = new TextEncoder().encode('{"peer":"alice"}').buffer;
+    const aadBob = new TextEncoder().encode('{"peer":"bob"}').buffer;
+
+    const blob = await wrapBlob(plaintext, mkek, aadAlice);
+
+    // Verifying against a different context's AAD must fail the GCM tag.
+    await expect(unwrapBlob(blob, mkek, aadBob)).rejects.toThrow();
+    // Verifying against the correct AAD succeeds.
+    await expect(unwrapBlob(blob, mkek, aadAlice)).resolves.toBeInstanceOf(ArrayBuffer);
+  });
+
+  it('fails to decrypt under a different wrapping key', async () => {
+    const blob = await wrapBlob(new ArrayBuffer(16), mkek, new ArrayBuffer(0));
+    const otherKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+      'encrypt',
+      'decrypt',
+    ]);
+    await expect(unwrapBlob(blob, otherKey)).rejects.toThrow();
+  });
+});
+
+// ============================================================================
+// Signal Store CRUD Tests
+// ============================================================================
+
+describe('Signal messaging stores', () => {
+  const blob = (): { ciphertext: ArrayBuffer; iv: ArrayBuffer; aad: ArrayBuffer } => ({
+    ciphertext: new ArrayBuffer(16),
+    iv: new ArrayBuffer(12),
+    aad: new ArrayBuffer(4),
+  });
+
+  it('stores and retrieves identity by userId', async () => {
+    await putSignalIdentity({
+      userId: 'alice',
+      registrationId: 7,
+      wrappedIdentity: blob(),
+      identityPubKey: new ArrayBuffer(33),
+      createdAt: 1,
+    });
+    expect((await getSignalIdentity('alice'))?.registrationId).toBe(7);
+    expect(await getSignalIdentity('nobody')).toBeNull();
+  });
+
+  it('isolates records by userId via compound keys', async () => {
+    await putSignalSignedPrekey({
+      userId: 'alice',
+      keyId: 1,
+      wrappedKeyPair: blob(),
+      signedPubKey: new ArrayBuffer(33),
+      signature: new ArrayBuffer(64),
+      createdAt: 1,
+      expiresAt: 2,
+    });
+    await putSignalSignedPrekey({
+      userId: 'bob',
+      keyId: 1, // same keyId, different user — must not collide
+      wrappedKeyPair: blob(),
+      signedPubKey: new ArrayBuffer(33),
+      signature: new ArrayBuffer(64),
+      createdAt: 1,
+      expiresAt: 2,
+    });
+
+    expect(await getSignalSignedPrekey('alice', 1)).not.toBeNull();
+    expect(await getSignalSignedPrekey('bob', 1)).not.toBeNull();
+    expect(await getSignalSignedPrekeys('alice')).toHaveLength(1);
+    expect(await getSignalSignedPrekeys('bob')).toHaveLength(1);
+  });
+
+  it('batches one-time prekeys and counts unconsumed', async () => {
+    const records: SignalOnetimePrekeyRecord[] = Array.from({ length: 5 }, (_, i) => ({
+      userId: 'alice',
+      keyId: i,
+      wrappedKeyPair: blob(),
+      pubKey: new ArrayBuffer(33),
+      consumed: i < 2, // first two already consumed
+      createdAt: 1,
+    }));
+    await putSignalOnetimePrekeys(records);
+
+    expect(await getSignalOnetimePrekeys('alice')).toHaveLength(5);
+    expect(await countUnconsumedOnetimePrekeys('alice')).toBe(3);
+
+    // Mark one more consumed.
+    const pk = await getSignalOnetimePrekey('alice', 2);
+    expect(pk).not.toBeNull();
+    await putSignalOnetimePrekeys([{ ...pk!, consumed: true }]);
+    expect(await countUnconsumedOnetimePrekeys('alice')).toBe(2);
+  });
+
+  it('stores, retrieves and deletes per-peer sessions', async () => {
+    await putSignalSession({
+      userId: 'alice',
+      peerAddress: 'bob.1',
+      wrappedSession: blob(),
+      updatedAt: 10,
+      messageCount: 0,
+    });
+    expect((await getSignalSession('alice', 'bob.1'))?.messageCount).toBe(0);
+
+    await putSignalSession({
+      userId: 'alice',
+      peerAddress: 'bob.1',
+      wrappedSession: blob(),
+      updatedAt: 20,
+      messageCount: 3,
+    });
+    expect((await getSignalSession('alice', 'bob.1'))?.messageCount).toBe(3);
+
+    await deleteSignalSession('alice', 'bob.1');
+    expect(await getSignalSession('alice', 'bob.1')).toBeNull();
+  });
+
+  it('stores TOFU trusted identities per peer', async () => {
+    await putSignalTrustedIdentity({
+      userId: 'alice',
+      peerAddress: 'bob.1',
+      identityPubKey: new ArrayBuffer(33),
+      firstSeenAt: 1,
+      updatedAt: 1,
+    });
+    expect(await getSignalTrustedIdentity('alice', 'bob.1')).not.toBeNull();
+    expect(await getSignalTrustedIdentity('alice', 'carol.1')).toBeNull();
+  });
+});
+
+describe('withSessionLock', () => {
+  // A read-modify-write that loses updates without serialization: read the
+  // session's messageCount, yield, then write count+1.
+  async function unsafeIncrement(userId: string, peer: string): Promise<void> {
+    const session = await getSignalSession(userId, peer);
+    const count = session?.messageCount ?? 0;
+    await new Promise((r) => setTimeout(r, 1)); // force interleaving window
+    await putSignalSession({
+      userId,
+      peerAddress: peer,
+      wrappedSession: { ciphertext: new ArrayBuffer(8), iv: new ArrayBuffer(12), aad: new ArrayBuffer(4) },
+      updatedAt: 0,
+      messageCount: count + 1,
+    });
+  }
+
+  it('serializes concurrent operations on the same peer (no lost updates)', async () => {
+    await Promise.all(
+      Array.from({ length: 5 }, () => withSessionLock('alice', 'bob.1', () => unsafeIncrement('alice', 'bob.1')))
+    );
+    expect((await getSignalSession('alice', 'bob.1'))?.messageCount).toBe(5);
+  });
+
+  it('allows different peers to proceed concurrently', async () => {
+    const order: string[] = [];
+    await Promise.all([
+      withSessionLock('alice', 'bob.1', async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        order.push('bob');
+      }),
+      withSessionLock('alice', 'carol.1', async () => {
+        order.push('carol'); // no contention with bob -> runs without waiting
+      }),
+    ]);
+    // Carol (different peer) completed without waiting for Bob's 5ms hold.
+    expect(order[0]).toBe('carol');
+  });
+
+  it('keeps a peer chain alive after an operation throws', async () => {
+    await expect(
+      withSessionLock('alice', 'bob.1', () => Promise.reject(new Error('boom')))
+    ).rejects.toThrow('boom');
+    // Subsequent op on the same peer still runs.
+    const result = await withSessionLock('alice', 'bob.1', () => Promise.resolve('ok'));
+    expect(result).toBe('ok');
   });
 });

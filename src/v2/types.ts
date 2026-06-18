@@ -272,6 +272,81 @@ export interface KeyMetadata {
 }
 
 /* ------------------------------------------------------------------
+ * Signal messaging storage types (Phase 6)
+ *
+ * Unlike VAPID/audit keys (non-extractable CryptoKeys), Signal private keys
+ * and Double Ratchet session state must be serialisable BYTES (the ratchet
+ * reads key material to advance). They are therefore persisted as opaque
+ * AES-GCM blobs wrapped under the MKEK. See docs .../10-signal-protocol.md.
+ */
+
+/** An opaque secret persisted as an AES-GCM blob (not a CryptoKey handle). */
+export interface WrappedBlob {
+  /** AES-GCM ciphertext of the serialised secret. */
+  ciphertext: ArrayBuffer;
+  /** 12-byte initialization vector. */
+  iv: ArrayBuffer;
+  /** Additional Authenticated Data bound at encryption time (context binding). */
+  aad: ArrayBuffer;
+}
+
+/** Long-term Signal identity (one per user). Store key: `userId`. */
+export interface SignalIdentityRecord {
+  userId: string;
+  registrationId: number;
+  /** Wrapped identity key pair (private + public bytes). */
+  wrappedIdentity: WrappedBlob;
+  /** Identity public key, 33 bytes (0x05-prefixed Curve25519). */
+  identityPubKey: ArrayBuffer;
+  createdAt: number;
+}
+
+/** Medium-term signed prekey. Store key: `[userId, keyId]`. */
+export interface SignalSignedPrekeyRecord {
+  userId: string;
+  keyId: number;
+  wrappedKeyPair: WrappedBlob;
+  /** Signed prekey public key, 33 bytes. */
+  signedPubKey: ArrayBuffer;
+  /** Ed25519/XEdDSA signature by the identity key, 64 bytes. */
+  signature: ArrayBuffer;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** Short-term one-time prekey, consumed on session start. Store key: `[userId, keyId]`. */
+export interface SignalOnetimePrekeyRecord {
+  userId: string;
+  keyId: number;
+  wrappedKeyPair: WrappedBlob;
+  /** One-time prekey public key, 33 bytes. */
+  pubKey: ArrayBuffer;
+  /** Whether this prekey has been consumed (kept for audit, not hard-deleted). */
+  consumed: boolean;
+  createdAt: number;
+}
+
+/** Per-peer Double Ratchet session state. Store key: `[userId, peerAddress]`. */
+export interface SignalSessionRecord {
+  userId: string;
+  peerAddress: string;
+  /** Wrapped `SessionRecord.serialize()` output. */
+  wrappedSession: WrappedBlob;
+  updatedAt: number;
+  messageCount: number;
+}
+
+/** TOFU peer identity (for safety-number / identity-change detection). Store key: `[userId, peerAddress]`. */
+export interface SignalTrustedIdentityRecord {
+  userId: string;
+  peerAddress: string;
+  /** Peer identity public key, 33 bytes. */
+  identityPubKey: ArrayBuffer;
+  firstSeenAt: number;
+  updatedAt: number;
+}
+
+/* ------------------------------------------------------------------
  * Audit types
  *
  * The audit log records every sensitive operation performed by the

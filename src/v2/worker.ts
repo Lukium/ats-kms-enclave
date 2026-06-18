@@ -93,11 +93,22 @@ import { loadRateLimitState } from './storage-types';
  * The SessionKEK is used to wrap/unwrap the VAPID private key for
  * JWT signing without requiring user credentials on each operation.
  *
- * Security properties:
- * - SessionKEK is never persisted (memory-only)
- * - Cleared on worker restart
- * - Cleared when lease expires
+ * Persistence (IMPORTANT — read before changing): for VAPID leases the
+ * SessionKEK is BOTH cached here AND persisted to IndexedDB in `createLease`
+ * (see `putMeta('sessionkek:...')`). This is deliberate: push must keep issuing
+ * JWTs in the background after a worker restart while the user is away, without
+ * forcing a re-unlock. The persisted key is a non-extractable CryptoKey handle
+ * (its raw bytes cannot be exported via the JS API), and re-derivation needs the
+ * MS, so this is an accepted reliability/security tradeoff for push.
+ *
+ * NOTE: messaging deliberately does NOT follow this pattern. Messaging is a
+ * foreground, user-present activity, so its session KEK is held memory-only
+ * (keyed by session id) and never persisted — see the Signal messaging design.
+ *
+ * Lifecycle:
  * - Derived uniquely per lease (different salt)
+ * - Cleared from this cache on worker restart (re-derived/re-loaded on demand)
+ * - Cleared when lease expires
  */
 const sessionKEKCache = new Map<string, CryptoKey>();
 
@@ -2040,8 +2051,10 @@ async function handleCreateLease(
     return { wrappedLeaseKey, iv, sessionKEK, lakDelegationCert: delegationCert };
   });
 
-  // Store SessionKEK in IndexedDB (persists across worker restarts)
-  // CryptoKey objects can be stored directly in IndexedDB
+  // Store SessionKEK in IndexedDB so background push JWT issuance survives a
+  // worker restart without forcing a re-unlock (see the sessionKEKCache doc
+  // comment for the rationale + security tradeoff). Stored as a non-extractable
+  // CryptoKey handle; raw bytes are not exportable via the JS API.
   await putMeta(`sessionkek:${leaseId}`, result.result.sessionKEK);
 
   // Cache SessionKEK in memory for performance

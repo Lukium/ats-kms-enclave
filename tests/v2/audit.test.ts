@@ -26,7 +26,44 @@ import {
   generateLAK,
   loadLAK,
 } from '@/v2/audit';
-import { initDB, closeDB, getAllAuditEntries, getWrappedKey } from '@/v2/storage';
+import { initDB, closeDB, getAllAuditEntries, getWrappedKey, DB_NAME } from '@/v2/storage';
+import { arrayBufferToBase64url } from '@/v2/crypto-utils';
+import type { AuditEntryV2 } from '@/v2/types';
+
+/**
+ * Overwrite an existing audit entry IN PLACE (preserving its autoIncrement
+ * primary key, so it replaces rather than appending a duplicate seqNum).
+ * Simulates an attacker with IndexedDB write access editing the log.
+ *
+ * The replacement value must be fully computed by the caller BEFORE calling
+ * this: the cursor update is synchronous so the IDB transaction cannot
+ * auto-close mid-write (awaiting async work inside the cursor handler would).
+ */
+async function replaceAuditEntry(seqNum: number, replacement: AuditEntryV2): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const open = globalThis.indexedDB.open(DB_NAME);
+    open.onsuccess = (): void => {
+      const db = open.result;
+      const tx = db.transaction('audit', 'readwrite');
+      const cursorReq = tx.objectStore('audit').openCursor();
+      cursorReq.onsuccess = (): void => {
+        const cursor = cursorReq.result;
+        if (!cursor) return;
+        if ((cursor.value as AuditEntryV2).seqNum === seqNum) {
+          cursor.update(replacement);
+          return;
+        }
+        cursor.continue();
+      };
+      tx.oncomplete = (): void => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = (): void => reject(tx.error ?? new Error('tamper tx failed'));
+    };
+    open.onerror = (): void => reject(open.error ?? new Error('tamper open failed'));
+  });
+}
 import type { AuditOperation, AuditDelegationCert } from '@/v2/types';
 import { handleMessage } from '@/v2/worker';
 
@@ -264,6 +301,67 @@ describe('verifyAuditChain', () => {
     expect(result.valid).toBe(true);
     expect(result.verified).toBe(3);
     expect(result.errors).toEqual([]);
+  });
+
+  it('should reject an entry whose signature has been tampered with', async () => {
+    await ensureKIAK();
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'test-user' });
+
+    // Forge: flip the signature bytes while leaving the (valid) hash chain intact.
+    const entry = (await getAllAuditEntries())[0]!;
+    const sigBytes = new Uint8Array(
+      Uint8Array.from(atob(entry.sig.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+    );
+    sigBytes[0] = (sigBytes[0] ?? 0) ^ 0xff;
+    entry.sig = arrayBufferToBase64url(sigBytes.buffer);
+    await replaceAuditEntry(1, entry);
+
+    const result = await verifyAuditChain();
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /Signature invalid at seq 1/.test(e))).toBe(true);
+  });
+
+  it('should reject a forged entry even when its hash chain is internally consistent', async () => {
+    // This is the core regression: an attacker with IndexedDB write access can
+    // recompute a self-consistent chain hash over tampered public fields. Only
+    // the Ed25519 signature (over the original chainHash) exposes the forgery.
+    await ensureKIAK();
+    await logOperation({ op: 'sign', kid: 'key-1', requestId: 'req-1', userId: 'alice' });
+
+    // Tamper a signed field, then recompute chainHash so the hash-chain check
+    // alone would pass (this is exactly what the pre-fix verifier accepted).
+    const entry = (await getAllAuditEntries())[0]!;
+    entry.userId = 'attacker';
+    const payload = {
+      kmsVersion: entry.kmsVersion,
+      seqNum: entry.seqNum,
+      timestamp: entry.timestamp,
+      op: entry.op,
+      kid: entry.kid,
+      requestId: entry.requestId,
+      userId: entry.userId,
+      origin: entry.origin,
+      leaseId: entry.leaseId,
+      unlockTime: entry.unlockTime,
+      lockTime: entry.lockTime,
+      duration: entry.duration,
+      details: entry.details,
+      previousHash: entry.previousHash,
+      signer: entry.signer,
+      signerId: entry.signerId,
+    };
+    const chainInput = new TextEncoder().encode(entry.previousHash + JSON.stringify(payload));
+    const chainHashBuf = await crypto.subtle.digest('SHA-256', chainInput);
+    entry.chainHash = arrayBufferToBase64url(chainHashBuf);
+    await replaceAuditEntry(1, entry);
+
+    const result = await verifyAuditChain();
+
+    // Hash chain is consistent, but the signature no longer matches.
+    expect(result.errors.some((e) => /Chain hash mismatch/.test(e))).toBe(false);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /Signature invalid at seq 1/.test(e))).toBe(true);
   });
 });
 

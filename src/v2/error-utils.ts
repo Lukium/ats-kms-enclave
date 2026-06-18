@@ -37,7 +37,7 @@ export function getErrorMessage(err: unknown): string {
     typeof err === 'object' &&
     err !== null &&
     'message' in err &&
-    typeof (err as { message: unknown }).message === 'string'
+    typeof (err).message === 'string'
   ) {
     return (err as { message: string }).message;
   }

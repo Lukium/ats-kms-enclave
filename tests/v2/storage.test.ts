@@ -986,6 +986,7 @@ describe('schema migration', () => {
       registrationId: 42,
       wrappedIdentity: { ciphertext: new ArrayBuffer(8), iv: new ArrayBuffer(12), aad: new ArrayBuffer(4) },
       identityPubKey: new ArrayBuffer(33),
+      identitySigningPubKey: new ArrayBuffer(32),
       createdAt: 2000,
     });
     expect((await getSignalIdentity('alice'))?.registrationId).toBe(42);
@@ -1057,6 +1058,7 @@ describe('Signal messaging stores', () => {
       registrationId: 7,
       wrappedIdentity: blob(),
       identityPubKey: new ArrayBuffer(33),
+      identitySigningPubKey: new ArrayBuffer(32),
       createdAt: 1,
     });
     expect((await getSignalIdentity('alice'))?.registrationId).toBe(7);

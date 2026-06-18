@@ -1578,7 +1578,7 @@ export class KMSClient {
             extensions: {
               prf: {
                 eval: {
-                  first: appSalt as BufferSource,
+                  first: appSalt,
                 },
               },
             },
@@ -1619,7 +1619,7 @@ export class KMSClient {
                 extensions: {
                   prf: {
                     eval: {
-                      first: appSalt as BufferSource,
+                      first: appSalt,
                     },
                   },
                 },
@@ -1740,7 +1740,7 @@ export class KMSClient {
           extensions: {
             prf: {
               eval: {
-                first: appSalt as BufferSource,
+                first: appSalt,
               },
             },
           },
@@ -1768,7 +1768,7 @@ export class KMSClient {
             extensions: {
               prf: {
                 eval: {
-                  first: appSalt as BufferSource,
+                  first: appSalt,
                 },
               },
             },

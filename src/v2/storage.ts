@@ -390,7 +390,7 @@ export async function unwrapKey(
   // Determine import format based on algorithm
   // Asymmetric algorithms (ECDSA, ECDH, Ed25519, RSA-*) use pkcs8 for private keys
   // Symmetric algorithms (AES-*) use raw
-  const algName = typeof algorithm === 'string' ? algorithm : (algorithm as { name: string }).name;
+  const algName = typeof algorithm === 'string' ? algorithm : (algorithm).name;
   const isAsymmetric = algName === 'ECDSA' || algName === 'ECDH' || algName === 'Ed25519' || algName.startsWith('RSA');
   const format = isAsymmetric ? 'pkcs8' : 'raw';
 
@@ -536,6 +536,10 @@ export async function getSignalSignedPrekeys(
 
 export async function putSignalSignedPrekey(record: SignalSignedPrekeyRecord): Promise<void> {
   await put('signal-signed-prekey', record);
+}
+
+export async function deleteSignalSignedPrekey(userId: string, keyId: number): Promise<void> {
+  await del('signal-signed-prekey', [userId, keyId]);
 }
 
 // -- One-time prekeys ---------------------------------------------------------

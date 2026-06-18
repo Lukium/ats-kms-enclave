@@ -296,8 +296,14 @@ export interface SignalIdentityRecord {
   registrationId: number;
   /** Wrapped identity key pair (private + public bytes). */
   wrappedIdentity: WrappedBlob;
-  /** Identity public key, 33 bytes (0x05-prefixed Curve25519). */
+  /** X25519 DH identity public key, 33 bytes (0x05-prefixed). Used for X3DH. */
   identityPubKey: ArrayBuffer;
+  /**
+   * Ed25519 identity signing public key, 32 bytes. As of the WebCrypto two-key
+   * identity, this verifies signed-prekey signatures and must travel in the
+   * public bundle alongside {@link identityPubKey}.
+   */
+  identitySigningPubKey: ArrayBuffer;
   createdAt: number;
 }
 

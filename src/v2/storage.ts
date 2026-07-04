@@ -24,6 +24,7 @@ import type {
   SignalOnetimePrekeyRecord,
   SignalSessionRecord,
   SignalTrustedIdentityRecord,
+  MessagingAccountRecord,
 } from './types';
 import { buildKeyWrapAAD } from './crypto-utils';
 
@@ -33,10 +34,11 @@ import { buildKeyWrapAAD } from './crypto-utils';
 
 export const DB_NAME = 'kms-v2';
 /**
- * Current schema version. Bumped to 2 to add the Signal messaging stores.
- * Every increment must add a numbered entry to {@link MIGRATIONS}.
+ * Current schema version. v2 added the Signal messaging stores; v3 adds the
+ * per-device account-root store (secure-messaging §18). Every increment must add
+ * a numbered entry to {@link MIGRATIONS}.
  */
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 /** Names of the Signal messaging object stores (added in v2). */
 export type SignalStoreName =
@@ -114,6 +116,13 @@ const MIGRATIONS: Record<number, (db: IDBDatabase) => void> = {
       store.createIndex('by-userId', 'userId', { unique: false });
     }
   },
+  // v3: per-device account-root store (secure-messaging §18). One MKEK-wrapped
+  // accountRoot per user; additive, leaves all v2 Signal data untouched.
+  3: (database) => {
+    if (!database.objectStoreNames.contains('messaging-account')) {
+      database.createObjectStore('messaging-account', { keyPath: 'userId' });
+    }
+  },
 };
 
 /**
@@ -144,6 +153,7 @@ let db: IDBDatabase | null = null;
  * - v1: `config`, `keys`, `leases`, `audit`, `meta`
  * - v2: `signal-identity`, `signal-signed-prekey`, `signal-onetime-prekey`,
  *       `signal-session`, `signal-trusted-identity`
+ * - v3: `messaging-account`
  *
  * This function is idempotent and safe to call multiple times. Upgrading an
  * existing database only runs the newer migrations and preserves prior data.
@@ -657,6 +667,22 @@ export async function putSignalTrustedIdentity(
   record: SignalTrustedIdentityRecord
 ): Promise<void> {
   await put('signal-trusted-identity', record);
+}
+
+// -- Account root (secure-messaging §18; one per user) ------------------------
+
+export async function getMessagingAccount(
+  userId: string
+): Promise<MessagingAccountRecord | null> {
+  return (await get<MessagingAccountRecord>('messaging-account', userId)) ?? null;
+}
+
+export async function putMessagingAccount(record: MessagingAccountRecord): Promise<void> {
+  await put('messaging-account', record);
+}
+
+export async function deleteMessagingAccount(userId: string): Promise<void> {
+  await del('messaging-account', userId);
 }
 
 // ============================================================================

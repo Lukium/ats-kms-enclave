@@ -353,6 +353,20 @@ export interface SignalTrustedIdentityRecord {
 }
 
 /**
+ * The account root (secure-messaging §18) at rest, sealed under this device's
+ * MKEK. One per user. The plaintext `accountRoot` value is SHARED across the
+ * account's devices (synced via the self-channel / device-wrap), but each device
+ * stores its own copy wrapped under its own local MKEK — so the wrapped blob
+ * differs per device even though the value does not. Store key: `userId`.
+ */
+export interface MessagingAccountRecord {
+  userId: string;
+  /** MKEK-wrapped 16-byte accountRoot. */
+  wrappedAccountRoot: WrappedBlob;
+  createdAt: number;
+}
+
+/**
  * Public prekey bundle (public bytes only — no unlock required) returned by the
  * messaging RPCs (setupMessaging / getMessagingBundle / rotatePrekeys) for upload
  * to the directory server. Defined here rather than in signal.ts so the vendored

@@ -53,6 +53,9 @@ import {
   withSessionLock,
   getSignalTrustedIdentity,
   putSignalTrustedIdentity,
+  getMessagingAccount,
+  putMessagingAccount,
+  deleteMessagingAccount,
 } from '@/v2/storage';
 import type {
   AuditEntryV2,
@@ -945,8 +948,8 @@ describe('schema migration', () => {
     });
   }
 
-  it('DB_VERSION is 2', () => {
-    expect(DB_VERSION).toBe(2);
+  it('DB_VERSION is 3', () => {
+    expect(DB_VERSION).toBe(3);
   });
 
   it('a v1 database has no Signal stores', async () => {
@@ -990,6 +993,102 @@ describe('schema migration', () => {
       createdAt: 2000,
     });
     expect((await getSignalIdentity('alice'))?.registrationId).toBe(42);
+  });
+
+  // Build a realistic v2 database (VAPID + a Signal identity) via the production
+  // migration logic, then close it so the next initDB() upgrades v2 -> v3.
+  async function createV2DatabaseWithSignalIdentity(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const req = globalThis.indexedDB.open(DB_NAME, 2);
+      req.onupgradeneeded = (event): void => {
+        migrateDatabase(req.result, event.oldVersion, 2); // v1 + v2 stores, no v3
+      };
+      req.onsuccess = (): void => {
+        const db = req.result;
+        const tx = db.transaction(['keys', 'signal-identity'], 'readwrite');
+        tx.objectStore('keys').put({
+          kid: 'vapid-existing',
+          kmsVersion: 2,
+          wrappedKey: new ArrayBuffer(8),
+          iv: new ArrayBuffer(12),
+          aad: new ArrayBuffer(4),
+          alg: 'ES256',
+          purpose: 'vapid',
+          createdAt: 1000,
+        });
+        tx.objectStore('signal-identity').put({
+          userId: 'alice',
+          registrationId: 7,
+          wrappedIdentity: { ciphertext: new ArrayBuffer(8), iv: new ArrayBuffer(12), aad: new ArrayBuffer(4) },
+          identityPubKey: new ArrayBuffer(33),
+          identitySigningPubKey: new ArrayBuffer(32),
+          createdAt: 2000,
+        });
+        tx.oncomplete = (): void => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = (): void => reject(tx.error ?? new Error('seed tx failed'));
+      };
+      req.onerror = (): void => reject(req.error ?? new Error('open v2 failed'));
+    });
+  }
+
+  it('a v2 database has no messaging-account store', async () => {
+    closeDB();
+    globalThis.indexedDB = new IDBFactory();
+    await createV2DatabaseWithSignalIdentity();
+
+    const names = await new Promise<DOMStringList>((resolve, reject) => {
+      const req = globalThis.indexedDB.open(DB_NAME, 2);
+      req.onsuccess = (): void => {
+        const n = req.result.objectStoreNames;
+        req.result.close();
+        resolve(n);
+      };
+      req.onerror = (): void => reject(req.error ?? new Error('open failed'));
+    });
+    expect(names.contains('signal-identity')).toBe(true);
+    expect(names.contains('messaging-account')).toBe(false);
+  });
+
+  it('upgrading v2 -> v3 preserves Signal data and adds the account store', async () => {
+    closeDB();
+    globalThis.indexedDB = new IDBFactory();
+    await createV2DatabaseWithSignalIdentity();
+
+    // initDB() opens at DB_VERSION (3): runs only the v3 migration step.
+    await initDB();
+
+    // v2 data survived.
+    expect((await getWrappedKey('vapid-existing'))?.purpose).toBe('vapid');
+    expect((await getSignalIdentity('alice'))?.registrationId).toBe(7);
+
+    // The new account store is present and usable.
+    await putMessagingAccount({
+      userId: 'alice',
+      wrappedAccountRoot: { ciphertext: new ArrayBuffer(32), iv: new ArrayBuffer(12), aad: new ArrayBuffer(4) },
+      createdAt: 3000,
+    });
+    expect((await getMessagingAccount('alice'))?.createdAt).toBe(3000);
+  });
+});
+
+describe('messaging-account store', () => {
+  it('put / get / delete round-trip; missing user is null', async () => {
+    expect(await getMessagingAccount('nobody')).toBeNull();
+
+    await putMessagingAccount({
+      userId: 'bob',
+      wrappedAccountRoot: { ciphertext: new ArrayBuffer(32), iv: new ArrayBuffer(12), aad: new ArrayBuffer(4) },
+      createdAt: 4242,
+    });
+    const rec = await getMessagingAccount('bob');
+    expect(rec?.userId).toBe('bob');
+    expect(rec?.wrappedAccountRoot.ciphertext.byteLength).toBe(32);
+
+    await deleteMessagingAccount('bob');
+    expect(await getMessagingAccount('bob')).toBeNull();
   });
 });
 

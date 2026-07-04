@@ -931,6 +931,97 @@ export function validateRotatePrekeys(params: unknown): {
   };
 }
 
+// === Fan-out Bundle Operations (secure-messaging §8/§12) ===
+
+/** Max devices in one logical message's fan-out (a contact's devices + own devices). */
+const MAX_FANOUT_RECIPIENTS = 64;
+/** Max serialized bundle size (guards openBundle's parse against hostile input). */
+const MAX_BUNDLE_BYTES = 4 * 1024 * 1024;
+
+function validateRecipientAddress(
+  method: string,
+  value: unknown
+): { peerName: string; peerDeviceId: number } {
+  const r = validateParamsObject(method, value);
+  return {
+    peerName: validateBoundedString(method, 'peerName', r.peerName, MAX_PEER_NAME_CHARS),
+    peerDeviceId: r.peerDeviceId === undefined ? 1 : validateNumber(method, 'peerDeviceId', r.peerDeviceId),
+  };
+}
+
+export function validateBuildBundle(params: unknown): {
+  sid: string;
+  token: string;
+  recipients: Array<{ peerName: string; peerDeviceId: number; deviceBundle?: MessagingDeviceBundle }>;
+  plaintext: ArrayBuffer;
+} {
+  const p = validateParamsObject('buildBundle', params);
+  const plaintext = validateBuffer('buildBundle', 'plaintext', p.plaintext);
+  if (plaintext.byteLength === 0 || plaintext.byteLength > MAX_PLAINTEXT_BYTES) {
+    throw new RPCValidationError(
+      'buildBundle',
+      'plaintext',
+      `non-empty ArrayBuffer ≤ ${MAX_PLAINTEXT_BYTES} bytes`,
+      p.plaintext
+    );
+  }
+  if (!Array.isArray(p.recipients) || p.recipients.length < 1 || p.recipients.length > MAX_FANOUT_RECIPIENTS) {
+    throw new RPCValidationError(
+      'buildBundle',
+      'recipients',
+      `array of 1..${MAX_FANOUT_RECIPIENTS}`,
+      p.recipients
+    );
+  }
+  const recipients = p.recipients.map((raw) => {
+    const addr = validateRecipientAddress('buildBundle', raw);
+    const obj = validateParamsObject('buildBundle', raw);
+    if (obj.deviceBundle === undefined) {
+      return addr;
+    }
+    return { ...addr, deviceBundle: validateDeviceBundle('buildBundle', obj.deviceBundle) };
+  });
+  return {
+    sid: validateString('buildBundle', 'sid', p.sid),
+    token: validateString('buildBundle', 'token', p.token),
+    recipients,
+    plaintext,
+  };
+}
+
+export function validateOpenBundle(params: unknown): {
+  sid: string;
+  token: string;
+  senders: Array<{ peerName: string; peerDeviceId: number }>;
+  bundle: ArrayBuffer;
+} {
+  const p = validateParamsObject('openBundle', params);
+  const bundle = validateBuffer('openBundle', 'bundle', p.bundle);
+  if (bundle.byteLength === 0 || bundle.byteLength > MAX_BUNDLE_BYTES) {
+    throw new RPCValidationError(
+      'openBundle',
+      'bundle',
+      `non-empty ArrayBuffer ≤ ${MAX_BUNDLE_BYTES} bytes`,
+      p.bundle
+    );
+  }
+  if (!Array.isArray(p.senders) || p.senders.length < 1 || p.senders.length > MAX_FANOUT_RECIPIENTS) {
+    throw new RPCValidationError(
+      'openBundle',
+      'senders',
+      `array of 1..${MAX_FANOUT_RECIPIENTS}`,
+      p.senders
+    );
+  }
+  const senders = p.senders.map((raw) => validateRecipientAddress('openBundle', raw));
+  return {
+    sid: validateString('openBundle', 'sid', p.sid),
+    token: validateString('openBundle', 'token', p.token),
+    senders,
+    bundle,
+  };
+}
+
 // === Account Root Operations (secure-messaging §18) ===
 
 /** Max recovery-phrase length in chars (24 words × ~9 chars + spaces, padded). */

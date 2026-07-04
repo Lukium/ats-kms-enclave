@@ -106,6 +106,13 @@ import {
   decryptSelfMessage,
 } from './self-channel';
 import {
+  encryptEnvelope,
+  serializeBundle,
+  parseBundle,
+  trialDecryptEnvelope,
+  type Envelope,
+} from './envelope';
+import {
   wrapAccountRootToDevice,
   unwrapAccountRootFromDevice,
   type WrappedAccountRoot,
@@ -1260,6 +1267,15 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'rotatePrekeys':
         result = await handleRotatePrekeys(validators.validateRotatePrekeys(params), id);
+        break;
+
+      // === Fan-out Bundle Operations (secure-messaging §8/§12) ===
+      case 'buildBundle':
+        result = await handleBuildBundle(validators.validateBuildBundle(params), id);
+        break;
+
+      case 'openBundle':
+        result = await handleOpenBundle(validators.validateOpenBundle(params), id);
         break;
 
       // === Account Root Operations (secure-messaging §18) ===
@@ -3322,6 +3338,111 @@ async function handleRotatePrekeys(
   });
 
   return { bundle };
+}
+
+// ============================================================================
+// Fan-out Bundle Operations (secure-messaging §8/§12) — messaging capability
+// ============================================================================
+
+/**
+ * Build one opaque fan-out bundle for a logical message: encrypt the plaintext
+ * once per recipient device session (establishing a session from `deviceBundle`
+ * on the first message to a device), then shuffle + serialize. The caller
+ * composes the recipient set (a contact's devices + the account's own other
+ * devices); this handler only ciphers and packs — no addressing/routing logic.
+ */
+async function handleBuildBundle(
+  params: {
+    sid: string;
+    token: string;
+    recipients: Array<{ peerName: string; peerDeviceId: number; deviceBundle?: DeviceType }>;
+    plaintext: ArrayBuffer;
+  },
+  requestId: string
+): Promise<{ bundle: ArrayBuffer }> {
+  const { sid, token, recipients, plaintext } = params;
+  const { messagingKEK, userId } = await requireCapability(sid, token);
+
+  const envelopes: Envelope[] = [];
+  for (const recipient of recipients) {
+    const address = new SignalProtocolAddress(recipient.peerName, recipient.peerDeviceId);
+    const peerAddress = address.toString();
+    const envelope = await withSessionLock(userId, peerAddress, async () => {
+      const store = createSignalProtocolStore(userId, messagingKEK);
+      const existing = await store.loadSession(peerAddress);
+      if (!existing) {
+        if (!recipient.deviceBundle) {
+          throw new Error(`No existing session with ${peerAddress}; deviceBundle is required`);
+        }
+        await new SessionBuilder(store, address).processPreKey(recipient.deviceBundle);
+      }
+      return encryptEnvelope(new SessionCipher(store, address), plaintext);
+    });
+    envelopes.push(envelope);
+  }
+
+  const bundle = serializeBundle(envelopes);
+
+  await logOperation({
+    op: 'messaging.bundle.build',
+    kid: `messaging:${userId}`,
+    requestId,
+    userId,
+    details: { recipients: recipients.length },
+  });
+
+  return { bundle: u8ToArrayBuffer(bundle) };
+}
+
+/**
+ * Open a fan-out bundle: trial-decrypt each envelope against each candidate
+ * sender-device session, returning the first plaintext that authenticates (or
+ * null if none is addressed to this device). A failed trial mutates no persisted
+ * state (fork MAC isolation). Each attempt runs under the per-peer session lock.
+ */
+async function handleOpenBundle(
+  params: {
+    sid: string;
+    token: string;
+    senders: Array<{ peerName: string; peerDeviceId: number }>;
+    bundle: ArrayBuffer;
+  },
+  requestId: string
+): Promise<{ plaintext: ArrayBuffer | null }> {
+  const { sid, token, senders, bundle } = params;
+  const { messagingKEK, userId } = await requireCapability(sid, token);
+
+  const envelopes = parseBundle(bundle);
+  for (const envelope of envelopes) {
+    for (const sender of senders) {
+      const address = new SignalProtocolAddress(sender.peerName, sender.peerDeviceId);
+      const peerAddress = address.toString();
+      const plaintext = await withSessionLock(userId, peerAddress, async () => {
+        const store = createSignalProtocolStore(userId, messagingKEK);
+        return trialDecryptEnvelope(new SessionCipher(store, address), envelope);
+      });
+      if (plaintext !== null) {
+        await logOperation({
+          op: 'messaging.bundle.open',
+          kid: `messaging:${userId}`,
+          requestId,
+          userId,
+          details: { sender: peerAddress, envelopes: envelopes.length },
+        });
+        return { plaintext: u8ToArrayBuffer(plaintext) };
+      }
+    }
+  }
+
+  await logOperation({
+    op: 'messaging.bundle.open',
+    kid: `messaging:${userId}`,
+    requestId,
+    userId,
+    details: { matched: false, envelopes: envelopes.length },
+  });
+
+  return { plaintext: null };
 }
 
 // ============================================================================

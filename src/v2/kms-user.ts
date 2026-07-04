@@ -2304,4 +2304,36 @@ export class KMSUser {
   }): Promise<{ payload: ArrayBuffer }> {
     return this.sendRequest<{ payload: ArrayBuffer }>('openSelfMessage', args);
   }
+
+  /**
+   * Build one opaque fan-out bundle: encrypt `plaintext` once per recipient
+   * device (pass `deviceBundle` on the first message to a device to establish the
+   * session), shuffle, and pack. Compose the recipient set yourself — the peer's
+   * devices plus the account's own other devices.
+   *
+   * @category Fan-out Bundle Operations
+   */
+  async buildBundle(args: {
+    sid: string;
+    token: string;
+    recipients: Array<{ peerName: string; peerDeviceId?: number; deviceBundle?: MessagingDeviceBundle }>;
+    plaintext: ArrayBuffer;
+  }): Promise<{ bundle: ArrayBuffer }> {
+    return this.sendRequest<{ bundle: ArrayBuffer }>('buildBundle', args);
+  }
+
+  /**
+   * Open a fan-out bundle by trial decryption against the given candidate sender
+   * devices. Returns the plaintext addressed to this device, or `null` if none.
+   *
+   * @category Fan-out Bundle Operations
+   */
+  async openBundle(args: {
+    sid: string;
+    token: string;
+    senders: Array<{ peerName: string; peerDeviceId?: number }>;
+    bundle: ArrayBuffer;
+  }): Promise<{ plaintext: ArrayBuffer | null }> {
+    return this.sendRequest<{ plaintext: ArrayBuffer | null }>('openBundle', args);
+  }
 }

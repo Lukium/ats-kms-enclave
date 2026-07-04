@@ -13,8 +13,8 @@ import {
   validateGetPrekeyCount,
   validateOpenMessaging,
   validateCloseMessaging,
-  validateEncryptMessage,
-  validateDecryptMessage,
+  validateBuildBundle,
+  validateOpenBundle,
   validateRotatePrekeys,
   type MessagingDeviceBundle,
 } from '@/v2/rpc-validation';
@@ -83,70 +83,84 @@ describe('validateOpenMessaging / validateCloseMessaging', () => {
   });
 });
 
-describe('validateEncryptMessage', () => {
+describe('validateBuildBundle', () => {
   const base = {
     sid: 's',
     token: 't',
-    peerName: 'bob',
+    recipients: [{ peerName: 'bob' }],
     plaintext: new TextEncoder().encode('hi').buffer,
   };
 
   it('defaults peerDeviceId to 1 and passes through a valid device bundle', () => {
-    const r = validateEncryptMessage({ ...base, deviceBundle: validBundle() });
-    expect(r.peerDeviceId).toBe(1);
-    expect(r.deviceBundle?.registrationId).toBe(42);
+    const r = validateBuildBundle({
+      ...base,
+      recipients: [{ peerName: 'bob', deviceBundle: validBundle() }],
+    });
+    expect(r.recipients[0]!.peerDeviceId).toBe(1);
+    expect(r.recipients[0]!.deviceBundle?.registrationId).toBe(42);
   });
 
-  it('allows omitting the device bundle (existing session)', () => {
-    const r = validateEncryptMessage(base);
-    expect(r.deviceBundle).toBeUndefined();
+  it('allows a recipient without a device bundle (existing session)', () => {
+    const r = validateBuildBundle(base);
+    expect(r.recipients[0]!.deviceBundle).toBeUndefined();
   });
 
   it('rejects empty or oversized plaintext', () => {
-    expect(() => validateEncryptMessage({ ...base, plaintext: new ArrayBuffer(0) })).toThrow();
-    expect(() => validateEncryptMessage({ ...base, plaintext: new ArrayBuffer(64 * 1024 + 1) })).toThrow();
+    expect(() => validateBuildBundle({ ...base, plaintext: new ArrayBuffer(0) })).toThrow();
+    expect(() => validateBuildBundle({ ...base, plaintext: new ArrayBuffer(64 * 1024 + 1) })).toThrow();
+  });
+
+  it('rejects an empty or oversized recipients array', () => {
+    expect(() => validateBuildBundle({ ...base, recipients: [] })).toThrow();
+    const many = Array.from({ length: 65 }, () => ({ peerName: 'b' }));
+    expect(() => validateBuildBundle({ ...base, recipients: many })).toThrow();
   });
 
   it('rejects an oversized peer name', () => {
-    expect(() => validateEncryptMessage({ ...base, peerName: 'x'.repeat(257) })).toThrow();
+    expect(() => validateBuildBundle({ ...base, recipients: [{ peerName: 'x'.repeat(257) }] })).toThrow();
   });
 
   it('rejects a device bundle with wrong-length keys', () => {
     const bad = validBundle();
     bad.identityKey = new ArrayBuffer(32); // must be 33
-    expect(() => validateEncryptMessage({ ...base, deviceBundle: bad })).toThrow();
+    expect(() => validateBuildBundle({ ...base, recipients: [{ peerName: 'bob', deviceBundle: bad }] })).toThrow();
   });
 
   it('rejects a device bundle with a bad signature length', () => {
     const bad = validBundle();
     bad.signedPreKey.signature = new ArrayBuffer(63);
-    expect(() => validateEncryptMessage({ ...base, deviceBundle: bad })).toThrow();
+    expect(() => validateBuildBundle({ ...base, recipients: [{ peerName: 'bob', deviceBundle: bad }] })).toThrow();
   });
 
   it('accepts a device bundle without a one-time prekey', () => {
     const b = validBundle();
     delete b.preKey;
-    const r = validateEncryptMessage({ ...base, deviceBundle: b });
-    expect(r.deviceBundle?.preKey).toBeUndefined();
+    const r = validateBuildBundle({ ...base, recipients: [{ peerName: 'bob', deviceBundle: b }] });
+    expect(r.recipients[0]!.deviceBundle?.preKey).toBeUndefined();
   });
 });
 
-describe('validateDecryptMessage', () => {
-  const base = { sid: 's', token: 't', peerName: 'bob', messageType: 3, body: 'ciphertext' };
+describe('validateOpenBundle', () => {
+  const base = {
+    sid: 's',
+    token: 't',
+    senders: [{ peerName: 'bob' }],
+    bundle: new Uint8Array([1, 0, 0]).buffer,
+  };
 
-  it('accepts message types 1 and 3', () => {
-    expect(validateDecryptMessage({ ...base, messageType: 1 }).messageType).toBe(1);
-    expect(validateDecryptMessage({ ...base, messageType: 3 }).messageType).toBe(3);
+  it('defaults peerDeviceId to 1', () => {
+    expect(validateOpenBundle(base).senders[0]!.peerDeviceId).toBe(1);
   });
 
-  it('rejects other message types', () => {
-    expect(() => validateDecryptMessage({ ...base, messageType: 2 })).toThrow();
-    expect(() => validateDecryptMessage({ ...base, messageType: 0 })).toThrow();
+  it('rejects an empty or oversized bundle', () => {
+    expect(() => validateOpenBundle({ ...base, bundle: new ArrayBuffer(0) })).toThrow();
+    expect(() => validateOpenBundle({ ...base, bundle: new ArrayBuffer(4 * 1024 * 1024 + 1) })).toThrow();
   });
 
-  it('rejects empty or oversized body', () => {
-    expect(() => validateDecryptMessage({ ...base, body: '' })).toThrow();
-    expect(() => validateDecryptMessage({ ...base, body: 'x'.repeat(256 * 1024 + 1) })).toThrow();
+  it('rejects an empty or oversized senders array', () => {
+    expect(() => validateOpenBundle({ ...base, senders: [] })).toThrow();
+    const many = Array.from({ length: 65 }, () => ({ peerName: 'b' }));
+    expect(() => validateOpenBundle({ ...base, senders: many })).toThrow();
   });
 });
 

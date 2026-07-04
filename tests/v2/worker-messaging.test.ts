@@ -30,6 +30,7 @@ import {
   getPublicBundle,
   type PublicPreKeyBundle,
 } from '@/v2/signal';
+import { buildFanoutBundle, openFanoutBundle } from '@/v2/envelope';
 
 const ALICE_PASS = 'correct-horse-battery-staple';
 const aliceCreds = { method: 'passphrase' as const, userId: 'alice', passphrase: ALICE_PASS };
@@ -164,63 +165,58 @@ describe('openMessaging', () => {
   });
 });
 
-describe('encrypt/decrypt round trip (exit criteria)', () => {
-  it('encrypts over RPC, a library peer decrypts, and a reply decrypts back over RPC', async () => {
+describe('buildBundle/openBundle round trip (exit criteria)', () => {
+  it('builds a bundle over RPC a library peer opens, and opens the reply over RPC', async () => {
     await setupAlice();
     const bob = await provisionBobViaLibrary();
     const open = await openAlice();
 
-    // Alice -> Bob: first message is a type-3 prekey message, establishing the session.
-    const encRes = await handleMessage(
-      createRequest('encryptMessage', {
+    // Alice -> Bob: buildBundle establishes the session and produces one opaque
+    // bundle (a single type-3 envelope for bob).
+    const buildRes = await handleMessage(
+      createRequest('buildBundle', {
         sid: open.sid,
         token: open.token,
-        peerName: 'bob',
-        peerDeviceId: 1,
+        recipients: [{ peerName: 'bob', peerDeviceId: 1, deviceBundle: bundleToDevice(bob.bundle) }],
         plaintext: utf8.encode('hello bob').buffer,
-        deviceBundle: bundleToDevice(bob.bundle),
       })
     );
-    expect(encRes.error).toBeUndefined();
-    const msg1 = getResult<{ type: 1 | 3; body: string }>(encRes);
-    expect(msg1.type).toBe(3);
+    expect(buildRes.error).toBeUndefined();
+    const { bundle } = getResult<{ bundle: ArrayBuffer }>(buildRes);
 
-    // Bob (library, separate enclave) decrypts.
+    // Bob (library, separate enclave) opens his envelope.
     const bobStore = createSignalProtocolStore('bob', bob.kek);
     const aliceAddr = new SignalProtocolAddress('alice', 1);
     const bobCipher = new SessionCipher(bobStore, aliceAddr);
-    const pt1 = await bobCipher.decryptPreKeyWhisperMessage(msg1.body, 'binary');
-    expect(fromUtf8.decode(new Uint8Array(pt1))).toBe('hello bob');
+    const pt1 = await openFanoutBundle([bobCipher], bundle);
+    expect(fromUtf8.decode(new Uint8Array(pt1!))).toBe('hello bob');
 
     // Bob's one-time prekey was consumed (replay protection).
     expect(await bobStore.loadPreKey(bob.bundle.oneTimePreKeys[0]!.keyId)).toBeUndefined();
 
-    // Bob -> Alice: reply is a type-1 message; Alice decrypts over RPC.
-    const msg2 = await bobCipher.encrypt(utf8.encode('hi alice').buffer);
-    expect(msg2.type).toBe(1);
-    const decRes = await handleMessage(
-      createRequest('decryptMessage', {
+    // Bob -> Alice: reply bundle; Alice opens it over RPC via trial decryption.
+    const replyBundle = await buildFanoutBundle([bobCipher], utf8.encode('hi alice'));
+    const openRes = await handleMessage(
+      createRequest('openBundle', {
         sid: open.sid,
         token: open.token,
-        peerName: 'bob',
-        peerDeviceId: 1,
-        messageType: 1,
-        body: msg2.body as string,
+        senders: [{ peerName: 'bob', peerDeviceId: 1 }],
+        bundle: replyBundle.buffer.slice(0),
       })
     );
-    expect(decRes.error).toBeUndefined();
-    const { plaintext } = getResult<{ plaintext: ArrayBuffer }>(decRes);
-    expect(fromUtf8.decode(new Uint8Array(plaintext))).toBe('hi alice');
+    expect(openRes.error).toBeUndefined();
+    const { plaintext } = getResult<{ plaintext: ArrayBuffer | null }>(openRes);
+    expect(fromUtf8.decode(new Uint8Array(plaintext!))).toBe('hi alice');
   });
 
-  it('refuses to encrypt to an unknown peer without a device bundle', async () => {
+  it('refuses to build to an unknown peer without a device bundle', async () => {
     await setupAlice();
     const open = await openAlice();
     const res = await handleMessage(
-      createRequest('encryptMessage', {
+      createRequest('buildBundle', {
         sid: open.sid,
         token: open.token,
-        peerName: 'stranger',
+        recipients: [{ peerName: 'stranger' }],
         plaintext: utf8.encode('hi').buffer,
       })
     );
@@ -231,10 +227,10 @@ describe('encrypt/decrypt round trip (exit criteria)', () => {
 describe('capability enforcement', () => {
   async function encryptAttempt(sid: string, token: string): Promise<RPCResponse> {
     return handleMessage(
-      createRequest('encryptMessage', {
+      createRequest('buildBundle', {
         sid,
         token,
-        peerName: 'bob',
+        recipients: [{ peerName: 'bob' }],
         plaintext: utf8.encode('hi').buffer,
       })
     );

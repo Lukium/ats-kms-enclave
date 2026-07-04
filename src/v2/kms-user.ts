@@ -2152,41 +2152,6 @@ export class KMSUser {
   }
 
   /**
-   * Encrypt a message to a peer within an open session. Pass `deviceBundle` (the
-   * peer's bundle from the directory) on the first message to a peer to establish
-   * the session; omit it once a session exists.
-   *
-   * @category Messaging Operations
-   */
-  async encryptMessage(args: {
-    sid: string;
-    token: string;
-    peerName: string;
-    peerDeviceId?: number;
-    plaintext: ArrayBuffer;
-    deviceBundle?: MessagingDeviceBundle;
-  }): Promise<{ type: 1 | 3; body: string }> {
-    return this.sendRequest<{ type: 1 | 3; body: string }>('encryptMessage', args);
-  }
-
-  /**
-   * Decrypt a message from a peer within an open session. `messageType` 3 is a
-   * prekey message (establishes the inbound session); 1 advances the ratchet.
-   *
-   * @category Messaging Operations
-   */
-  async decryptMessage(args: {
-    sid: string;
-    token: string;
-    peerName: string;
-    peerDeviceId?: number;
-    messageType: 1 | 3;
-    body: string;
-  }): Promise<{ plaintext: ArrayBuffer }> {
-    return this.sendRequest<{ plaintext: ArrayBuffer }>('decryptMessage', args);
-  }
-
-  /**
    * Rotate the signed prekey and top up one-time prekeys within an open session,
    * returning the refreshed bundle to re-upload.
    *

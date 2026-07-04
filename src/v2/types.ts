@@ -547,8 +547,6 @@ export type RPCMethod =
   | 'getPrekeyCount'
   | 'openMessaging'
   | 'closeMessaging'
-  | 'encryptMessage'
-  | 'decryptMessage'
   | 'rotatePrekeys'
   // === Account root (secure-messaging §18) ===
   | 'setupAccountRoot'

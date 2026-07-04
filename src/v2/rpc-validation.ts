@@ -683,7 +683,6 @@ export function validateGetPushSubscription(_params: unknown): Record<string, ne
 
 /** Upper bounds for messaging inputs (reject oversized payloads at the boundary). */
 const MAX_PLAINTEXT_BYTES = 64 * 1024; // 64 KiB cleartext per message
-const MAX_CIPHERTEXT_CHARS = 256 * 1024; // type-3 prekey messages carry the bundle
 const MAX_PEER_NAME_CHARS = 256;
 const MAX_ONETIME_PREKEY_COUNT = 100;
 /** Signal key ids live in the 24-bit medium-id space (1..0xFFFFFF). */
@@ -830,78 +829,6 @@ export function validateCloseMessaging(params: unknown): { sid: string; token: s
   return {
     sid: validateString('closeMessaging', 'sid', p.sid),
     token: validateString('closeMessaging', 'token', p.token),
-  };
-}
-
-export function validateEncryptMessage(params: unknown): {
-  sid: string;
-  token: string;
-  peerName: string;
-  peerDeviceId: number;
-  plaintext: ArrayBuffer;
-  deviceBundle?: MessagingDeviceBundle;
-} {
-  const p = validateParamsObject('encryptMessage', params);
-  const plaintext = validateBuffer('encryptMessage', 'plaintext', p.plaintext);
-  if (plaintext.byteLength === 0 || plaintext.byteLength > MAX_PLAINTEXT_BYTES) {
-    throw new RPCValidationError(
-      'encryptMessage',
-      'plaintext',
-      `non-empty ArrayBuffer ≤ ${MAX_PLAINTEXT_BYTES} bytes`,
-      p.plaintext
-    );
-  }
-  const result: {
-    sid: string;
-    token: string;
-    peerName: string;
-    peerDeviceId: number;
-    plaintext: ArrayBuffer;
-    deviceBundle?: MessagingDeviceBundle;
-  } = {
-    sid: validateString('encryptMessage', 'sid', p.sid),
-    token: validateString('encryptMessage', 'token', p.token),
-    peerName: validateBoundedString('encryptMessage', 'peerName', p.peerName, MAX_PEER_NAME_CHARS),
-    peerDeviceId:
-      p.peerDeviceId === undefined ? 1 : validateNumber('encryptMessage', 'peerDeviceId', p.peerDeviceId),
-    plaintext,
-  };
-  if (p.deviceBundle !== undefined) {
-    result.deviceBundle = validateDeviceBundle('encryptMessage', p.deviceBundle);
-  }
-  return result;
-}
-
-export function validateDecryptMessage(params: unknown): {
-  sid: string;
-  token: string;
-  peerName: string;
-  peerDeviceId: number;
-  messageType: 1 | 3;
-  body: string;
-} {
-  const p = validateParamsObject('decryptMessage', params);
-  const messageType = validateNumber('decryptMessage', 'messageType', p.messageType);
-  if (messageType !== 1 && messageType !== 3) {
-    throw new RPCValidationError('decryptMessage', 'messageType', '1 or 3', p.messageType);
-  }
-  const body = validateString('decryptMessage', 'body', p.body);
-  if (body.length === 0 || body.length > MAX_CIPHERTEXT_CHARS) {
-    throw new RPCValidationError(
-      'decryptMessage',
-      'body',
-      `non-empty string ≤ ${MAX_CIPHERTEXT_CHARS} chars`,
-      p.body
-    );
-  }
-  return {
-    sid: validateString('decryptMessage', 'sid', p.sid),
-    token: validateString('decryptMessage', 'token', p.token),
-    peerName: validateBoundedString('decryptMessage', 'peerName', p.peerName, MAX_PEER_NAME_CHARS),
-    peerDeviceId:
-      p.peerDeviceId === undefined ? 1 : validateNumber('decryptMessage', 'peerDeviceId', p.peerDeviceId),
-    messageType,
-    body,
   };
 }
 

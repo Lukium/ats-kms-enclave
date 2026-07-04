@@ -1257,14 +1257,6 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleCloseMessaging(validators.validateCloseMessaging(params), id);
         break;
 
-      case 'encryptMessage':
-        result = await handleEncryptMessage(validators.validateEncryptMessage(params), id);
-        break;
-
-      case 'decryptMessage':
-        result = await handleDecryptMessage(validators.validateDecryptMessage(params), id);
-        break;
-
       case 'rotatePrekeys':
         result = await handleRotatePrekeys(validators.validateRotatePrekeys(params), id);
         break;
@@ -3215,97 +3207,6 @@ async function handleCloseMessaging(
   });
 
   return { closed: true };
-}
-
-/**
- * Encrypt a message to a peer. Establishes the session from `deviceBundle` if
- * none exists yet (the first message is a type-3 prekey message). The
- * read-modify-write runs under the per-peer session lock so concurrent sends
- * cannot corrupt the ratchet.
- */
-async function handleEncryptMessage(
-  params: {
-    sid: string;
-    token: string;
-    peerName: string;
-    peerDeviceId: number;
-    plaintext: ArrayBuffer;
-    deviceBundle?: DeviceType;
-  },
-  requestId: string
-): Promise<{ type: 1 | 3; body: string }> {
-  const { sid, token, peerName, peerDeviceId, plaintext, deviceBundle } = params;
-  const { messagingKEK, userId } = await requireCapability(sid, token);
-
-  const address = new SignalProtocolAddress(peerName, peerDeviceId);
-  const peerAddress = address.toString();
-
-  const out = await withSessionLock(userId, peerAddress, async () => {
-    const store = createSignalProtocolStore(userId, messagingKEK);
-    const existing = await store.loadSession(peerAddress);
-    if (!existing) {
-      if (!deviceBundle) {
-        throw new Error('No existing session with peer; deviceBundle is required to start one');
-      }
-      const builder = new SessionBuilder(store, address);
-      await builder.processPreKey(deviceBundle);
-    }
-    const cipher = new SessionCipher(store, address);
-    const message = await cipher.encrypt(plaintext);
-    return { type: message.type as 1 | 3, body: message.body as string };
-  });
-
-  await logOperation({
-    op: 'messaging.encrypt',
-    kid: `messaging:${userId}`,
-    requestId,
-    userId,
-    details: { peer: peerAddress, messageType: out.type, establishedSession: out.type === 3 },
-  });
-
-  return out;
-}
-
-/**
- * Decrypt a message from a peer. A type-3 (prekey) message establishes the
- * inbound session and consumes a one-time prekey; type-1 advances an existing
- * ratchet. Runs under the per-peer session lock.
- */
-async function handleDecryptMessage(
-  params: {
-    sid: string;
-    token: string;
-    peerName: string;
-    peerDeviceId: number;
-    messageType: 1 | 3;
-    body: string;
-  },
-  requestId: string
-): Promise<{ plaintext: ArrayBuffer }> {
-  const { sid, token, peerName, peerDeviceId, messageType, body } = params;
-  const { messagingKEK, userId } = await requireCapability(sid, token);
-
-  const address = new SignalProtocolAddress(peerName, peerDeviceId);
-  const peerAddress = address.toString();
-
-  const plaintext = await withSessionLock(userId, peerAddress, async () => {
-    const store = createSignalProtocolStore(userId, messagingKEK);
-    const cipher = new SessionCipher(store, address);
-    if (messageType === 3) {
-      return cipher.decryptPreKeyWhisperMessage(body, 'binary');
-    }
-    return cipher.decryptWhisperMessage(body, 'binary');
-  });
-
-  await logOperation({
-    op: 'messaging.decrypt',
-    kid: `messaging:${userId}`,
-    requestId,
-    userId,
-    details: { peer: peerAddress, messageType },
-  });
-
-  return { plaintext };
 }
 
 /**

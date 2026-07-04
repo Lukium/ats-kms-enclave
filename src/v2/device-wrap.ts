@@ -29,6 +29,7 @@
 
 import { deriveDeterministicSalt } from './crypto-utils';
 import { ACCOUNT_ROOT_BYTES } from './account-root';
+import type { WrappedAccountRoot } from './types';
 
 // ============================================================================
 // Constants
@@ -54,23 +55,10 @@ const X25519_PKCS8_PREFIX = new Uint8Array([
   0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20,
 ]);
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/**
- * An `accountRoot` sealed to a single device's X25519 identity public key. All
- * fields are opaque bytes; the PWA base64-encodes them for the bootstrap blob
- * main-server carries (and cannot read).
- */
-export interface WrappedAccountRoot {
-  /** Sender's ephemeral X25519 public key, 32 bytes raw. */
-  ephemeralPubKey: ArrayBuffer;
-  /** AES-GCM IV, 12 bytes. */
-  iv: ArrayBuffer;
-  /** AES-GCM ciphertext of `accountRoot` (+16-byte tag). */
-  ciphertext: ArrayBuffer;
-}
+// `WrappedAccountRoot` now lives in ./types (a fork/storage-free module the PWA
+// vendors) so the vendored kms-user client can reference it without pulling in
+// this crypto module. Re-exported here for enclave-side consumers.
+export type { WrappedAccountRoot };
 
 // ============================================================================
 // X25519 helpers (WebCrypto, byte-compatible with the fork's curve backend)

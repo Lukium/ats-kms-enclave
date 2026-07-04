@@ -8,8 +8,12 @@
  * to typed handler functions.
  */
 
-import type { AuthCredentials, VAPIDPayload, StoredPushSubscription } from './types.js';
-import type { WrappedAccountRoot } from './device-wrap.js';
+import type {
+  AuthCredentials,
+  VAPIDPayload,
+  StoredPushSubscription,
+  WrappedAccountRoot,
+} from './types.js';
 
 /**
  * Custom error for RPC parameter validation failures.

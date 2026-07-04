@@ -30,9 +30,8 @@ import type {
   LeaseVerificationResult,
   StoredPushSubscription,
 } from './types.js';
-import type { PublicPreKeyBundle } from './types.js';
+import type { PublicPreKeyBundle, WrappedAccountRoot } from './types.js';
 import type { MessagingDeviceBundle } from './rpc-validation.js';
-import type { WrappedAccountRoot } from './device-wrap.js';
 import { formatError } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
 

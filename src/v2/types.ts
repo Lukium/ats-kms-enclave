@@ -367,6 +367,22 @@ export interface MessagingAccountRecord {
 }
 
 /**
+ * An `accountRoot` sealed to a single device's X25519 identity public key for
+ * server-blind auto-onboarding (secure-messaging §18.1). All fields are opaque
+ * bytes; the PWA base64-encodes them for the bootstrap blob main-server carries
+ * (and cannot read). Defined here (not device-wrap.ts) so the vendored client
+ * can reference the type without pulling in the crypto module.
+ */
+export interface WrappedAccountRoot {
+  /** Sender's ephemeral X25519 public key, 32 bytes raw. */
+  ephemeralPubKey: ArrayBuffer;
+  /** AES-GCM IV, 12 bytes. */
+  iv: ArrayBuffer;
+  /** AES-GCM ciphertext of `accountRoot` (+16-byte tag). */
+  ciphertext: ArrayBuffer;
+}
+
+/**
  * Public prekey bundle (public bytes only — no unlock required) returned by the
  * messaging RPCs (setupMessaging / getMessagingBundle / rotatePrekeys) for upload
  * to the directory server. Defined here rather than in signal.ts so the vendored

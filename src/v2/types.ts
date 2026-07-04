@@ -555,7 +555,11 @@ export type RPCMethod =
   | 'importAccountRootFromMnemonic'
   | 'importWrappedAccountRoot'
   | 'wrapAccountRootForDevice'
-  | 'hasAccountRoot';
+  | 'hasAccountRoot'
+  // === Self-channel (secure-messaging §18.2) ===
+  | 'getSelfScope'
+  | 'sealSelfMessage'
+  | 'openSelfMessage';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)

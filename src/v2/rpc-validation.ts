@@ -1007,3 +1007,75 @@ export function validateHasAccountRoot(params: unknown): { userId: string } {
   const p = validateParamsObject('hasAccountRoot', params);
   return { userId: validateString('hasAccountRoot', 'userId', p.userId) };
 }
+
+// === Self-channel Operations (secure-messaging §18.2) ===
+
+/** Max self-channel plaintext (announcements are tiny; snapshots are a contact list). */
+const MAX_SELF_PAYLOAD_BYTES = 256 * 1024;
+/** Self-channel ciphertext bound (payload + 12-byte IV + 16-byte GCM tag, padded). */
+const MAX_SELF_CIPHERTEXT_BYTES = MAX_SELF_PAYLOAD_BYTES + 64;
+/** Max self-channel context-label length. */
+const MAX_SELF_CONTEXT_CHARS = 64;
+
+function validateSelfContext(method: string, value: unknown): string {
+  if (value === undefined) {
+    return 'announcement';
+  }
+  return validateBoundedString(method, 'context', value, MAX_SELF_CONTEXT_CHARS);
+}
+
+export function validateGetSelfScope(params: unknown): { sid: string; token: string } {
+  const p = validateParamsObject('getSelfScope', params);
+  return {
+    sid: validateString('getSelfScope', 'sid', p.sid),
+    token: validateString('getSelfScope', 'token', p.token),
+  };
+}
+
+export function validateSealSelfMessage(params: unknown): {
+  sid: string;
+  token: string;
+  payload: ArrayBuffer;
+  context: string;
+} {
+  const p = validateParamsObject('sealSelfMessage', params);
+  const payload = validateBuffer('sealSelfMessage', 'payload', p.payload);
+  if (payload.byteLength === 0 || payload.byteLength > MAX_SELF_PAYLOAD_BYTES) {
+    throw new RPCValidationError(
+      'sealSelfMessage',
+      'payload',
+      `non-empty ArrayBuffer ≤ ${MAX_SELF_PAYLOAD_BYTES} bytes`,
+      p.payload
+    );
+  }
+  return {
+    sid: validateString('sealSelfMessage', 'sid', p.sid),
+    token: validateString('sealSelfMessage', 'token', p.token),
+    payload,
+    context: validateSelfContext('sealSelfMessage', p.context),
+  };
+}
+
+export function validateOpenSelfMessage(params: unknown): {
+  sid: string;
+  token: string;
+  ciphertext: ArrayBuffer;
+  context: string;
+} {
+  const p = validateParamsObject('openSelfMessage', params);
+  const ciphertext = validateBuffer('openSelfMessage', 'ciphertext', p.ciphertext);
+  if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_SELF_CIPHERTEXT_BYTES) {
+    throw new RPCValidationError(
+      'openSelfMessage',
+      'ciphertext',
+      `non-empty ArrayBuffer ≤ ${MAX_SELF_CIPHERTEXT_BYTES} bytes`,
+      p.ciphertext
+    );
+  }
+  return {
+    sid: validateString('openSelfMessage', 'sid', p.sid),
+    token: validateString('openSelfMessage', 'token', p.token),
+    ciphertext,
+    context: validateSelfContext('openSelfMessage', p.context),
+  };
+}

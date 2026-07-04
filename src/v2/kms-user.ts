@@ -2265,4 +2265,43 @@ export class KMSUser {
   async hasAccountRoot(userId: string): Promise<{ present: boolean }> {
     return this.sendRequest<{ present: boolean }>('hasAccountRoot', { userId });
   }
+
+  /**
+   * Get the account's self-channel address `selfScope` within an open session.
+   * The transport subscribes to `self:<selfScope>`.
+   *
+   * @category Self-channel Operations
+   */
+  async getSelfScope(sid: string, token: string): Promise<{ selfScope: string }> {
+    return this.sendRequest<{ selfScope: string }>('getSelfScope', { sid, token });
+  }
+
+  /**
+   * Encrypt a self-channel payload (announcement/snapshot) under the account's
+   * self-key. `context` domain-separates payload kinds (default `announcement`).
+   *
+   * @category Self-channel Operations
+   */
+  async sealSelfMessage(args: {
+    sid: string;
+    token: string;
+    payload: ArrayBuffer;
+    context?: string;
+  }): Promise<{ ciphertext: ArrayBuffer }> {
+    return this.sendRequest<{ ciphertext: ArrayBuffer }>('sealSelfMessage', args);
+  }
+
+  /**
+   * Decrypt a self-channel payload. `context` must match the seal-time value.
+   *
+   * @category Self-channel Operations
+   */
+  async openSelfMessage(args: {
+    sid: string;
+    token: string;
+    ciphertext: ArrayBuffer;
+    context?: string;
+  }): Promise<{ payload: ArrayBuffer }> {
+    return this.sendRequest<{ payload: ArrayBuffer }>('openSelfMessage', args);
+  }
 }

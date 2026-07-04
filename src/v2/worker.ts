@@ -100,6 +100,12 @@ import {
 } from './account-root';
 import { storeAccountRoot, loadAccountRoot, hasAccountRoot } from './account-store';
 import {
+  deriveSelfScope,
+  deriveSelfKey,
+  encryptSelfMessage,
+  decryptSelfMessage,
+} from './self-channel';
+import {
   wrapAccountRootToDevice,
   unwrapAccountRootFromDevice,
   type WrappedAccountRoot,
@@ -175,6 +181,14 @@ interface MessagingSession {
   absoluteExp: number;
   /** Sliding idle deadline (ms epoch); refreshed on each authorized call. */
   idleExp: number;
+  /**
+   * Self-channel content key, derived from the account root at openMessaging and
+   * cached memory-only for the session (so routine self-channel seal/open need no
+   * extra unlock). Undefined until this device has an account root.
+   */
+  selfKey?: CryptoKey;
+  /** Self-channel address (opaque, non-secret), derived alongside {@link selfKey}. */
+  selfScope?: string;
 }
 
 /**
@@ -212,10 +226,7 @@ async function mintCapabilityToken(
  * and returns the session's messaging-scoped key + user. Throws on any failure
  * (an expired session is evicted first).
  */
-async function requireCapability(
-  sid: string,
-  token: string
-): Promise<{ messagingKEK: CryptoKey; userId: string }> {
+async function requireCapability(sid: string, token: string): Promise<MessagingSession> {
   const session = messagingSessions.get(sid);
   if (!session) {
     throw new Error('Messaging session not found (closed, expired, or never opened)');
@@ -261,7 +272,7 @@ async function requireCapability(
 
   // Slide the idle window (absolute cap is untouched).
   session.idleExp = now + MESSAGING_IDLE_TIMEOUT_MS;
-  return { messagingKEK: session.messagingKEK, userId: session.userId };
+  return session;
 }
 
 // ============================================================================
@@ -1279,6 +1290,19 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'hasAccountRoot':
         result = await handleHasAccountRoot(validators.validateHasAccountRoot(params));
+        break;
+
+      // === Self-channel Operations (secure-messaging §18.2) ===
+      case 'getSelfScope':
+        result = await handleGetSelfScope(validators.validateGetSelfScope(params));
+        break;
+
+      case 'sealSelfMessage':
+        result = await handleSealSelfMessage(validators.validateSealSelfMessage(params), id);
+        break;
+
+      case 'openSelfMessage':
+        result = await handleOpenSelfMessage(validators.validateOpenSelfMessage(params), id);
         break;
 
       default:
@@ -3104,6 +3128,19 @@ async function handleOpenMessaging(
     }
 
     const messagingKEK = await deriveMessagingKEK(ms);
+
+    // If this device has an account root, derive the self-channel key + address
+    // now (the master MKEK is in hand) and cache them memory-only for the
+    // session, so self-channel seal/open need no further unlock.
+    let selfKey: CryptoKey | undefined;
+    let selfScope: string | undefined;
+    const accountRoot = await loadAccountRoot(credentials.userId, mkek);
+    if (accountRoot) {
+      selfKey = await deriveSelfKey(accountRoot);
+      selfScope = await deriveSelfScope(accountRoot);
+      accountRoot.fill(0);
+    }
+
     const capKeyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
 
     const nowMs = Date.now();
@@ -3111,13 +3148,18 @@ async function handleOpenMessaging(
     const exp = iat + Math.floor(MESSAGING_ABSOLUTE_MAX_MS / 1000);
     const token = await mintCapabilityToken(sid, capKeyPair.privateKey, iat, exp);
 
-    messagingSessions.set(sid, {
+    const session: MessagingSession = {
       messagingKEK,
       userId: credentials.userId,
       capPubKey: capKeyPair.publicKey,
       absoluteExp: nowMs + MESSAGING_ABSOLUTE_MAX_MS,
       idleExp: nowMs + MESSAGING_IDLE_TIMEOUT_MS,
-    });
+    };
+    if (selfKey && selfScope) {
+      session.selfKey = selfKey;
+      session.selfScope = selfScope;
+    }
+    messagingSessions.set(sid, session);
 
     return { token, exp };
   });
@@ -3437,6 +3479,83 @@ async function handleWrapAccountRootForDevice(
  */
 async function handleHasAccountRoot(params: { userId: string }): Promise<{ present: boolean }> {
   return { present: await hasAccountRoot(params.userId) };
+}
+
+// ============================================================================
+// Self-channel Operations (secure-messaging §18.2) — messaging capability
+// ============================================================================
+
+/** Copy a Uint8Array into a fresh, standalone ArrayBuffer (for RPC responses). */
+function u8ToArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  const ab = new ArrayBuffer(u8.byteLength);
+  new Uint8Array(ab).set(u8);
+  return ab;
+}
+
+/** Small helper: the self-channel key/scope cached on the session, or throw. */
+function requireSelfChannel(session: MessagingSession): { selfKey: CryptoKey; selfScope: string } {
+  if (!session.selfKey || !session.selfScope) {
+    throw new Error('No account root on this device; set up or import one first');
+  }
+  return { selfKey: session.selfKey, selfScope: session.selfScope };
+}
+
+/**
+ * Return the account's self-channel address `selfScope` (opaque, non-secret).
+ * The transport forms the scope key `self:<selfScope>`.
+ */
+async function handleGetSelfScope(params: {
+  sid: string;
+  token: string;
+}): Promise<{ selfScope: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  return { selfScope: requireSelfChannel(session).selfScope };
+}
+
+/**
+ * Encrypt a self-channel payload (a contact-add announcement or a snapshot) under
+ * the account's symmetric self-key. `context` domain-separates payload kinds.
+ */
+async function handleSealSelfMessage(
+  params: { sid: string; token: string; payload: ArrayBuffer; context: string },
+  requestId: string
+): Promise<{ ciphertext: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const { selfKey } = requireSelfChannel(session);
+  const out = await encryptSelfMessage(selfKey, params.payload, params.context);
+
+  await logOperation({
+    op: 'messaging.self.seal',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { context: params.context, bytes: params.payload.byteLength },
+  });
+
+  return { ciphertext: u8ToArrayBuffer(out) };
+}
+
+/**
+ * Decrypt a self-channel payload produced by {@link handleSealSelfMessage}.
+ * `context` must match the value used at seal time.
+ */
+async function handleOpenSelfMessage(
+  params: { sid: string; token: string; ciphertext: ArrayBuffer; context: string },
+  requestId: string
+): Promise<{ payload: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const { selfKey } = requireSelfChannel(session);
+  const out = await decryptSelfMessage(selfKey, params.ciphertext, params.context);
+
+  await logOperation({
+    op: 'messaging.self.open',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { context: params.context },
+  });
+
+  return { payload: u8ToArrayBuffer(out) };
 }
 
 // ============================================================================

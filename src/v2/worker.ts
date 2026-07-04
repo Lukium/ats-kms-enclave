@@ -94,6 +94,17 @@ import {
   type PublicPreKeyBundle,
 } from './signal';
 import {
+  generateAccountRoot,
+  accountRootToMnemonic,
+  mnemonicToAccountRoot,
+} from './account-root';
+import { storeAccountRoot, loadAccountRoot, hasAccountRoot } from './account-store';
+import {
+  wrapAccountRootToDevice,
+  unwrapAccountRootFromDevice,
+  type WrappedAccountRoot,
+} from './device-wrap';
+import {
   SessionBuilder,
   SessionCipher,
   SignalProtocolAddress,
@@ -1238,6 +1249,36 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'rotatePrekeys':
         result = await handleRotatePrekeys(validators.validateRotatePrekeys(params), id);
+        break;
+
+      // === Account Root Operations (secure-messaging §18) ===
+      case 'setupAccountRoot':
+        result = await handleSetupAccountRoot(validators.validateSetupAccountRoot(params), id);
+        break;
+
+      case 'importAccountRootFromMnemonic':
+        result = await handleImportAccountRootFromMnemonic(
+          validators.validateImportAccountRootFromMnemonic(params),
+          id
+        );
+        break;
+
+      case 'importWrappedAccountRoot':
+        result = await handleImportWrappedAccountRoot(
+          validators.validateImportWrappedAccountRoot(params),
+          id
+        );
+        break;
+
+      case 'wrapAccountRootForDevice':
+        result = await handleWrapAccountRootForDevice(
+          validators.validateWrapAccountRootForDevice(params),
+          id
+        );
+        break;
+
+      case 'hasAccountRoot':
+        result = await handleHasAccountRoot(validators.validateHasAccountRoot(params));
         break;
 
       default:
@@ -3239,6 +3280,163 @@ async function handleRotatePrekeys(
   });
 
   return { bundle };
+}
+
+// ============================================================================
+// Account Root Operations (secure-messaging §18) — full unlock required
+// ============================================================================
+
+/**
+ * Generate a fresh account root on this (first) device, persist it wrapped under
+ * the master MKEK, and return the 12-word recovery phrase for one-time display.
+ * Guarded: fails if an account root already exists, so a regenerate can't orphan
+ * the account's self-channel state.
+ */
+async function handleSetupAccountRoot(
+  params: { credentials: AuthCredentials },
+  requestId: string
+): Promise<{ mnemonic: string }> {
+  const { credentials } = params;
+
+  const result = await withUnlock(credentials, async (mkek) => {
+    await ensureAuditKey(mkek);
+    if (await hasAccountRoot(credentials.userId)) {
+      throw new Error('Account root already exists for this user');
+    }
+    const accountRoot = generateAccountRoot();
+    const mnemonic = await accountRootToMnemonic(accountRoot);
+    await storeAccountRoot(credentials.userId, accountRoot, mkek);
+    accountRoot.fill(0);
+    return { mnemonic };
+  });
+
+  await logOperation({
+    op: 'messaging.accountRoot.setup',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+  });
+
+  return result.result;
+}
+
+/**
+ * Restore an account root from its 12-word recovery phrase and persist it
+ * (overwrites any existing record — recovery is deliberate).
+ */
+async function handleImportAccountRootFromMnemonic(
+  params: { credentials: AuthCredentials; mnemonic: string },
+  requestId: string
+): Promise<{ ok: true }> {
+  const { credentials, mnemonic } = params;
+
+  const result = await withUnlock(credentials, async (mkek) => {
+    await ensureAuditKey(mkek);
+    const accountRoot = await mnemonicToAccountRoot(mnemonic);
+    await storeAccountRoot(credentials.userId, accountRoot, mkek);
+    accountRoot.fill(0);
+  });
+
+  await logOperation({
+    op: 'messaging.accountRoot.importPhrase',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Auto-onboard: unseal an account root that an existing device wrapped to THIS
+ * device's X25519 identity public key, then persist it. Requires this device's
+ * Signal identity to exist (its private key does the unseal).
+ */
+async function handleImportWrappedAccountRoot(
+  params: { credentials: AuthCredentials; wrapped: WrappedAccountRoot },
+  requestId: string
+): Promise<{ ok: true }> {
+  const { credentials, wrapped } = params;
+
+  const result = await withUnlock(credentials, async (mkek, ms) => {
+    await ensureAuditKey(mkek);
+    const messagingKEK = await deriveMessagingKEK(ms);
+    const store = createSignalProtocolStore(credentials.userId, messagingKEK);
+    const identity = await store.getIdentityKeyPair();
+    if (!identity) {
+      throw new Error('Messaging not set up for this user; call setupMessaging first');
+    }
+    const accountRoot = await unwrapAccountRootFromDevice(
+      wrapped,
+      new Uint8Array(identity.privKey)
+    );
+    await storeAccountRoot(credentials.userId, accountRoot, mkek);
+    accountRoot.fill(0);
+  });
+
+  await logOperation({
+    op: 'messaging.accountRoot.importWrapped',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Seal this device's account root to another device's X25519 identity public
+ * key (from the self-keyserver) so it can be carried to that device via
+ * main-server, which cannot read it.
+ */
+async function handleWrapAccountRootForDevice(
+  params: { credentials: AuthCredentials; recipientIdentityPubKey: ArrayBuffer },
+  requestId: string
+): Promise<{ wrapped: WrappedAccountRoot }> {
+  const { credentials, recipientIdentityPubKey } = params;
+
+  const result = await withUnlock(credentials, async (mkek) => {
+    await ensureAuditKey(mkek);
+    const accountRoot = await loadAccountRoot(credentials.userId, mkek);
+    if (!accountRoot) {
+      throw new Error('No account root on this device');
+    }
+    const wrapped = await wrapAccountRootToDevice(
+      accountRoot,
+      new Uint8Array(recipientIdentityPubKey)
+    );
+    accountRoot.fill(0);
+    return { wrapped };
+  });
+
+  await logOperation({
+    op: 'messaging.accountRoot.wrapForDevice',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+  });
+
+  return result.result;
+}
+
+/**
+ * Whether this device already holds an account root. Presence check only — no
+ * unlock, reads no secret bytes.
+ */
+async function handleHasAccountRoot(params: { userId: string }): Promise<{ present: boolean }> {
+  return { present: await hasAccountRoot(params.userId) };
 }
 
 // ============================================================================

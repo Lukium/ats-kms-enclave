@@ -32,6 +32,7 @@ import type {
 } from './types.js';
 import type { PublicPreKeyBundle } from './types.js';
 import type { MessagingDeviceBundle } from './rpc-validation.js';
+import type { WrappedAccountRoot } from './device-wrap.js';
 import { formatError } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
 
@@ -2199,5 +2200,69 @@ export class KMSUser {
     count: number;
   }): Promise<{ bundle: PublicPreKeyBundle }> {
     return this.sendRequest<{ bundle: PublicPreKeyBundle }>('rotatePrekeys', args);
+  }
+
+  /**
+   * Generate this account's root on the first device and return the 12-word
+   * recovery phrase to display once. Fails if a root already exists.
+   *
+   * @category Account Root Operations
+   */
+  async setupAccountRoot(credentials: AuthCredentials): Promise<{ mnemonic: string }> {
+    return this.sendRequest<{ mnemonic: string }>('setupAccountRoot', { credentials });
+  }
+
+  /**
+   * Restore the account root from its 12-word recovery phrase (overwrites any
+   * existing record — deliberate recovery).
+   *
+   * @category Account Root Operations
+   */
+  async importAccountRootFromMnemonic(
+    credentials: AuthCredentials,
+    mnemonic: string
+  ): Promise<{ ok: true }> {
+    return this.sendRequest<{ ok: true }>('importAccountRootFromMnemonic', {
+      credentials,
+      mnemonic,
+    });
+  }
+
+  /**
+   * Auto-onboard: unseal an account root another device wrapped to THIS device's
+   * identity key, and persist it. Requires this device's messaging identity.
+   *
+   * @category Account Root Operations
+   */
+  async importWrappedAccountRoot(
+    credentials: AuthCredentials,
+    wrapped: WrappedAccountRoot
+  ): Promise<{ ok: true }> {
+    return this.sendRequest<{ ok: true }>('importWrappedAccountRoot', { credentials, wrapped });
+  }
+
+  /**
+   * Seal this device's account root to another device's identity public key (from
+   * the self-keyserver) so it can be carried to that device via main-server.
+   *
+   * @category Account Root Operations
+   */
+  async wrapAccountRootForDevice(
+    credentials: AuthCredentials,
+    recipientIdentityPubKey: ArrayBuffer
+  ): Promise<{ wrapped: WrappedAccountRoot }> {
+    return this.sendRequest<{ wrapped: WrappedAccountRoot }>('wrapAccountRootForDevice', {
+      credentials,
+      recipientIdentityPubKey,
+    });
+  }
+
+  /**
+   * Whether this device already holds an account root (no authentication).
+   *
+   * @category Account Root Operations
+   */
+  async hasAccountRoot(userId: string): Promise<{ present: boolean }> {
+    return this.sendRequest<{ present: boolean }>('hasAccountRoot', { userId });
   }
 }

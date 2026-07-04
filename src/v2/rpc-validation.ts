@@ -9,6 +9,7 @@
  */
 
 import type { AuthCredentials, VAPIDPayload, StoredPushSubscription } from './types.js';
+import type { WrappedAccountRoot } from './device-wrap.js';
 
 /**
  * Custom error for RPC parameter validation failures.
@@ -928,4 +929,81 @@ export function validateRotatePrekeys(params: unknown): {
     startKeyId: validateKeyId('rotatePrekeys', 'startKeyId', p.startKeyId),
     count,
   };
+}
+
+// === Account Root Operations (secure-messaging §18) ===
+
+/** Max recovery-phrase length in chars (24 words × ~9 chars + spaces, padded). */
+const MAX_MNEMONIC_CHARS = 512;
+
+export function validateSetupAccountRoot(params: unknown): { credentials: AuthCredentials } {
+  const p = validateParamsObject('setupAccountRoot', params);
+  return { credentials: validateAuthCredentials('setupAccountRoot', p.credentials) };
+}
+
+export function validateImportAccountRootFromMnemonic(params: unknown): {
+  credentials: AuthCredentials;
+  mnemonic: string;
+} {
+  const p = validateParamsObject('importAccountRootFromMnemonic', params);
+  return {
+    credentials: validateAuthCredentials('importAccountRootFromMnemonic', p.credentials),
+    mnemonic: validateBoundedString(
+      'importAccountRootFromMnemonic',
+      'mnemonic',
+      p.mnemonic,
+      MAX_MNEMONIC_CHARS
+    ),
+  };
+}
+
+export function validateImportWrappedAccountRoot(params: unknown): {
+  credentials: AuthCredentials;
+  wrapped: WrappedAccountRoot;
+} {
+  const p = validateParamsObject('importWrappedAccountRoot', params);
+  const w = validateParamsObject('importWrappedAccountRoot', p.wrapped);
+  return {
+    credentials: validateAuthCredentials('importWrappedAccountRoot', p.credentials),
+    wrapped: {
+      ephemeralPubKey: validateBufferOfLength(
+        'importWrappedAccountRoot',
+        'wrapped.ephemeralPubKey',
+        w.ephemeralPubKey,
+        32
+      ),
+      iv: validateBufferOfLength('importWrappedAccountRoot', 'wrapped.iv', w.iv, 12),
+      ciphertext: validateBufferOfLength(
+        'importWrappedAccountRoot',
+        'wrapped.ciphertext',
+        w.ciphertext,
+        32
+      ),
+    },
+  };
+}
+
+export function validateWrapAccountRootForDevice(params: unknown): {
+  credentials: AuthCredentials;
+  recipientIdentityPubKey: ArrayBuffer;
+} {
+  const p = validateParamsObject('wrapAccountRootForDevice', params);
+  const pub = validateBuffer('wrapAccountRootForDevice', 'recipientIdentityPubKey', p.recipientIdentityPubKey);
+  if (pub.byteLength !== 32 && pub.byteLength !== 33) {
+    throw new RPCValidationError(
+      'wrapAccountRootForDevice',
+      'recipientIdentityPubKey',
+      'ArrayBuffer of 32 or 33 bytes',
+      p.recipientIdentityPubKey
+    );
+  }
+  return {
+    credentials: validateAuthCredentials('wrapAccountRootForDevice', p.credentials),
+    recipientIdentityPubKey: pub,
+  };
+}
+
+export function validateHasAccountRoot(params: unknown): { userId: string } {
+  const p = validateParamsObject('hasAccountRoot', params);
+  return { userId: validateString('hasAccountRoot', 'userId', p.userId) };
 }

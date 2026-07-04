@@ -549,7 +549,13 @@ export type RPCMethod =
   | 'closeMessaging'
   | 'encryptMessage'
   | 'decryptMessage'
-  | 'rotatePrekeys';
+  | 'rotatePrekeys'
+  // === Account root (secure-messaging §18) ===
+  | 'setupAccountRoot'
+  | 'importAccountRootFromMnemonic'
+  | 'importWrappedAccountRoot'
+  | 'wrapAccountRootForDevice'
+  | 'hasAccountRoot';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)

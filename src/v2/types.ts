@@ -367,6 +367,22 @@ export interface MessagingAccountRecord {
 }
 
 /**
+ * A per-contact pairing secret at rest (secure-messaging §5). Wrapped under the
+ * device's messagingKEK (session tier, so pairIDs derive within an open session
+ * without re-unlock), bound by AAD to (userId, peerUserId). The plaintext secret
+ * is shared with the peer out-of-band and across the account's own devices (via
+ * the self-channel); each device stores its own copy wrapped under its own
+ * messagingKEK. Store key: `[userId, peerUserId]`.
+ */
+export interface MessagingContactRecord {
+  userId: string;
+  peerUserId: string;
+  /** messagingKEK-wrapped pairing secret. */
+  wrappedSecret: WrappedBlob;
+  createdAt: number;
+}
+
+/**
  * An `accountRoot` sealed to a single device's X25519 identity public key for
  * server-blind auto-onboarding (secure-messaging §18.1). All fields are opaque
  * bytes; the PWA base64-encodes them for the bootstrap blob main-server carries

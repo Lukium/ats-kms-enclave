@@ -56,6 +56,10 @@ import {
   getMessagingAccount,
   putMessagingAccount,
   deleteMessagingAccount,
+  getMessagingContact,
+  getMessagingContacts,
+  putMessagingContact,
+  deleteMessagingContact,
 } from '@/v2/storage';
 import type {
   AuditEntryV2,
@@ -948,8 +952,8 @@ describe('schema migration', () => {
     });
   }
 
-  it('DB_VERSION is 3', () => {
-    expect(DB_VERSION).toBe(3);
+  it('DB_VERSION is 4', () => {
+    expect(DB_VERSION).toBe(4);
   });
 
   it('a v1 database has no Signal stores', async () => {
@@ -1089,6 +1093,32 @@ describe('messaging-account store', () => {
 
     await deleteMessagingAccount('bob');
     expect(await getMessagingAccount('bob')).toBeNull();
+  });
+});
+
+describe('messaging-contact store', () => {
+  const blob = (): { ciphertext: ArrayBuffer; iv: ArrayBuffer; aad: ArrayBuffer } => ({
+    ciphertext: new ArrayBuffer(32),
+    iv: new ArrayBuffer(12),
+    aad: new ArrayBuffer(4),
+  });
+
+  it('put / get / delete round-trip keyed by (user, peer)', async () => {
+    expect(await getMessagingContact('alice', 'bob')).toBeNull();
+
+    await putMessagingContact({ userId: 'alice', peerUserId: 'bob', wrappedSecret: blob(), createdAt: 1 });
+    expect((await getMessagingContact('alice', 'bob'))?.peerUserId).toBe('bob');
+
+    await deleteMessagingContact('alice', 'bob');
+    expect(await getMessagingContact('alice', 'bob')).toBeNull();
+  });
+
+  it('lists all contacts for a user via the by-userId index', async () => {
+    await putMessagingContact({ userId: 'alice', peerUserId: 'bob', wrappedSecret: blob(), createdAt: 1 });
+    await putMessagingContact({ userId: 'alice', peerUserId: 'carol', wrappedSecret: blob(), createdAt: 2 });
+    await putMessagingContact({ userId: 'dave', peerUserId: 'bob', wrappedSecret: blob(), createdAt: 3 });
+    const peers = (await getMessagingContacts('alice')).map((r) => r.peerUserId).sort();
+    expect(peers).toEqual(['bob', 'carol']);
   });
 });
 

@@ -25,6 +25,7 @@ import type {
   SignalSessionRecord,
   SignalTrustedIdentityRecord,
   MessagingAccountRecord,
+  MessagingContactRecord,
 } from './types';
 import { buildKeyWrapAAD } from './crypto-utils';
 
@@ -34,11 +35,11 @@ import { buildKeyWrapAAD } from './crypto-utils';
 
 export const DB_NAME = 'kms-v2';
 /**
- * Current schema version. v2 added the Signal messaging stores; v3 adds the
- * per-device account-root store (secure-messaging §18). Every increment must add
- * a numbered entry to {@link MIGRATIONS}.
+ * Current schema version. v2 added the Signal messaging stores; v3 the per-device
+ * account-root store; v4 the per-contact pairing-secret store (secure-messaging
+ * §5). Every increment must add a numbered entry to {@link MIGRATIONS}.
  */
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 /** Names of the Signal messaging object stores (added in v2). */
 export type SignalStoreName =
@@ -123,6 +124,16 @@ const MIGRATIONS: Record<number, (db: IDBDatabase) => void> = {
       database.createObjectStore('messaging-account', { keyPath: 'userId' });
     }
   },
+  // v4: per-contact pairing-secret store (secure-messaging §5). Compound key
+  // scopes each secret to (userId, peerUserId); additive.
+  4: (database) => {
+    if (!database.objectStoreNames.contains('messaging-contact')) {
+      const store = database.createObjectStore('messaging-contact', {
+        keyPath: ['userId', 'peerUserId'],
+      });
+      store.createIndex('by-userId', 'userId', { unique: false });
+    }
+  },
 };
 
 /**
@@ -154,6 +165,7 @@ let db: IDBDatabase | null = null;
  * - v2: `signal-identity`, `signal-signed-prekey`, `signal-onetime-prekey`,
  *       `signal-session`, `signal-trusted-identity`
  * - v3: `messaging-account`
+ * - v4: `messaging-contact`
  *
  * This function is idempotent and safe to call multiple times. Upgrading an
  * existing database only runs the newer migrations and preserves prior data.
@@ -505,7 +517,7 @@ export async function unwrapBlob(
  * Generic indexed query over a store (e.g. all records for a given userId).
  */
 async function getAllByIndex<T>(
-  storeName: SignalStoreName,
+  storeName: SignalStoreName | 'messaging-contact',
   indexName: string,
   query: IDBValidKey | IDBKeyRange
 ): Promise<T[]> {
@@ -683,6 +695,27 @@ export async function putMessagingAccount(record: MessagingAccountRecord): Promi
 
 export async function deleteMessagingAccount(userId: string): Promise<void> {
   await del('messaging-account', userId);
+}
+
+// -- Contact pairing secrets (secure-messaging §5; one per [user, peer]) ------
+
+export async function getMessagingContact(
+  userId: string,
+  peerUserId: string
+): Promise<MessagingContactRecord | null> {
+  return (await get<MessagingContactRecord>('messaging-contact', [userId, peerUserId])) ?? null;
+}
+
+export async function getMessagingContacts(userId: string): Promise<MessagingContactRecord[]> {
+  return getAllByIndex<MessagingContactRecord>('messaging-contact', 'by-userId', userId);
+}
+
+export async function putMessagingContact(record: MessagingContactRecord): Promise<void> {
+  await put('messaging-contact', record);
+}
+
+export async function deleteMessagingContact(userId: string, peerUserId: string): Promise<void> {
+  await del('messaging-contact', [userId, peerUserId]);
 }
 
 // ============================================================================

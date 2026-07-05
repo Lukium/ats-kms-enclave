@@ -105,6 +105,8 @@ import {
   encryptSelfMessage,
   decryptSelfMessage,
 } from './self-channel';
+import { derivePairID, deriveExchangeKey } from './pairing';
+import { storeContactSecret, loadContactSecret, listContactPeers } from './contact-store';
 import {
   encryptEnvelope,
   serializeBundle,
@@ -1311,6 +1313,41 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'openSelfMessage':
         result = await handleOpenSelfMessage(validators.validateOpenSelfMessage(params), id);
+        break;
+
+      // === Pairing / Contact Operations (secure-messaging §5/§6) ===
+      case 'setContactSecret':
+        result = await handleSetContactSecret(validators.validateSetContactSecret(params), id);
+        break;
+
+      case 'getContactPairID':
+        result = await handleGetContactPairID(validators.validateGetContactPairID(params));
+        break;
+
+      case 'listContacts':
+        result = await handleListContacts(validators.validateListContacts(params));
+        break;
+
+      case 'sealDeviceExchange':
+        result = await handleSealDeviceExchange(validators.validateSealDeviceExchange(params), id);
+        break;
+
+      case 'openDeviceExchange':
+        result = await handleOpenDeviceExchange(validators.validateOpenDeviceExchange(params), id);
+        break;
+
+      case 'sealContactAnnouncement':
+        result = await handleSealContactAnnouncement(
+          validators.validateSealContactAnnouncement(params),
+          id
+        );
+        break;
+
+      case 'applyContactAnnouncement':
+        result = await handleApplyContactAnnouncement(
+          validators.validateApplyContactAnnouncement(params),
+          id
+        );
         break;
 
       default:
@@ -3578,6 +3615,193 @@ async function handleOpenSelfMessage(
   });
 
   return { payload: u8ToArrayBuffer(out) };
+}
+
+// ============================================================================
+// Pairing / Contact Operations (secure-messaging §5/§6) — messaging capability
+// ============================================================================
+
+/** Context labels domain-separating the two pairing-secret-keyed AEAD payloads. */
+const DEVICE_EXCHANGE_CONTEXT = 'device-exchange';
+const CONTACT_ANNOUNCEMENT_CONTEXT = 'contact-announcement';
+
+/** Serialize a self-channel contact announcement ({peerUserId, secret}). */
+function encodeContactAnnouncement(peerUserId: string, secret: Uint8Array): Uint8Array {
+  const obj = { peerUserId, secret: arrayBufferToBase64url(u8ToArrayBuffer(secret)) };
+  return new TextEncoder().encode(JSON.stringify(obj));
+}
+
+function decodeContactAnnouncement(bytes: Uint8Array): { peerUserId: string; secret: Uint8Array } {
+  const obj = JSON.parse(new TextDecoder().decode(bytes)) as { peerUserId?: unknown; secret?: unknown };
+  if (typeof obj.peerUserId !== 'string' || typeof obj.secret !== 'string') {
+    throw new Error('Malformed contact announcement');
+  }
+  return { peerUserId: obj.peerUserId, secret: new Uint8Array(base64urlToArrayBuffer(obj.secret)) };
+}
+
+/** Load a contact's pairing secret or throw a clear error. */
+async function requireContactSecret(
+  userId: string,
+  peerUserId: string,
+  messagingKEK: CryptoKey
+): Promise<Uint8Array> {
+  const secret = await loadContactSecret(userId, peerUserId, messagingKEK);
+  if (!secret) {
+    throw new Error(`No pairing secret for contact ${peerUserId}`);
+  }
+  return secret;
+}
+
+/**
+ * Store a contact's pairing secret (from a QR / word-pair, supplied by the PWA at
+ * pairing time) and return the derived pairID. Overwrites any existing record.
+ */
+async function handleSetContactSecret(
+  params: { sid: string; token: string; peerUserId: string; secret: ArrayBuffer },
+  requestId: string
+): Promise<{ pairID: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  const secret = new Uint8Array(params.secret);
+  await storeContactSecret(session.userId, params.peerUserId, secret, session.messagingKEK);
+  const pairID = await derivePairID(secret, session.userId, params.peerUserId);
+
+  await logOperation({
+    op: 'messaging.contact.set',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { peer: params.peerUserId },
+  });
+
+  return { pairID };
+}
+
+/** Derive the pairID for an existing contact (to subscribe to its pair-topic). */
+async function handleGetContactPairID(params: {
+  sid: string;
+  token: string;
+  peerUserId: string;
+}): Promise<{ pairID: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  const secret = await requireContactSecret(session.userId, params.peerUserId, session.messagingKEK);
+  return { pairID: await derivePairID(secret, session.userId, params.peerUserId) };
+}
+
+/** List every contact's {peerUserId, pairID} — for subscribing all pair-topics on connect. */
+async function handleListContacts(params: {
+  sid: string;
+  token: string;
+}): Promise<{ contacts: Array<{ peerUserId: string; pairID: string }> }> {
+  const session = await requireCapability(params.sid, params.token);
+  const peers = await listContactPeers(session.userId);
+  const contacts: Array<{ peerUserId: string; pairID: string }> = [];
+  for (const peerUserId of peers) {
+    const secret = await loadContactSecret(session.userId, peerUserId, session.messagingKEK);
+    if (secret) {
+      contacts.push({ peerUserId, pairID: await derivePairID(secret, session.userId, peerUserId) });
+    }
+  }
+  return { contacts };
+}
+
+/**
+ * AEAD-seal a device-key-exchange payload (this account's device bundle) under
+ * the contact's pairing-secret-derived key, so the peer can authenticate + read
+ * it over the pair-topic (§6).
+ */
+async function handleSealDeviceExchange(
+  params: { sid: string; token: string; peerUserId: string; payload: ArrayBuffer },
+  requestId: string
+): Promise<{ ciphertext: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const secret = await requireContactSecret(session.userId, params.peerUserId, session.messagingKEK);
+  const key = await deriveExchangeKey(secret);
+  const out = await encryptSelfMessage(key, params.payload, DEVICE_EXCHANGE_CONTEXT);
+
+  await logOperation({
+    op: 'messaging.contact.sealExchange',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { peer: params.peerUserId },
+  });
+
+  return { ciphertext: u8ToArrayBuffer(out) };
+}
+
+/** Open a device-key-exchange payload a contact sealed for us over the pair-topic. */
+async function handleOpenDeviceExchange(
+  params: { sid: string; token: string; peerUserId: string; ciphertext: ArrayBuffer },
+  requestId: string
+): Promise<{ payload: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const secret = await requireContactSecret(session.userId, params.peerUserId, session.messagingKEK);
+  const key = await deriveExchangeKey(secret);
+  const out = await decryptSelfMessage(key, params.ciphertext, DEVICE_EXCHANGE_CONTEXT);
+
+  await logOperation({
+    op: 'messaging.contact.openExchange',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { peer: params.peerUserId },
+  });
+
+  return { payload: u8ToArrayBuffer(out) };
+}
+
+/**
+ * Seal a contact for propagation to the account's OTHER devices over the
+ * self-channel: read the stored pairing secret and seal {peerUserId, secret}
+ * under the account self-key. The PWA publishes the opaque result to the
+ * self-channel; only this account's enclaves can open it.
+ */
+async function handleSealContactAnnouncement(
+  params: { sid: string; token: string; peerUserId: string },
+  requestId: string
+): Promise<{ ciphertext: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const { selfKey } = requireSelfChannel(session);
+  const secret = await requireContactSecret(session.userId, params.peerUserId, session.messagingKEK);
+  const payload = encodeContactAnnouncement(params.peerUserId, secret);
+  const out = await encryptSelfMessage(selfKey, payload, CONTACT_ANNOUNCEMENT_CONTEXT);
+
+  await logOperation({
+    op: 'messaging.contact.announce',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { peer: params.peerUserId },
+  });
+
+  return { ciphertext: u8ToArrayBuffer(out) };
+}
+
+/**
+ * Apply a self-channel contact announcement from another of the account's
+ * devices: open it under the self-key, store the pairing secret locally, and
+ * return {peerUserId, pairID} so the PWA can subscribe to the new pair-topic.
+ */
+async function handleApplyContactAnnouncement(
+  params: { sid: string; token: string; ciphertext: ArrayBuffer },
+  requestId: string
+): Promise<{ peerUserId: string; pairID: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  const { selfKey } = requireSelfChannel(session);
+  const bytes = await decryptSelfMessage(selfKey, params.ciphertext, CONTACT_ANNOUNCEMENT_CONTEXT);
+  const { peerUserId, secret } = decodeContactAnnouncement(bytes);
+  await storeContactSecret(session.userId, peerUserId, secret, session.messagingKEK);
+  const pairID = await derivePairID(secret, session.userId, peerUserId);
+
+  await logOperation({
+    op: 'messaging.contact.applyAnnounce',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { peer: peerUserId },
+  });
+
+  return { peerUserId, pairID };
 }
 
 // ============================================================================

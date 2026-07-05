@@ -2300,4 +2300,80 @@ export class KMSUser {
   }): Promise<{ plaintext: ArrayBuffer | null }> {
     return this.sendRequest<{ plaintext: ArrayBuffer | null }>('openBundle', args);
   }
+
+  // -------------------------------------------------------------------------
+  // Pairing / contacts (§5/§6). The pairing secret (from a QR / word-pair) is
+  // enclave-held; the PWA gets only the opaque pairID + sealed exchange blobs.
+  // -------------------------------------------------------------------------
+
+  /** Store a contact's pairing secret and get its pairID (transport: `dm:<pairID>`). */
+  async setContactSecret(args: {
+    sid: string;
+    token: string;
+    peerUserId: string;
+    secret: ArrayBuffer;
+  }): Promise<{ pairID: string }> {
+    return this.sendRequest<{ pairID: string }>('setContactSecret', args);
+  }
+
+  /** Derive an existing contact's pairID (to subscribe to its pair-topic). */
+  async getContactPairID(
+    sid: string,
+    token: string,
+    peerUserId: string
+  ): Promise<{ pairID: string }> {
+    return this.sendRequest<{ pairID: string }>('getContactPairID', { sid, token, peerUserId });
+  }
+
+  /** List every contact's {peerUserId, pairID} (to subscribe all pair-topics on connect). */
+  async listContacts(
+    sid: string,
+    token: string
+  ): Promise<{ contacts: Array<{ peerUserId: string; pairID: string }> }> {
+    return this.sendRequest<{ contacts: Array<{ peerUserId: string; pairID: string }> }>(
+      'listContacts',
+      { sid, token }
+    );
+  }
+
+  /** AEAD-seal this account's device bundle for a contact over the pair-topic (§6). */
+  async sealDeviceExchange(args: {
+    sid: string;
+    token: string;
+    peerUserId: string;
+    payload: ArrayBuffer;
+  }): Promise<{ ciphertext: ArrayBuffer }> {
+    return this.sendRequest<{ ciphertext: ArrayBuffer }>('sealDeviceExchange', args);
+  }
+
+  /** Open a device bundle a contact sealed for us over the pair-topic. */
+  async openDeviceExchange(args: {
+    sid: string;
+    token: string;
+    peerUserId: string;
+    ciphertext: ArrayBuffer;
+  }): Promise<{ payload: ArrayBuffer }> {
+    return this.sendRequest<{ payload: ArrayBuffer }>('openDeviceExchange', args);
+  }
+
+  /** Seal a contact for self-channel propagation to the account's other devices. */
+  async sealContactAnnouncement(args: {
+    sid: string;
+    token: string;
+    peerUserId: string;
+  }): Promise<{ ciphertext: ArrayBuffer }> {
+    return this.sendRequest<{ ciphertext: ArrayBuffer }>('sealContactAnnouncement', args);
+  }
+
+  /** Apply a self-channel contact announcement from another device; stores it. */
+  async applyContactAnnouncement(args: {
+    sid: string;
+    token: string;
+    ciphertext: ArrayBuffer;
+  }): Promise<{ peerUserId: string; pairID: string }> {
+    return this.sendRequest<{ peerUserId: string; pairID: string }>(
+      'applyContactAnnouncement',
+      args
+    );
+  }
 }

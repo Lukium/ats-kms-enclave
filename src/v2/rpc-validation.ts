@@ -1101,3 +1101,142 @@ export function validateOpenSelfMessage(params: unknown): {
     context: validateSelfContext('openSelfMessage', p.context),
   };
 }
+
+// === Pairing / Contact Operations (secure-messaging §5/§6) ===
+
+/** Max pairing-secret bytes (QR high-entropy ~32; word-pair bytes; padded). */
+const MAX_CONTACT_SECRET_BYTES = 1024;
+/** Max device-exchange payload (a device bundle: identity + prekeys + OTK pool). */
+const MAX_DEVICE_EXCHANGE_BYTES = 256 * 1024;
+
+function validatePeerUserId(method: string, value: unknown): string {
+  return validateBoundedString(method, 'peerUserId', value, MAX_PEER_NAME_CHARS);
+}
+
+export function validateSetContactSecret(params: unknown): {
+  sid: string;
+  token: string;
+  peerUserId: string;
+  secret: ArrayBuffer;
+} {
+  const p = validateParamsObject('setContactSecret', params);
+  const secret = validateBuffer('setContactSecret', 'secret', p.secret);
+  if (secret.byteLength === 0 || secret.byteLength > MAX_CONTACT_SECRET_BYTES) {
+    throw new RPCValidationError(
+      'setContactSecret',
+      'secret',
+      `non-empty ArrayBuffer ≤ ${MAX_CONTACT_SECRET_BYTES} bytes`,
+      p.secret
+    );
+  }
+  return {
+    sid: validateString('setContactSecret', 'sid', p.sid),
+    token: validateString('setContactSecret', 'token', p.token),
+    peerUserId: validatePeerUserId('setContactSecret', p.peerUserId),
+    secret,
+  };
+}
+
+export function validateGetContactPairID(params: unknown): {
+  sid: string;
+  token: string;
+  peerUserId: string;
+} {
+  const p = validateParamsObject('getContactPairID', params);
+  return {
+    sid: validateString('getContactPairID', 'sid', p.sid),
+    token: validateString('getContactPairID', 'token', p.token),
+    peerUserId: validatePeerUserId('getContactPairID', p.peerUserId),
+  };
+}
+
+export function validateListContacts(params: unknown): { sid: string; token: string } {
+  const p = validateParamsObject('listContacts', params);
+  return {
+    sid: validateString('listContacts', 'sid', p.sid),
+    token: validateString('listContacts', 'token', p.token),
+  };
+}
+
+export function validateSealDeviceExchange(params: unknown): {
+  sid: string;
+  token: string;
+  peerUserId: string;
+  payload: ArrayBuffer;
+} {
+  const p = validateParamsObject('sealDeviceExchange', params);
+  const payload = validateBuffer('sealDeviceExchange', 'payload', p.payload);
+  if (payload.byteLength === 0 || payload.byteLength > MAX_DEVICE_EXCHANGE_BYTES) {
+    throw new RPCValidationError(
+      'sealDeviceExchange',
+      'payload',
+      `non-empty ArrayBuffer ≤ ${MAX_DEVICE_EXCHANGE_BYTES} bytes`,
+      p.payload
+    );
+  }
+  return {
+    sid: validateString('sealDeviceExchange', 'sid', p.sid),
+    token: validateString('sealDeviceExchange', 'token', p.token),
+    peerUserId: validatePeerUserId('sealDeviceExchange', p.peerUserId),
+    payload,
+  };
+}
+
+export function validateOpenDeviceExchange(params: unknown): {
+  sid: string;
+  token: string;
+  peerUserId: string;
+  ciphertext: ArrayBuffer;
+} {
+  const p = validateParamsObject('openDeviceExchange', params);
+  const ciphertext = validateBuffer('openDeviceExchange', 'ciphertext', p.ciphertext);
+  if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_DEVICE_EXCHANGE_BYTES + 64) {
+    throw new RPCValidationError(
+      'openDeviceExchange',
+      'ciphertext',
+      `non-empty ArrayBuffer ≤ ${MAX_DEVICE_EXCHANGE_BYTES + 64} bytes`,
+      p.ciphertext
+    );
+  }
+  return {
+    sid: validateString('openDeviceExchange', 'sid', p.sid),
+    token: validateString('openDeviceExchange', 'token', p.token),
+    peerUserId: validatePeerUserId('openDeviceExchange', p.peerUserId),
+    ciphertext,
+  };
+}
+
+export function validateSealContactAnnouncement(params: unknown): {
+  sid: string;
+  token: string;
+  peerUserId: string;
+} {
+  const p = validateParamsObject('sealContactAnnouncement', params);
+  return {
+    sid: validateString('sealContactAnnouncement', 'sid', p.sid),
+    token: validateString('sealContactAnnouncement', 'token', p.token),
+    peerUserId: validatePeerUserId('sealContactAnnouncement', p.peerUserId),
+  };
+}
+
+export function validateApplyContactAnnouncement(params: unknown): {
+  sid: string;
+  token: string;
+  ciphertext: ArrayBuffer;
+} {
+  const p = validateParamsObject('applyContactAnnouncement', params);
+  const ciphertext = validateBuffer('applyContactAnnouncement', 'ciphertext', p.ciphertext);
+  if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_CONTACT_SECRET_BYTES + 512) {
+    throw new RPCValidationError(
+      'applyContactAnnouncement',
+      'ciphertext',
+      `non-empty ArrayBuffer ≤ ${MAX_CONTACT_SECRET_BYTES + 512} bytes`,
+      p.ciphertext
+    );
+  }
+  return {
+    sid: validateString('applyContactAnnouncement', 'sid', p.sid),
+    token: validateString('applyContactAnnouncement', 'token', p.token),
+    ciphertext,
+  };
+}

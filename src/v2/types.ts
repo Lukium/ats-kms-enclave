@@ -592,7 +592,15 @@ export type RPCMethod =
   | 'openSelfMessage'
   // === Fan-out bundle (secure-messaging §8/§12) ===
   | 'buildBundle'
-  | 'openBundle';
+  | 'openBundle'
+  // === Pairing / contacts (secure-messaging §5/§6) ===
+  | 'setContactSecret'
+  | 'getContactPairID'
+  | 'listContacts'
+  | 'sealDeviceExchange'
+  | 'openDeviceExchange'
+  | 'sealContactAnnouncement'
+  | 'applyContactAnnouncement';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)

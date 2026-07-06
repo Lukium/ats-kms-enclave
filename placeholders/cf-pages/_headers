@@ -77,6 +77,18 @@
   # Standard security headers
   X-Content-Type-Options: nosniff
 
+# enclave-client.js has a FIXED (non-content-addressed) filename, so it must NOT be
+# served immutable like the content-addressed worker above — otherwise a deploy that
+# changes its content leaves returning browsers serving the stale client forever,
+# which then fails SRI against the fresh index.html (the KMS never boots). Short,
+# revalidating cache instead (this rule is more specific / later, so it overrides
+# the /*.js immutable rule for this path).
+/enclave-client.js
+  Content-Type: application/javascript; charset=utf-8
+  Cross-Origin-Resource-Policy: same-origin
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff
+
 /*.mjs
   Content-Type: application/javascript; charset=utf-8
 

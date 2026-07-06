@@ -6,8 +6,8 @@ settings:
 
 dependencies:
   '@lukium/libsignal-protocol-typescript':
-    specifier: 0.2.0-beta.3
-    version: 0.2.0-beta.3
+    specifier: 0.2.0-beta.4
+    version: 0.2.0-beta.4
 
 devDependencies:
   '@eslint/js':
@@ -1164,8 +1164,8 @@ packages:
       '@jridgewell/sourcemap-codec': 1.5.5
     dev: true
 
-  /@lukium/libsignal-protocol-typescript@0.2.0-beta.3:
-    resolution: {integrity: sha512-BAvjvcxWBpnRgYvFBXS0IxmgfPIio2fHP0Q5MDJHy74bvqKSXn3Qw088YHAqKoFMV38XKw+2VgB6n502ZhkR3g==}
+  /@lukium/libsignal-protocol-typescript@0.2.0-beta.4:
+    resolution: {integrity: sha512-QVfm0XQl/OnhktGw3+Tp2HaBp0E7kYC/nx2IjEb3oyTFdrhQOzBo+XT9Z01UX2hEb/PyUPb1PZr+/unZAH0wAA==}
     engines: {node: '>=20'}
     dependencies:
       base64-js: 1.5.1

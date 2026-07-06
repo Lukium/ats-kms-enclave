@@ -55,6 +55,13 @@ export interface KMSUserConfig {
    * @default false
    */
   autoInit?: boolean;
+
+  /**
+   * Timeout (ms) to wait for the enclave's kms:connected acknowledgement during the
+   * MessagePort handshake (BUG-014). On timeout the window transport is used as a fallback.
+   * @default 3000
+   */
+  portHandshakeTimeoutMs?: number;
 }
 
 /**
@@ -175,6 +182,14 @@ export class KMSUser {
   private isInitialized = false;
   private isReady = false;
   private boundMessageHandler: ((event: MessageEvent) => void) | null = null;
+  // BUG-014: dedicated MessageChannel port to the enclave. When connected, RPC requests
+  // are sent over the port and RPC responses are accepted ONLY from the port — window
+  // messages (where a content script like StickyPassword can inject/reflect) are ignored
+  // for RPC resolution. If the handshake fails/times out, portConnected stays false and
+  // the window channel is used exactly as before (automatic fallback).
+  private port: MessagePort | null = null;
+  private portConnected = false;
+  private portHandshakeTimeoutMs: number;
 
   /**
    * Create a new KMS user API instance
@@ -184,6 +199,7 @@ export class KMSUser {
   constructor(config: KMSUserConfig) {
     this.kmsOrigin = config.kmsOrigin;
     this.defaultTimeout = config.defaultTimeout ?? 300000; // 5 minutes for testing
+    this.portHandshakeTimeoutMs = config.portHandshakeTimeoutMs ?? 3000;
 
     if (config.autoInit && typeof window !== 'undefined') {
       this.init().catch((err) => {
@@ -239,6 +255,16 @@ export class KMSUser {
 
       // Wait for ready signal from iframe
       await this.waitForReady();
+
+      // BUG-014: try to upgrade the transport to a dedicated MessagePort. Best-effort —
+      // on any failure we keep using the window channel (which is fully functional), so a
+      // handshake problem can never make setup worse than the pre-port behavior.
+      await this.establishPort(this.portHandshakeTimeoutMs).catch((err: unknown) => {
+        console.warn(
+          '[KMS User] MessagePort handshake failed; using window transport fallback:',
+          err
+        );
+      });
     } catch (err: unknown) {
       console.error('[KMS User] Initialization failed:', err);
       this.cleanup();
@@ -273,9 +299,69 @@ export class KMSUser {
   }
 
   /**
+   * Establish a dedicated MessagePort to the enclave (BUG-014).
+   *
+   * Creates a MessageChannel, transfers one port to the iframe via a `kms:connect` message,
+   * and waits for the enclave's `kms:connected` acknowledgement on the retained port. Once
+   * connected, RPC requests are sent over the port and responses are accepted only from it
+   * (see handlePortMessage / handleMessage), which prevents window-level content scripts from
+   * injecting or reflecting RPC traffic.
+   *
+   * Best-effort: rejects on timeout or if the iframe is unavailable; callers keep the window
+   * transport as an automatic fallback.
+   *
+   * @param timeout - Timeout in milliseconds to wait for the connected acknowledgement
+   * @returns Promise that resolves once the port is connected
+   */
+  private establishPort(timeout: number = 3000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.iframe?.contentWindow) {
+        reject(new Error('KMS iframe not available for port handshake'));
+        return;
+      }
+
+      const channel = new MessageChannel();
+      const port = channel.port1;
+
+      const timeoutId = setTimeout(() => {
+        port.onmessage = null;
+        port.close();
+        reject(new Error('Timeout waiting for KMS port connection'));
+      }, timeout);
+
+      // First message on the port must be the enclave's connected acknowledgement.
+      port.onmessage = (event: MessageEvent): void => {
+        const data = event.data as { type?: string };
+        if (data?.type === 'kms:connected') {
+          clearTimeout(timeoutId);
+          this.port = port;
+          this.portConnected = true;
+          // Swap to the RPC response handler for all subsequent port messages.
+          port.onmessage = this.handlePortMessage.bind(this);
+          resolve();
+        }
+        // Ignore anything else on the port before connection is confirmed.
+      };
+
+      // Transfer the other end to the enclave.
+      this.iframe.contentWindow.postMessage({ type: 'kms:connect' }, this.kmsOrigin, [
+        channel.port2,
+      ]);
+    });
+  }
+
+  /**
    * Cleanup iframe and resources (without rejecting pending requests)
    */
   private cleanup(): void {
+    // Tear down the dedicated port if present
+    if (this.port) {
+      this.port.onmessage = null;
+      this.port.close();
+      this.port = null;
+    }
+    this.portConnected = false;
+
     // Remove message event listener
     if (this.boundMessageHandler) {
       window.removeEventListener('message', this.boundMessageHandler);
@@ -328,7 +414,8 @@ export class KMSUser {
       return;
     }
 
-    // Handle show-iframe request (from unlock modal)
+    // Handle show-iframe request (from unlock modal). This is a control message and always
+    // travels on the window channel, so it is handled here regardless of port state.
     if (data?.type === 'kms:show-iframe') {
       if (this.iframe) {
         this.iframe.style.display = 'block';
@@ -336,8 +423,37 @@ export class KMSUser {
       return;
     }
 
-    // Handle RPC response
-    const response = event.data as RPCResponse;
+    // BUG-014: once the dedicated MessagePort is connected, the port is the authoritative
+    // channel for RPC responses. Ignore RPC responses that arrive on the window here — a
+    // window-level content script (e.g. StickyPassword) could inject or reflect them.
+    if (this.portConnected) {
+      return;
+    }
+
+    // Window transport (pre-port / fallback): resolve the RPC response.
+    this.processResponse(event.data);
+  }
+
+  /**
+   * Handle an RPC response arriving over the dedicated MessagePort (BUG-014).
+   *
+   * The port is a private channel confirmed by the kms:connect/kms:connected handshake, so
+   * there is no origin to check. Control messages still travel over the window; the port
+   * carries only RPC responses.
+   *
+   * @param event - Message event from the enclave-connected port
+   */
+  private handlePortMessage(event: MessageEvent): void {
+    this.processResponse(event.data);
+  }
+
+  /**
+   * Resolve or reject the pending request matching an RPC response (transport-agnostic).
+   *
+   * @param raw - The RPCResponse payload received from the enclave
+   */
+  private processResponse(raw: unknown): void {
+    const response = raw as RPCResponse;
     if (!response.id) {
       console.warn('[KMS User] Received message without ID:', response);
       return;
@@ -411,7 +527,13 @@ export class KMSUser {
         params,
       };
 
-      this.iframe!.contentWindow!.postMessage(request, this.kmsOrigin);
+      // BUG-014: prefer the dedicated MessagePort when connected; otherwise fall back to the
+      // window channel (pre-port behavior).
+      if (this.portConnected && this.port) {
+        this.port.postMessage(request);
+      } else {
+        this.iframe!.contentWindow!.postMessage(request, this.kmsOrigin);
+      }
     });
   }
 

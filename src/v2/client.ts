@@ -64,6 +64,13 @@ export class KMSClient {
   private userId: string | null = null; // User ID (email) from fullSetup/setupWithPopup params
   private popupState: string | null = null; // Anti-CSRF state token
   private messagePort: MessagePort | null = null; // For direct parent communication
+  // Iframe-mode dedicated MessagePort (BUG-014): when the parent PWA establishes a
+  // MessageChannel, RPC requests/responses ride the port instead of window postMessage,
+  // so a content script that can only reach the window (e.g. StickyPassword's
+  // spExtensionWindowTransport) can neither inject nor reflect RPC traffic. Distinct from
+  // the stateless-popup use of `messagePort` above (that path sets isStatelessPopup=true).
+  // When false, everything flows over the window channel exactly as before (auto-fallback).
+  private iframePortActive: boolean = false;
   // Note: hkdfSalt from URL is not used directly in popup (sent to iframe via encrypted message)
 
   /**
@@ -233,6 +240,33 @@ export class KMSClient {
     /* eslint-enable no-console, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
     /* c8 ignore stop */
 
+    // Iframe-mode MessagePort handshake (BUG-014). The parent PWA transfers one end of a
+    // MessageChannel; from here on we accept RPC requests on the port and send RPC
+    // responses back over it. This is separate from the stateless-popup kms:connect above
+    // (guarded by isStatelessPopup) and only applies to the normal embedded-iframe flow.
+    // If this handshake never arrives, iframePortActive stays false and the window channel
+    // is used exactly as before — a safe automatic fallback.
+    if (
+      event.data &&
+      (event.data as { type?: string }).type === 'kms:connect' &&
+      !this.isStatelessPopup &&
+      this.isInitialized
+    ) {
+      if (!event.ports || event.ports.length === 0) {
+        console.error('[KMS Client] kms:connect (iframe) missing MessagePort — staying on window transport');
+        return;
+      }
+      this.messagePort = event.ports[0] || null;
+      if (this.messagePort) {
+        this.messagePort.onmessage = this.handlePortRequest.bind(this);
+        this.iframePortActive = true;
+        this.messagePort.postMessage({ type: 'kms:connected' });
+        // eslint-disable-next-line no-console
+        console.log('[KMS Client] Iframe MessagePort established — RPC traffic now uses the port');
+      }
+      return;
+    }
+
     // Handle popup responses from parent
     const eventData = event.data as { type?: string; requestId?: string; reason?: string };
     /* c8 ignore start - fullSetup flow handlers: work in manual testing, tested against phase2-demo.allthe.services but cannot be reliably automated due to Playwright notification permission restrictions */
@@ -290,13 +324,42 @@ export class KMSClient {
     }
     /* c8 ignore stop */
 
+    // Normal RPC request from the parent (window channel). Shared with the MessagePort
+    // path (handlePortRequest) via processParentRequest so both transports behave
+    // identically for auth interception + worker forwarding.
+    this.processParentRequest(event.data);
+  }
+
+  /**
+   * Handle an RPC request arriving over the iframe-mode MessagePort (BUG-014).
+   *
+   * The port is a private channel established via the kms:connect handshake, so — unlike
+   * the window listener — there is no origin to check here; possession of the port IS the
+   * authorization. Delegates to the same processing path as the window transport.
+   *
+   * @param event - Message event from the parent-held MessagePort
+   */
+  private handlePortRequest(event: MessageEvent): void {
+    this.processParentRequest(event.data);
+  }
+
+  /**
+   * Process a parent RPC request (transport-agnostic).
+   *
+   * Applies auth interception (showUnlockModal for auth-required methods) and otherwise
+   * forwards the request to the Worker. Called from both the window listener
+   * (handleParentMessage) and the MessagePort listener (handlePortRequest).
+   *
+   * @param data - The RPCRequest payload from the parent
+   */
+  private processParentRequest(data: unknown): void {
     // Validate client is initialized
     if (!this.isInitialized || !this.worker) {
       console.error('[KMS Client] Received message before initialization');
       return;
     }
 
-    const request = event.data as RPCRequest;
+    const request = data as RPCRequest;
 
     // Intercept operations that require authentication
     // These will show modal, collect credentials, then execute.
@@ -336,7 +399,7 @@ export class KMSClient {
 
     // Forward to Worker
     try {
-      this.worker.postMessage(event.data);
+      this.worker.postMessage(data);
     } catch (err: unknown) {
       console.error('[KMS Client] Failed to forward message to Worker:', err);
 
@@ -787,6 +850,22 @@ export class KMSClient {
    * @param data - Data to send
    */
   private sendToParent(data: RPCResponse | { type: string; [key: string]: unknown }): void {
+    // BUG-014: route plain RPC responses over the dedicated MessagePort when the iframe-mode
+    // port is active. Typed control messages (kms:ready, kms:show-iframe, popup/fullSetup
+    // coordination) keep using the window channel so existing flows are untouched. An
+    // RPC response is identified as an object carrying `id` but no `type`.
+    const isRpcResponse =
+      !!data && typeof data === 'object' && 'id' in data && !('type' in data);
+    if (isRpcResponse && this.iframePortActive && this.messagePort) {
+      try {
+        this.messagePort.postMessage(data);
+        return;
+      } catch (err: unknown) {
+        console.error('[KMS Client] Failed to send RPC response over MessagePort, falling back to window:', err);
+        // fall through to the window channel below
+      }
+    }
+
     // Determine target window based on context
     // Popup mode: use window.opener (popup was opened by parent)
     // Iframe mode: use window.parent (iframe is embedded in parent)
@@ -1115,8 +1194,14 @@ export class KMSClient {
         // Hide modal
         this.hideModal();
 
-        // Forward RPC response to parent
-        this.sendToParent(response);
+        // NOTE: Do NOT forward the response here. The persistent handleWorkerMessage
+        // catch-all (see "Forward all other messages to parent") already forwards this
+        // exact worker response to the parent exactly once. Forwarding again here caused
+        // BUG-014's double-emit: the PWA received the same {id, result} twice, resolving
+        // the pending request on the first copy and warning "No pending request for ID"
+        // on the second — and, when the copies raced, resolving with the wrong payload
+        // (e.g. setupMessaging → undefined → "Cannot destructure 'bundle'"). This listener
+        // now only handles modal teardown + unlock-request cleanup.
 
         // Clear pending request
         this.pendingUnlockRequest = null;

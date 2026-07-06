@@ -180,7 +180,10 @@ function setupLocalStorageMock() {
  * Helper to initialize KMSUser with automatic ready signal
  */
 async function initializeKMSUser(config: KMSUserConfig, env: ReturnType<typeof setupTestEnvironment>) {
-  const kmsUser = new KMSUser(config);
+  // Default the MessagePort handshake to a tiny timeout so window-transport (fallback) tests
+  // don't each wait the full 3s for the (unanswered) kms:connect handshake. Port-path tests
+  // that DO answer the handshake use a dedicated helper below.
+  const kmsUser = new KMSUser({ portHandshakeTimeoutMs: 20, ...config });
 
   // Start init
   const initPromise = kmsUser.init();
@@ -853,5 +856,184 @@ describe('lifecycle management', () => {
 
     // Verify terminate completed successfully
     expect(true).toBe(true);
+  });
+});
+
+// ============================================================================
+// MessagePort transport tests (BUG-014)
+// ============================================================================
+
+/**
+ * Test environment whose iframe ANSWERS the kms:connect handshake, so the dedicated
+ * MessagePort connects and RPC traffic rides the port. Exposes helpers to inspect the
+ * requests the enclave received over the port and to push responses back over it.
+ */
+function setupPortTestEnvironment() {
+  let currentIframe: any = null;
+  const windowListeners: Array<(event: MessageEvent) => void> = [];
+  let enclavePort: MessagePort | null = null; // the transferred port2 (enclave side)
+  const portRequests: any[] = [];
+
+  const originalCreateElement = global.document?.createElement;
+  (global.document as any) = {
+    createElement: vi.fn((tagName: string) => {
+      if (tagName === 'iframe') {
+        currentIframe = {
+          src: '',
+          style: { display: 'none' },
+          allow: '',
+          sandbox: { add: vi.fn() },
+          parentNode: { removeChild: vi.fn() },
+          appendChild: vi.fn(),
+          contentWindow: {
+            postMessage: vi.fn((data: any, _origin?: any, transfer?: any[]) => {
+              // Answer the BUG-014 handshake: adopt the transferred port, ack, and record
+              // any RPC requests that arrive on it.
+              if (data?.type === 'kms:connect' && transfer && transfer[0]) {
+                enclavePort = transfer[0] as MessagePort;
+                enclavePort.onmessage = (ev: MessageEvent): void => {
+                  portRequests.push(ev.data);
+                };
+                enclavePort.postMessage({ type: 'kms:connected' });
+              }
+            }),
+          },
+        };
+        return currentIframe;
+      }
+      return {};
+    }),
+    body: { appendChild: vi.fn() },
+    readyState: 'complete',
+  };
+
+  const originalAddEventListener = global.window?.addEventListener;
+  (global.window as any).addEventListener = vi.fn((event: string, listener: any) => {
+    if (event === 'message') windowListeners.push(listener);
+  });
+  (global.window as any).removeEventListener = vi.fn((event: string, listener: any) => {
+    if (event === 'message') {
+      const index = windowListeners.indexOf(listener);
+      if (index > -1) windowListeners.splice(index, 1);
+    }
+  });
+  (global.window as any).location = { origin: 'https://allthe.services' };
+
+  const simulateWindowMessage = (data: any, origin: string = 'https://kms.ats.run'): void => {
+    const event = new MessageEvent('message', { data, origin });
+    windowListeners.forEach((listener) => listener(event));
+  };
+
+  const pushPortResponse = (data: any): void => {
+    enclavePort?.postMessage(data);
+  };
+
+  const cleanup = (): void => {
+    (global.document as any).createElement = originalCreateElement;
+    (global.window as any).addEventListener = originalAddEventListener;
+    currentIframe = null;
+    windowListeners.length = 0;
+    portRequests.length = 0;
+  };
+
+  return {
+    getCurrentIframe: () => currentIframe,
+    simulateWindowMessage,
+    pushPortResponse,
+    getPortRequests: () => portRequests,
+    cleanup,
+  };
+}
+
+/**
+ * Initialize a KMSUser against a handshake-answering env (port connects).
+ */
+async function initWithPort(env: ReturnType<typeof setupPortTestEnvironment>) {
+  const kmsUser = new KMSUser({ kmsOrigin: 'https://kms.ats.run' });
+  const initPromise = kmsUser.init();
+  setTimeout(() => env.simulateWindowMessage({ type: 'kms:ready' }), 5);
+  await initPromise;
+  return kmsUser;
+}
+
+/** Wait for pending microtasks/timers so port messages get delivered. */
+const flush = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+describe('MessagePort transport (BUG-014)', () => {
+  let env: ReturnType<typeof setupPortTestEnvironment>;
+
+  beforeEach(() => {
+    env = setupPortTestEnvironment();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('connects the port and routes requests over it (not the window)', async () => {
+    const kmsUser = await initWithPort(env);
+
+    const iframe = env.getCurrentIframe();
+    const windowPostSpy = vi.spyOn(iframe.contentWindow, 'postMessage');
+
+    const requestPromise = kmsUser.isSetup();
+    await flush();
+
+    // The request rode the port, not the window channel.
+    const portReqs = env.getPortRequests();
+    const isSetupReq = portReqs.find((r: any) => r?.method === 'isSetup');
+    expect(isSetupReq).toBeDefined();
+    expect(windowPostSpy).not.toHaveBeenCalled();
+
+    // Respond over the port; the promise resolves.
+    env.pushPortResponse({ id: isSetupReq.id, result: true } as RPCResponse);
+    await expect(requestPromise).resolves.toBe(true);
+
+    kmsUser.terminate();
+  });
+
+  it('ignores an RPC response injected on the window once the port is connected', async () => {
+    const kmsUser = await initWithPort(env);
+
+    const requestPromise = kmsUser.isSetup();
+    await flush();
+
+    const isSetupReq = env.getPortRequests().find((r: any) => r?.method === 'isSetup');
+    expect(isSetupReq).toBeDefined();
+
+    // Injection attempt over the window (e.g. StickyPassword) with the correct id — MUST be ignored.
+    env.simulateWindowMessage({ id: isSetupReq.id, result: 'INJECTED' } as unknown as RPCResponse);
+    await flush();
+
+    // The genuine port response wins.
+    env.pushPortResponse({ id: isSetupReq.id, result: 'GENUINE' } as unknown as RPCResponse);
+    await expect(requestPromise).resolves.toBe('GENUINE');
+
+    kmsUser.terminate();
+  });
+
+  it('still shows the iframe on kms:show-iframe (control message stays on the window)', async () => {
+    const kmsUser = await initWithPort(env);
+    const iframe = env.getCurrentIframe();
+    expect(iframe.style.display).toBe('none');
+
+    env.simulateWindowMessage({ type: 'kms:show-iframe' });
+    expect(iframe.style.display).toBe('block');
+
+    kmsUser.terminate();
+  });
+
+  it('rejects/propagates an error response delivered over the port', async () => {
+    const kmsUser = await initWithPort(env);
+
+    const requestPromise = kmsUser.isSetup();
+    await flush();
+    const isSetupReq = env.getPortRequests().find((r: any) => r?.method === 'isSetup');
+    expect(isSetupReq).toBeDefined();
+
+    env.pushPortResponse({ id: isSetupReq.id, error: 'boom' } as RPCResponse);
+    await expect(requestPromise).rejects.toThrow('boom');
+
+    kmsUser.terminate();
   });
 });

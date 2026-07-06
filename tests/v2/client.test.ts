@@ -571,7 +571,16 @@ describe('authentication interception', () => {
     env.cleanup();
   });
 
-  const authRequiredMethods = ['createLease', 'generateVAPID', 'signJWT', 'regenerateVAPID', 'addEnrollment'];
+  const authRequiredMethods = [
+    'createLease',
+    'generateVAPID',
+    'signJWT',
+    'regenerateVAPID',
+    'addEnrollment',
+    'setupMessaging',
+    'setupAccountRoot',
+    'openMessaging',
+  ];
 
   authRequiredMethods.forEach((method) => {
     it(`should intercept ${method} and not forward to worker immediately`, () => {

@@ -2099,13 +2099,29 @@ export class KMSUser {
    * @category Messaging Operations
    */
   async setupMessaging(
-    credentials: AuthCredentials,
+    userId: string,
     options?: { signedPreKeyId?: number; oneTimePrekeyCount?: number }
   ): Promise<{ bundle: PublicPreKeyBundle }> {
-    return this.sendRequest<{ bundle: PublicPreKeyBundle }>('setupMessaging', {
-      credentials,
-      ...options,
-    });
+    // Auth is collected in the enclave modal (see authRequiredMethods in client.ts);
+    // the PWA never constructs credentials. Show the iframe so the modal is visible.
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
+    try {
+      const result = await this.sendRequest<{ bundle: PublicPreKeyBundle }>('setupMessaging', {
+        userId,
+        ...options,
+      });
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
   }
 
   /**
@@ -2134,11 +2150,27 @@ export class KMSUser {
    * @category Messaging Operations
    */
   async openMessaging(
-    credentials: AuthCredentials
+    userId: string
   ): Promise<{ sid: string; token: string; exp: number }> {
-    return this.sendRequest<{ sid: string; token: string; exp: number }>('openMessaging', {
-      credentials,
-    });
+    // Auth is collected in the enclave modal (see authRequiredMethods in client.ts);
+    // the PWA never constructs credentials. Show the iframe so the modal is visible.
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
+    try {
+      const result = await this.sendRequest<{ sid: string; token: string; exp: number }>('openMessaging', {
+        userId,
+      });
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
   }
 
   /**
@@ -2172,8 +2204,24 @@ export class KMSUser {
    *
    * @category Account Root Operations
    */
-  async setupAccountRoot(credentials: AuthCredentials): Promise<{ mnemonic: string }> {
-    return this.sendRequest<{ mnemonic: string }>('setupAccountRoot', { credentials });
+  async setupAccountRoot(userId: string): Promise<{ mnemonic: string }> {
+    // Auth is collected in the enclave modal (see authRequiredMethods in client.ts);
+    // the PWA never constructs credentials. Show the iframe so the modal is visible.
+    if (this.iframe) {
+      this.iframe.style.display = 'block';
+    }
+    try {
+      const result = await this.sendRequest<{ mnemonic: string }>('setupAccountRoot', { userId });
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
   }
 
   /**

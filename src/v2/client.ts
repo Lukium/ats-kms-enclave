@@ -299,8 +299,24 @@ export class KMSClient {
     const request = event.data as RPCRequest;
 
     // Intercept operations that require authentication
-    // These will show modal, collect credentials, then execute
-    const authRequiredMethods = ['createLease', 'generateVAPID', 'signJWT', 'regenerateVAPID', 'addEnrollment'];
+    // These will show modal, collect credentials, then execute.
+    //
+    // Messaging unlock (setupMessaging / setupAccountRoot / openMessaging) rides
+    // this SAME path: the enclave collects credentials in its own modal so the
+    // PWA never constructs them. This is the only place a passkey-prf unlock can
+    // happen — the appSalt lives in this (kms.ats.run) origin's localStorage and
+    // is unreadable from the parent PWA. The PWA sends only { userId, ... }; the
+    // client injects the collected credentials before forwarding to the worker.
+    const authRequiredMethods = [
+      'createLease',
+      'generateVAPID',
+      'signJWT',
+      'regenerateVAPID',
+      'addEnrollment',
+      'setupMessaging',
+      'setupAccountRoot',
+      'openMessaging',
+    ];
     if (request?.method && authRequiredMethods.includes(request.method)) {
       this.showUnlockModal(request);
       return; // Don't forward to worker yet

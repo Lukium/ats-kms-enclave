@@ -219,6 +219,38 @@ export function closeDB(): void {
   }
 }
 
+/**
+ * Clear every record from all object stores WITHOUT deleting the database.
+ *
+ * Used by KMS reset. Unlike `indexedDB.deleteDatabase()`, clearing stores runs in an
+ * ordinary readwrite transaction on the already-open connection, so it can NEVER be
+ * blocked by another open connection to `kms-v2` (a second app tab, or the fullSetup
+ * popup's own enclave worker). `deleteDatabase()` fires `onblocked` in that situation
+ * and, if the reset awaits it, hangs forever — leaving the database wedged so every
+ * subsequent `open()` (isSetup / fullSetup) queues behind the stuck delete and also
+ * hangs. That is the "reset → No active popup window reference" bug. Clearing the stores
+ * wipes all user data (keys, leases, enrollments, audit chain, signal/messaging state)
+ * while keeping the current v4 schema, which is exactly what a reset needs.
+ */
+export async function clearAllStores(): Promise<void> {
+  const database = await getDB();
+  const storeNames = Array.from(database.objectStoreNames);
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(storeNames, 'readwrite');
+    transaction.oncomplete = (): void => resolve();
+    /* c8 ignore next 6 */
+    transaction.onerror = (): void => {
+      reject(new Error(`Failed to clear stores: ${transaction.error?.message ?? 'unknown'}`));
+    };
+    transaction.onabort = (): void => {
+      reject(new Error(`Clear-stores transaction aborted: ${transaction.error?.message ?? 'unknown'}`));
+    };
+    for (const name of storeNames) {
+      transaction.objectStore(name).clear();
+    }
+  });
+}
+
 // ============================================================================
 // Generic Storage Operations
 // ============================================================================

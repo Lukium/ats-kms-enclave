@@ -55,7 +55,7 @@ import {
 } from './audit';
 import {
   initDB,
-  closeDB,
+  clearAllStores,
   wrapKey,
   unwrapKey,
   getWrappedKey,
@@ -3812,24 +3812,25 @@ async function handleApplyContactAnnouncement(
  * Reset KMS (delete all data). USE WITH CAUTION.
  */
 async function handleResetKMS(): Promise<{ success: true }> {
-  // Close DB
-  closeDB();
+  // Wipe all user data by CLEARING every object store on the open connection, rather than
+  // deleting the whole database.
+  //
+  // Why not indexedDB.deleteDatabase('kms-v2')? It requires exclusive access: if ANY other
+  // context still holds kms-v2 open — a second app tab, or the fullSetup popup's own enclave
+  // worker — the delete fires `onblocked` and never completes. The previous implementation
+  // awaited that delete with no `onblocked` handler, so the reset hung forever and left the
+  // database wedged; every subsequent isSetup/fullSetup `open()` then queued behind the stuck
+  // delete and also hung. In the app that surfaced as a dead setup ceremony ("No active popup
+  // window reference", because the worker never emitted worker:setup-with-popup). Clearing the
+  // stores runs in an ordinary readwrite transaction that cannot be blocked by other
+  // connections, wiping all data while keeping the current v4 schema.
+  await clearAllStores();
 
-  // Delete database
-  const deleteRequest = indexedDB.deleteDatabase('kms-v2');
-  await new Promise<void>((resolve, reject) => {
-    deleteRequest.onsuccess = (): void => resolve();
-    deleteRequest.onerror = (): void => reject(new Error(deleteRequest.error?.message ?? 'Failed to delete database'));
-  });
-
-  // Reinitialize
-  await initDB();
-  resetAuditLogger(); // Reset audit state (seqCounter, auditKeyPair, etc.)
-
-  // Note: We don't log the reset operation because:
-  // 1. Audit chain has been destroyed (database deleted)
-  // 2. No audit key exists yet (requires MKEK from credentials)
-  // 3. Reset will be implicitly logged when next operation creates new audit chain
+  // Reset in-memory audit state (seqCounter, auditKeyPair, etc.) so the next operation starts
+  // a fresh audit chain. We don't log the reset itself: the audit chain has just been wiped and
+  // no audit key exists yet (it requires the MKEK from credentials); the reset is implicitly
+  // recorded when the next operation creates a new chain.
+  resetAuditLogger();
 
   return { success: true };
 }

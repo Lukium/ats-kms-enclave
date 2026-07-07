@@ -16,6 +16,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import {
   initDB,
   closeDB,
+  clearAllStores,
   wrapKey,
   unwrapKey,
   getWrappedKey,
@@ -450,6 +451,31 @@ describe('getAllMeta', () => {
     expect(keys).toContain('key1');
     expect(keys).toContain('key2');
     expect(keys).toContain('key3');
+  });
+});
+
+describe('clearAllStores', () => {
+  it('clears object stores but keeps the schema and connection usable', async () => {
+    // Seed data (one store is enough — clearAllStores clears every store in one transaction).
+    await putMeta('k1', 'v1');
+    await putMeta('k2', 'v2');
+    await putSignalIdentity({
+      userId: 'u1',
+    } as unknown as Parameters<typeof putSignalIdentity>[0]);
+    expect((await getAllMeta()).length).toBeGreaterThanOrEqual(2);
+    expect(await getSignalIdentity('u1')).not.toBeNull();
+
+    // Clear everything.
+    await clearAllStores();
+
+    // Stores are empty across the board…
+    expect(await getAllMeta()).toEqual([]);
+    expect(await getSignalIdentity('u1')).toBeNull();
+
+    // …and the connection is still open/usable (schema intact, no deleteDatabase teardown
+    // that could wedge it): writing again works immediately.
+    await putMeta('after-clear', 'ok');
+    expect(await getAllMeta()).toHaveLength(1);
   });
 });
 

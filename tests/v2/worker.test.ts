@@ -1775,6 +1775,24 @@ describe('resetKMS', () => {
     const afterReset = await handleMessage(createRequest('isSetup', { userId: 'test@example.com' }));
     expect(getResult<{ isSetup: boolean }>(afterReset).isSetup).toBe(false);
   });
+
+  it('leaves the database usable after reset (clears stores, no wedge)', async () => {
+    const userId = 'cycle@example.com';
+    await handleMessage(createRequest('setupPassphrase', { userId, passphrase: 'cycle-pass-123' }));
+    expect(getResult<{ isSetup: boolean }>(await handleMessage(createRequest('isSetup', { userId }))).isSetup).toBe(true);
+
+    // Reset clears all stores on the open connection (no deleteDatabase that could block).
+    const reset1 = await handleMessage(createRequest('resetKMS', { userId }));
+    expect(reset1.error).toBeUndefined();
+    expect(getResult<{ success: boolean }>(reset1).success).toBe(true);
+
+    // The DB is immediately usable afterward — reads succeed and reflect the wipe — and a
+    // second reset also succeeds (would hang/throw if the first reset had wedged the DB).
+    expect(getResult<{ isSetup: boolean }>(await handleMessage(createRequest('isSetup', { userId }))).isSetup).toBe(false);
+    const reset2 = await handleMessage(createRequest('resetKMS', { userId }));
+    expect(reset2.error).toBeUndefined();
+    expect(getResult<{ success: boolean }>(reset2).success).toBe(true);
+  });
 });
 
 describe('removeEnrollment', () => {

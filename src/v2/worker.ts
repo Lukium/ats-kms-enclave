@@ -30,6 +30,8 @@ import type {
   LeaseVerificationResult,
   VerificationResult,
   StoredPushSubscription,
+  PasskeyPRFConfigV2,
+  PasskeyGateConfigV2,
 } from './types';
 import {
   setupPassphrase,
@@ -1187,6 +1189,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'getEnrollments':
         result = await handleGetEnrollments(validators.validateGetEnrollments(params));
+        break;
+
+      case 'getPasskeyUnlockParams':
+        result = await handleGetPasskeyUnlockParams(validators.validateGetPasskeyUnlockParams(params));
         break;
 
       case 'verifyAuditChain':
@@ -2881,6 +2887,53 @@ async function handleGetEnrollments(params?: { userId?: string }): Promise<{ enr
   }
 
   return { enrollments };
+}
+
+/**
+ * Resolve the parameters the top-level popup needs to run a WebAuthn unlock
+ * ceremony for a user's passkey enrollment.
+ *
+ * SECURITY / CORRECTNESS: the authoritative PRF `appSalt` lives ONLY in the
+ * worker's IndexedDB (`PasskeyPRFConfigV2.kdf.appSalt`). The iframe used to read
+ * `localStorage['kms:appSalt']` and fabricate a random salt when absent — which
+ * produced a wrong PRF output and a failed unlock (BUG-008). This RPC is the
+ * single source of truth for the salt, the stored credentialId (for
+ * `allowCredentials`), and the rpId.
+ *
+ * Prefers PRF when both PRF and gate enrollments exist.
+ */
+async function handleGetPasskeyUnlockParams(params?: { userId?: string }): Promise<{
+  method: 'passkey-prf' | 'passkey-gate';
+  appSalt?: string;
+  credentialId?: string;
+  rpId?: string;
+}> {
+  const userId = params?.userId ?? 'default';
+
+  const prfConfig = await getMeta<PasskeyPRFConfigV2>(`enrollment:passkey-prf:v2:${userId}`);
+  if (prfConfig) {
+    return {
+      method: 'passkey-prf',
+      appSalt: arrayBufferToBase64url(prfConfig.kdf.appSalt),
+      ...(prfConfig.credentialId
+        ? { credentialId: arrayBufferToBase64url(prfConfig.credentialId) }
+        : {}),
+      rpId: prfConfig.rpId,
+    };
+  }
+
+  const gateConfig = await getMeta<PasskeyGateConfigV2>(`enrollment:passkey-gate:v2:${userId}`);
+  if (gateConfig) {
+    return {
+      method: 'passkey-gate',
+      ...(gateConfig.credentialId
+        ? { credentialId: arrayBufferToBase64url(gateConfig.credentialId) }
+        : {}),
+      rpId: gateConfig.rpId,
+    };
+  }
+
+  throw new Error('No passkey enrollment found for this user');
 }
 
 /**

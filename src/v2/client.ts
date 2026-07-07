@@ -66,6 +66,13 @@ export class KMSClient {
   private messagePort: MessagePort | null = null; // For direct parent communication
   // Note: hkdfSalt from URL is not used directly in popup (sent to iframe via encrypted message)
 
+  // Popup-side unlock ceremony state (BUG-008: passkey unlock runs in a top-level
+  // popup, not the iframe, so password managers key on the top-level domain and the
+  // PRF appSalt is not storage-partitioned away).
+  private credentialPort: MessagePort | null = null; // MessagePort back to the iframe
+  private unlockMethod: 'passkey-prf' | 'passkey-gate' | null = null;
+  private unlockCredentialId: string | null = null;
+
   /**
    * Create a new KMS client bridge
    *
@@ -477,6 +484,68 @@ export class KMSClient {
   }
 
   /**
+   * Ask the parent PWA to open a top-level popup and wait for the private
+   * MessagePort the parent transfers back once the popup signals ready.
+   *
+   * The parent is the only party that can open a popup (the iframe is sandboxed
+   * without `allow-popups`); it brokers a MessageChannel — one port to the iframe
+   * (returned here), one to the popup — so the iframe and popup talk directly and
+   * privately without the parent seeing the traffic. Shared by the setup-popup
+   * flow ({@link handleSetupWithPopup}) and the unlock-popup flow
+   * ({@link handleWebAuthnUnlockViaPopup}).
+   *
+   * @param popupURL - Fully-built popup URL (parentOrigin already appended)
+   * @param requestId - Correlation id echoed by the parent in `kms:popup-ready`
+   * @returns The iframe-side MessagePort to the popup
+   */
+  private async openPopupChannel(popupURL: string, requestId: string): Promise<MessagePort> {
+    if (!this.parentOrigin) {
+      throw new Error('Parent origin not configured');
+    }
+
+    const targetWindow = window.parent && window.parent !== window ? window.parent : null;
+    if (!targetWindow) {
+      throw new Error('No parent window available');
+    }
+
+    // Ask parent to open popup
+    targetWindow.postMessage(
+      {
+        type: 'kms:request-popup',
+        url: popupURL,
+        requestId,
+      },
+      this.parentOrigin
+    );
+
+    // Wait for popup ready signal and MessagePort from parent.
+    // Parent creates MessageChannel and sends one port to iframe, one to popup.
+    return new Promise<MessagePort>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handlePopupReady);
+        reject(new Error('Popup ready timeout'));
+      }, 30000); // 30 second timeout
+
+      const handlePopupReady = (event: MessageEvent): void => {
+        // Parent forwards popup-ready and transfers MessagePort
+        const data = event.data as { type?: string; requestId?: string };
+        if (data?.type === 'kms:popup-ready' && data.requestId === requestId) {
+          clearTimeout(timeout);
+          window.removeEventListener('message', handlePopupReady);
+          // MessagePort is in event.ports[0]
+          if (event.ports && event.ports.length > 0 && event.ports[0]) {
+            resolve(event.ports[0]);
+          } else {
+            reject(new Error('No MessagePort received with popup-ready'));
+          }
+        }
+      };
+
+      window.addEventListener('message', handlePopupReady);
+    });
+  }
+
+  /**
    * Orchestrate complete popup setup flow.
    *
    * This method handles the entire popup flow for KMS-only credential collection:
@@ -499,13 +568,14 @@ export class KMSClient {
     hkdfSalt: string;
   }): Promise<void> {
     try {
-      // Step 1: Request parent to open popup
+      // Step 1: Request parent to open popup.
+      // These preconditions are validated synchronously (before any await) so the
+      // worker:popup-error is posted in the same tick — openPopupChannel repeats the
+      // same checks defensively, but that path runs a microtask later.
       if (!this.parentOrigin) {
         throw new Error('Parent origin not configured');
       }
-
-      const targetWindow = window.parent && window.parent !== window ? window.parent : null;
-      if (!targetWindow) {
+      if (!(window.parent && window.parent !== window)) {
         throw new Error('No parent window available');
       }
 
@@ -513,44 +583,8 @@ export class KMSClient {
       const popupURL = new URL(params.popupURL);
       popupURL.searchParams.set('parentOrigin', this.parentOrigin);
 
-      // Ask parent to open popup
-      targetWindow.postMessage(
-        {
-          type: 'kms:request-popup',
-          url: popupURL.toString(),
-          requestId: params.requestId,
-        },
-        this.parentOrigin
-      );
-
-      // Step 2: Wait for popup ready signal and MessagePort from parent
-      // Parent creates MessageChannel and sends one port to iframe, one to popup
-      const popupPortPromise = new Promise<MessagePort>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Popup ready timeout'));
-        }, 30000); // 30 second timeout
-
-        const handlePopupReady = (event: MessageEvent): void => {
-          // Parent forwards popup-ready and transfers MessagePort
-          const data = event.data as { type?: string; requestId?: string };
-          if (data?.type === 'kms:popup-ready' && data.requestId === params.requestId) {
-            // MessagePort is in event.ports[0]
-            if (event.ports && event.ports.length > 0 && event.ports[0]) {
-              clearTimeout(timeout);
-              window.removeEventListener('message', handlePopupReady);
-              resolve(event.ports[0]);
-            } else {
-              clearTimeout(timeout);
-              window.removeEventListener('message', handlePopupReady);
-              reject(new Error('No MessagePort received with popup-ready'));
-            }
-          }
-        };
-
-        window.addEventListener('message', handlePopupReady);
-      });
-
-      const port1 = await popupPortPromise;
+      // Steps 2/3: Ask parent to open popup and wait for the transferred MessagePort.
+      const port1 = await this.openPopupChannel(popupURL.toString(), params.requestId);
 
       // Step 4: Send transport parameters to popup via MessagePort
       // Wait for popup to receive the channel and respond
@@ -926,108 +960,275 @@ export class KMSClient {
     this.hideError();
 
     try {
-      // Load appSalt for PRF (or generate new one for first unlock attempt)
-      const appSaltStr = localStorage.getItem('kms:appSalt');
-      let appSalt: Uint8Array;
-
-      if (appSaltStr) {
-        // Parse stored appSalt
-        appSalt = new Uint8Array(appSaltStr.split(',').map(n => parseInt(n, 10)));
-      } else {
-        // Generate new appSalt for first unlock attempt
-        appSalt = crypto.getRandomValues(new Uint8Array(32));
-      }
-
-      // Call WebAuthn in iframe context - ALWAYS try PRF extension
-      const credential = await navigator.credentials.get({
-        publicKey: {
-          challenge: new Uint8Array(32), // Dummy challenge for demo
-          timeout: 60000,
-          userVerification: 'required',
-          extensions: {
-            prf: {
-              eval: {
-                first: appSalt as BufferSource,
-              },
-            },
-          },
-        },
-      }) as PublicKeyCredential;
-
-      if (!credential) {
-        throw new Error('No credential returned');
-      }
-
-      // Check if PRF succeeded
-      const prfExt = getPRFResults(credential);
-      const prfOutput = prfExt?.results?.first;
-
-      // WebAuthn succeeded - now execute the pending operation with credentials
+      // BUG-008: passkey unlock cannot run reliably in this iframe — password
+      // managers key passkeys on the TOP-LEVEL domain and the PRF appSalt is
+      // storage-partitioned away. So we route the WebAuthn ceremony to a top-level
+      // kms.ats.run popup instead. Passphrase unlock stays in the iframe.
       if (!this.pendingUnlockRequest) {
         throw new Error('No pending operation');
       }
 
-      // Extract userId from the pending request params
+      // Resolve userId from the pending request params
       const userId = (this.pendingUnlockRequest.params as { userId?: string } | undefined)?.userId;
       if (!userId) {
         throw new Error('userId not found in request params');
       }
 
-      // Check what enrollment methods exist for this user
-      // We need to match the unlock method to the setup method
-      const enrollments = await this.getEnrollments(userId);
+      // Ask the worker for the authoritative unlock params. The appSalt MUST come
+      // from the stored PasskeyPRFConfigV2 (worker IndexedDB) — never localStorage,
+      // never fabricated. Throws 'No passkey enrollment found for this user' when
+      // the user has no passkey enrollment (same error as before).
+      const unlockParams = await this.getPasskeyUnlockParams(userId);
 
-
-      // Build credentials object based on enrollment type (include userId)
-      // Use PRF only if user has PRF enrollment, otherwise use Gate
-      const hasPRFEnrollment = enrollments.includes('enrollment:passkey-prf:v2');
-      const hasGateEnrollment = enrollments.includes('enrollment:passkey-gate:v2');
-
-      let credentials: AuthCredentials;
-      if (hasPRFEnrollment && prfOutput) {
-        credentials = { method: 'passkey-prf', prfOutput, userId };
-      } else if (hasGateEnrollment) {
-        credentials = { method: 'passkey-gate', userId };
-      } else {
-        throw new Error('No passkey enrollment found for this user');
-      }
-
-
-      // Check if this is for addEnrollmentWithPopup unlock flow
-      if (this.pendingUnlockRequestId) {
-        // Send credentials directly to worker for addEnrollmentWithPopup
-        this.worker?.postMessage({
-          type: 'worker:unlock-credentials',
-          requestId: this.pendingUnlockRequestId,
-          credentials,
-        });
-
-        // Clear state
-        this.pendingUnlockRequestId = null;
-        this.pendingUnlockRequest = null;
-
-        // Hide modal
-        this.hideModal();
-        this.hideLoading();
-      } else {
-        // Normal unlock flow for RPC methods
-        // Add credentials to the request params
-        const requestWithCredentials: RPCRequest = {
-          ...this.pendingUnlockRequest,
-          params: {
-            ...(this.pendingUnlockRequest.params as Record<string, unknown>),
-            credentials,
-          },
-        };
-
-        // Send to worker and setup response listener
-        this.setupUnlockResponseListener(requestWithCredentials);
-        this.worker?.postMessage(requestWithCredentials);
-      }
+      await this.handleWebAuthnUnlockViaPopup({ ...unlockParams, userId });
     } catch (err: unknown) {
       this.hideLoading();
       this.showError(`WebAuthn failed: ${getErrorMessage(err)}`);
       console.error('[KMS Client] WebAuthn unlock failed:', err);
+    }
+  }
+
+  /**
+   * Fetch the authoritative passkey unlock parameters from the worker.
+   *
+   * Mirrors {@link getEnrollments}' request/response round-trip. Returns the
+   * enrollment `method`, the PRF `appSalt` (base64url, from the stored config's
+   * `kdf.appSalt`), the stored `credentialId` (base64url, if any), and the `rpId`.
+   */
+  private async getPasskeyUnlockParams(userId: string): Promise<{
+    method: 'passkey-prf' | 'passkey-gate';
+    appSalt?: string;
+    credentialId?: string;
+    rpId?: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      const requestId = `get-passkey-unlock-params-${Date.now()}`;
+      const request: RPCRequest = {
+        id: requestId,
+        method: 'getPasskeyUnlockParams',
+        params: { userId },
+      };
+
+      const handler = (event: MessageEvent): void => {
+        const response = event.data as RPCResponse;
+        if (response.id === requestId) {
+          this.worker?.removeEventListener('message', handler);
+          if (response.error) {
+            const errorMsg = typeof response.error === 'string' ? response.error : response.error.message;
+            reject(new Error(errorMsg));
+          } else {
+            resolve(response.result as {
+              method: 'passkey-prf' | 'passkey-gate';
+              appSalt?: string;
+              credentialId?: string;
+              rpId?: string;
+            });
+          }
+        }
+      };
+
+      this.worker?.addEventListener('message', handler);
+      this.worker?.postMessage(request);
+
+      // Timeout after 5s
+      setTimeout(() => {
+        this.worker?.removeEventListener('message', handler);
+        reject(new Error('getPasskeyUnlockParams timeout'));
+      }, 5000);
+    });
+  }
+
+  /**
+   * Run the passkey unlock via a top-level kms.ats.run popup (BUG-008, approach B).
+   *
+   * Opens a `mode=unlock` popup through the parent broker, hands it the unlock
+   * params over the private MessagePort, and awaits the popup's WebAuthn result.
+   * The PRF output travels back as PLAINTEXT over the port (both ends are enclave
+   * code) — there is no encrypted-credential/transport-key round trip. The
+   * reconstructed `credentials` object is injected downstream IDENTICALLY to the
+   * previous iframe unlock path.
+   */
+  private async handleWebAuthnUnlockViaPopup(unlockParams: {
+    method: 'passkey-prf' | 'passkey-gate';
+    appSalt?: string;
+    credentialId?: string;
+    userId: string;
+  }): Promise<void> {
+    const { method, appSalt, credentialId, userId } = unlockParams;
+    const requestId = `unlock-popup-${Date.now()}`;
+
+    // Distinct mode=unlock popup on the top-level enclave origin.
+    const popupURL = `${location.origin}/?mode=unlock&parentOrigin=${this.parentOrigin}`;
+
+    const port = await this.openPopupChannel(popupURL, requestId);
+
+    // Await the popup's WebAuthn result over the private MessagePort.
+    const credentialsPromise = new Promise<{
+      method: 'passkey-prf' | 'passkey-gate';
+      prfOutput?: number[];
+    }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        port.close();
+        reject(new Error('Popup unlock timeout'));
+      }, 120000); // ~2 minutes for the user to complete the ceremony
+
+      port.onmessage = (event: MessageEvent): void => {
+        const data = event.data as {
+          type?: string;
+          method?: 'passkey-prf' | 'passkey-gate';
+          prfOutput?: number[];
+          error?: string;
+        };
+
+        if (data?.type === 'popup:credentials') {
+          clearTimeout(timeout);
+          port.close();
+          const resolvedMethod = data.method ?? 'passkey-prf';
+          resolve(
+            data.prfOutput
+              ? { method: resolvedMethod, prfOutput: data.prfOutput }
+              : { method: resolvedMethod }
+          );
+        } else if (data?.type === 'popup:error') {
+          clearTimeout(timeout);
+          port.close();
+          reject(new Error(data.error || 'Popup unlock error'));
+        } else if (data?.type === 'popup:connected') {
+          /* eslint-disable-next-line no-console */
+          console.log('[KMS Client] Unlock popup connected, awaiting ceremony...');
+        }
+      };
+    });
+
+    // Tell the popup which ceremony to run (plaintext params — enclave-to-enclave).
+    port.postMessage({
+      type: 'kms:connect',
+      operation: 'unlock',
+      method,
+      appSalt,
+      credentialId,
+      userId,
+    });
+
+    const popupResult = await credentialsPromise;
+
+    // Reconstruct AuthCredentials in exactly the shape the worker expects today.
+    let credentials: AuthCredentials;
+    if (method === 'passkey-prf') {
+      if (!popupResult.prfOutput) {
+        throw new Error('No PRF output returned from popup');
+      }
+      // Port carries a plain number[]; reconstruct the ArrayBuffer the worker wants.
+      const prfOutput = new Uint8Array(popupResult.prfOutput).buffer;
+      credentials = { method: 'passkey-prf', prfOutput, userId };
+    } else {
+      credentials = { method: 'passkey-gate', userId };
+    }
+
+    if (!this.pendingUnlockRequest) {
+      throw new Error('No pending operation');
+    }
+
+    // IDENTICAL downstream injection to the previous handleWebAuthnUnlock.
+    if (this.pendingUnlockRequestId) {
+      // addEnrollmentWithPopup unlock flow → send credentials straight to worker.
+      this.worker?.postMessage({
+        type: 'worker:unlock-credentials',
+        requestId: this.pendingUnlockRequestId,
+        credentials,
+      });
+
+      this.pendingUnlockRequestId = null;
+      this.pendingUnlockRequest = null;
+
+      this.hideModal();
+      this.hideLoading();
+    } else {
+      // Normal unlock flow for RPC methods.
+      const requestWithCredentials: RPCRequest = {
+        ...this.pendingUnlockRequest,
+        params: {
+          ...(this.pendingUnlockRequest.params as Record<string, unknown>),
+          credentials,
+        },
+      };
+
+      this.setupUnlockResponseListener(requestWithCredentials);
+      this.worker?.postMessage(requestWithCredentials);
+    }
+  }
+
+  /**
+   * Popup-side WebAuthn unlock ceremony (BUG-008). Runs in the top-level
+   * kms.ats.run popup after it receives `kms:connect` with `operation: 'unlock'`.
+   *
+   * Mirrors {@link handleWebAuthnSetup}'s stateless branch but calls
+   * `credentials.get()` (assertion) instead of `credentials.create()`. Posts the
+   * PRF output back to the iframe as PLAINTEXT (`number[]`) over the MessagePort.
+   */
+  async runPopupUnlockCeremony(): Promise<void> {
+    const port = this.credentialPort;
+    if (!port) {
+      console.error('[KMS Client] No credential port for unlock ceremony');
+      return;
+    }
+
+    try {
+      const method = this.unlockMethod ?? 'passkey-prf';
+      // Pass allowCredentials only when a credentialId is stored; otherwise omit it
+      // entirely so the browser runs a discoverable-credential get().
+      const allowCredentials: PublicKeyCredentialDescriptor[] | undefined = this.unlockCredentialId
+        ? [{ type: 'public-key', id: base64urlToArrayBuffer(this.unlockCredentialId) }]
+        : undefined;
+
+      if (method === 'passkey-prf') {
+        if (!this.appSalt) {
+          throw new Error('Missing appSalt for PRF unlock');
+        }
+        const appSalt = base64urlToArrayBuffer(this.appSalt);
+
+        // NOTE: this entire method lives inside the class-level `c8 ignore` region
+        // (DOM/WebAuthn ceremony cannot be unit-tested without a real authenticator).
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            timeout: 60000,
+            userVerification: 'required',
+            ...(allowCredentials ? { allowCredentials } : {}),
+            extensions: {
+              prf: {
+                eval: {
+                  first: appSalt,
+                },
+              },
+            },
+          },
+        }) as PublicKeyCredential;
+
+        const prfOutput = getPRFResults(assertion)?.results?.first;
+        if (!prfOutput) {
+          throw new Error('PRF output not available from assertion');
+        }
+
+        port.postMessage({
+          type: 'popup:credentials',
+          method: 'passkey-prf',
+          prfOutput: Array.from(new Uint8Array(prfOutput)),
+        });
+      } else {
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            timeout: 60000,
+            userVerification: 'required',
+            ...(allowCredentials ? { allowCredentials } : {}),
+          },
+        });
+
+        port.postMessage({ type: 'popup:credentials', method: 'passkey-gate' });
+      }
+    } catch (err: unknown) {
+      port.postMessage({ type: 'popup:error', error: getErrorMessage(err) });
     }
   }
 
@@ -2274,43 +2475,59 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             port.onmessage = (portEvent: MessageEvent): void => {
               const portData = portEvent.data as {
                 type?: string;
+                operation?: 'setup' | 'unlock';
+                method?: 'passkey-prf' | 'passkey-gate';
                 transportKey?: string;
                 transportKeyId?: string;
                 appSalt?: string;
+                credentialId?: string;
                 hkdfSalt?: string;
                 userId?: string;
               };
 
               if (portData?.type === 'kms:connect') {
                 /* eslint-disable no-console */
-                console.log('[KMS Client] Popup received kms:connect via MessagePort');
+                console.log('[KMS Client] Popup received kms:connect via MessagePort', portData.operation ?? 'setup');
                 /* eslint-enable no-console */
 
-                // Store transport params and port for credential sending
-                // Using type assertion to access private properties in auto-init code
                 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
-                (client as any).transportPublicKey = portData.transportKey!;
-                (client as any).transportKeyId = portData.transportKeyId!;
-                (client as any).appSalt = portData.appSalt!;
-                (client as any).hkdfSalt = portData.hkdfSalt!;
-                (client as any).userId = portData.userId!; // Store userId from parent
-                (client as any).isStatelessPopup = true;
+                if (portData.operation === 'unlock') {
+                  // BUG-008: top-level passkey unlock ceremony (approach B).
+                  (client as any).appSalt = portData.appSalt ?? null;
+                  (client as any).unlockCredentialId = portData.credentialId ?? null;
+                  (client as any).unlockMethod = portData.method ?? 'passkey-prf';
+                  (client as any).userId = portData.userId!;
+                  (client as any).credentialPort = port;
 
-                // Store the MessagePort for sending credentials later
-                (client as any).credentialPort = port;
+                  // Confirm connection, then run the WebAuthn assertion ceremony
+                  // (top-level, so the password manager and PRF salt work).
+                  port.postMessage({ type: 'popup:connected' });
+                  void client.runPopupUnlockCeremony();
+                } else {
+                  // Setup flow (unchanged): store transport params, show setup modal.
+                  (client as any).transportPublicKey = portData.transportKey!;
+                  (client as any).transportKeyId = portData.transportKeyId!;
+                  (client as any).appSalt = portData.appSalt!;
+                  (client as any).hkdfSalt = portData.hkdfSalt!;
+                  (client as any).userId = portData.userId!; // Store userId from parent
+                  (client as any).isStatelessPopup = true;
 
-                // Confirm connection
-                port.postMessage({ type: 'popup:connected' });
+                  // Store the MessagePort for sending credentials later
+                  (client as any).credentialPort = port;
+
+                  // Confirm connection
+                  port.postMessage({ type: 'popup:connected' });
+
+                  // Show setup modal
+                  setTimeout(() => {
+                    client.setupSetupModalHandlers();
+                    const setupModal = document.getElementById('setup-modal');
+                    if (setupModal) {
+                      setupModal.classList.remove('hidden');
+                    }
+                  }, 100);
+                }
                 /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
-
-                // Show setup modal
-                setTimeout(() => {
-                  client.setupSetupModalHandlers();
-                  const setupModal = document.getElementById('setup-modal');
-                  if (setupModal) {
-                    setupModal.classList.remove('hidden');
-                  }
-                }, 100);
               }
             };
           }

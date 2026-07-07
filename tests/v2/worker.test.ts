@@ -1675,6 +1675,46 @@ describe('getEnrollments', () => {
   });
 });
 
+describe('getPasskeyUnlockParams', () => {
+  it('should error when the user has no passkey enrollment', async () => {
+    const request = createRequest('getPasskeyUnlockParams', { userId: 'test@example.com' });
+    const response = await handleMessage(request);
+
+    expect(response.error).toBeDefined();
+    expect(response.error).toContain('No passkey enrollment found');
+  });
+
+  it('should return the appSalt and credentialId from the stored PRF config', async () => {
+    const credentialId = new Uint8Array([9, 8, 7, 6, 5]).buffer;
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
+
+    await handleMessage(
+      createRequest('setupPasskeyPRF', { userId: 'test@example.com', credentialId, prfOutput })
+    );
+
+    const response = await handleMessage(
+      createRequest('getPasskeyUnlockParams', { userId: 'test@example.com' })
+    );
+
+    expect(response.error).toBeUndefined();
+    const result = getResult<{
+      method: string;
+      appSalt?: string;
+      credentialId?: string;
+      rpId?: string;
+    }>(response);
+
+    expect(result.method).toBe('passkey-prf');
+    // appSalt is sourced from the worker config (never fabricated) and is a
+    // 32-byte value encoded as base64url.
+    expect(typeof result.appSalt).toBe('string');
+    expect(result.appSalt!.length).toBeGreaterThan(0);
+    expect(base64urlToArrayBuffer(result.appSalt!).byteLength).toBe(32);
+    // credentialId round-trips back to the stored bytes.
+    expect(result.credentialId).toBe(arrayBufferToBase64url(credentialId));
+  });
+});
+
 describe('verifyAuditChain', () => {
   it('should verify empty audit chain', async () => {
     const request = createRequest('verifyAuditChain');

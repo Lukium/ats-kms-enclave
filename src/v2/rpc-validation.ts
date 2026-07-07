@@ -491,6 +491,16 @@ export function validateGetEnrollments(params: unknown): { userId?: string } {
   return userId !== undefined ? { userId } : {};
 }
 
+export function validateGetPasskeyUnlockParams(params: unknown): { userId?: string } {
+  // getPasskeyUnlockParams takes an optional userId (defaults to 'default')
+  if (params === undefined || params === null) {
+    return {};
+  }
+  const p = validateParamsObject('getPasskeyUnlockParams', params);
+  const userId = validateOptionalString('getPasskeyUnlockParams', 'userId', p.userId);
+  return userId !== undefined ? { userId } : {};
+}
+
 export function validateVerifyAuditChain(_params: unknown): Record<string, never> {
   // No params required
   return {};

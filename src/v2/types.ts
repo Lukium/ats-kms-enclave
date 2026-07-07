@@ -554,6 +554,7 @@ export type RPCMethod =
   | 'addEnrollmentWithPopup'
   | 'removeEnrollment'
   | 'getEnrollments'
+  | 'getPasskeyUnlockParams'
   | 'generateVAPID'
   | 'regenerateVAPID'
   | 'signJWT'

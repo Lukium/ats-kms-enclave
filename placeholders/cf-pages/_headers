@@ -63,28 +63,24 @@
   # Standard security headers
   X-Content-Type-Options: nosniff
 
-# Content-addressed worker AND client (hashed filenames, e.g. kms-worker.{hash}.js and
-# enclave-client.{hash}.js — BUG-R05). Their URLs change whenever the bytes change, so
-# they are safe to cache forever / immutable: a new deploy is fetched fresh under a new
-# name and stale copies are simply never requested again. This is what ended the
-# manual-cache-purge dance — previously enclave-client.js had a FIXED name, so a client
-# change could leave returning browsers / the edge serving a stale copy that failed SRI
-# against the fresh index.html, and the KMS never booted.
+# Content-addressed worker (hashed filename, e.g. kms-worker.{hash}.js). Its URL
+# changes every build, so it is safe to cache forever / immutable.
+# NOTE: immutable must be scoped to the hashed worker ONLY — do not put it on a
+# broad /*.js glob, because that also matches the FIXED-name enclave-client.js.
+# Cloudflare MERGES Cache-Control across matching rules (a later, more specific rule
+# does NOT override), so a broad immutable leaks onto enclave-client.js; then a deploy
+# that changes the client leaves returning browsers serving the stale one (immutable
+# => no revalidation even on reload) which fails SRI against the fresh index.html and
+# the KMS never boots.
 /kms-worker.*.js
   Content-Type: application/javascript; charset=utf-8
   Cross-Origin-Resource-Policy: same-origin
   Cache-Control: public, max-age=31536000, immutable
   X-Content-Type-Options: nosniff
 
-/enclave-client.*.js
-  Content-Type: application/javascript; charset=utf-8
-  Cross-Origin-Resource-Policy: same-origin
-  Cache-Control: public, max-age=31536000, immutable
-  X-Content-Type-Options: nosniff
-
-# Fallback for any other JS. Short, revalidating cache; never immutable. With the worker
-# and client now both content-addressed, no fixed-name JS is expected here — this is a
-# safety net only.
+# All other JS — notably the FIXED-name enclave-client.js. Short, revalidating cache;
+# never immutable. (enclave-client.js does not match the worker rule above, so it gets
+# ONLY this max-age=300 with no immutable, regardless of Cloudflare glob semantics.)
 /*.js
   Content-Type: application/javascript; charset=utf-8
   Cross-Origin-Resource-Policy: same-origin

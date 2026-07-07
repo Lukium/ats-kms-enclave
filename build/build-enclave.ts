@@ -22,7 +22,7 @@ import * as esbuild from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 
 // ESM equivalents for __filename and __dirname
@@ -556,27 +556,18 @@ h1 {
 
 /**
  * Build the client script for the enclave
- * Compiles src/v2/client.ts and injects the hashed worker filename.
- *
- * The client is CONTENT-ADDRESSED (enclave-client.{hash}.js), exactly like the worker
- * (BUG-R05). A stable filename previously meant a deploy that changed the client left
- * returning browsers / the CDN edge serving a stale enclave-client.js that failed SRI
- * against the fresh index.html — so the enclave never booted and we had to purge the
- * cache by hand. With a hashed filename the URL changes whenever the bytes change, so a
- * new deploy is always fetched fresh and stale copies are simply never requested again.
- *
- * @returns SRI hash and content-addressed filename for the client script
+ * Compiles src/v2/client.ts and injects the hashed worker filename
+ * @returns SRI hash for the client script
  */
-async function buildEnclaveClient(workerFilename: string): Promise<{ sri: string; filename: string }> {
+async function buildEnclaveClient(workerFilename: string): Promise<string> {
   console.log('\n📦 Building KMS Enclave Client...');
 
-  // Build to a temp path first so we can hash the output and content-address it.
-  const tempPath = join(distDir, 'enclave/enclave-client.temp.js');
+  const clientPath = join(distDir, 'enclave/enclave-client.js');
 
   await esbuild.build({
     entryPoints: [join(srcDir, 'v2/client.ts')],
     bundle: true,
-    outfile: tempPath,
+    outfile: clientPath,
     format: 'esm',
     target: 'es2022',
     platform: 'browser',
@@ -598,32 +589,21 @@ async function buildEnclaveClient(workerFilename: string): Promise<{ sri: string
     external: [],
   });
 
-  // Content-address: hash the output, use first 8 chars for the filename (like the worker).
-  const content = readFileSync(tempPath);
-  const hash = createHash('sha256').update(content).digest('hex');
-  const sri = computeSRIHash(content);
-  const shortHash = hash.substring(0, 8);
-  const filename = `enclave-client.${shortHash}.js`;
-  const outputPath = join(distDir, 'enclave', filename);
+  // Compute SRI hash
+  const clientContent = readFileSync(clientPath);
+  const sri = computeSRIHash(clientContent);
 
-  writeFileSync(outputPath, content);
-
-  // Remove temp file
-  const fs = await import('fs');
-  fs.unlinkSync(tempPath);
-
-  console.log(`✅ Built: ${outputPath}`);
+  console.log(`✅ Built: ${clientPath}`);
   console.log(`🔒 SRI: ${sri}`);
-  console.log(`📝 Filename: ${filename}`);
 
-  return { sri, filename };
+  return sri;
 }
 
 /**
  * Generate the HTML wrapper for the enclave
  * Includes both iframe status display and modal UI for popup windows
  */
-function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: string, clientFilename: string): void {
+function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: string): void {
   console.log('\n📝 Generating KMS Enclave HTML...');
 
   const html = `<!DOCTYPE html>
@@ -797,7 +777,7 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
     </div>
   </div>
 
-  <script type="module" src="${clientFilename}" integrity="${clientSRI}" crossorigin="anonymous"></script>
+  <script type="module" src="enclave-client.js" integrity="${clientSRI}" crossorigin="anonymous"></script>
 </body>
 </html>`;
 
@@ -824,8 +804,8 @@ async function main() {
 
     // Generate CSS, client script, and HTML
     const cssSRI = generateEnclaveCSS();
-    const { sri: clientSRI, filename: clientFilename } = await buildEnclaveClient(filename);
-    generateEnclaveHTML(hash, cssSRI, clientSRI, clientFilename);
+    const clientSRI = await buildEnclaveClient(filename);
+    generateEnclaveHTML(hash, cssSRI, clientSRI);
 
     // Copy static assets (logo, favicon) to dist/enclave/
     const staticAssetsDir = join(rootDir, 'placeholders/cf-pages');
@@ -851,8 +831,7 @@ async function main() {
           sri: workerSRI
         },
         client: {
-          path: `enclave/${clientFilename}`,
-          filename: clientFilename,
+          path: 'enclave/enclave-client.js',
           sri: clientSRI
         },
         css: {
@@ -879,21 +858,16 @@ async function main() {
     const cfPagesDir = join(rootDir, 'placeholders/cf-pages');
     console.log(`\n📤 Copying to Cloudflare Pages directory...`);
 
-    // Clean up old worker + client files (security: only keep current version). This also
-    // removes any legacy fixed-name enclave-client.js from before content-addressing.
-    console.log(`\n🧹 Cleaning up old worker/client files...`);
+    // Clean up old worker files (security: only keep current version)
+    console.log(`\n🧹 Cleaning up old worker files...`);
     const fs = await import('fs');
-    const staleArtifacts = fs.readdirSync(cfPagesDir).filter(
-      (f) =>
-        (f.startsWith('kms-worker.') && f.endsWith('.js') && f !== filename) ||
-        (f.startsWith('enclave-client.') && f.endsWith('.js') && f !== clientFilename) ||
-        f === 'enclave-client.js'
-    );
+    const existingWorkers = fs.readdirSync(cfPagesDir)
+      .filter(f => f.startsWith('kms-worker.') && f.endsWith('.js') && f !== filename);
 
-    for (const stale of staleArtifacts) {
-      const oldPath = join(cfPagesDir, stale);
+    for (const oldWorker of existingWorkers) {
+      const oldPath = join(cfPagesDir, oldWorker);
       fs.unlinkSync(oldPath);
-      console.log(`  🗑️  Removed: ${stale}`);
+      console.log(`  🗑️  Removed: ${oldWorker}`);
     }
 
     // Copy the worker JS file
@@ -906,9 +880,9 @@ async function main() {
     writeFileSync(cfCssPath, readFileSync(join(distDir, 'enclave/enclave.css')));
     console.log(`  ✅ ${cfCssPath}`);
 
-    // Copy client JS file (content-addressed)
-    const cfClientPath = join(cfPagesDir, clientFilename);
-    writeFileSync(cfClientPath, readFileSync(join(distDir, `enclave/${clientFilename}`)));
+    // Copy client JS file
+    const cfClientPath = join(cfPagesDir, 'enclave-client.js');
+    writeFileSync(cfClientPath, readFileSync(join(distDir, 'enclave/enclave-client.js')));
     console.log(`  ✅ ${cfClientPath}`);
 
     // Copy index.html
@@ -941,7 +915,7 @@ async function main() {
             sri: workerSRI
           },
           client: {
-            filename: clientFilename,
+            filename: 'enclave-client.js',
             sri: clientSRI
           },
           css: {
@@ -984,11 +958,8 @@ async function main() {
   }
 }
 
-// Run if called directly (ESM check). Use pathToFileURL so this comparison also holds on
-// Windows, where process.argv[1] is a backslash path and file://${argv[1]} would never
-// match import.meta.url (drive-letter + slash-format mismatch) — which silently skipped
-// the build locally.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run if called directly (ESM check)
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 

@@ -50,7 +50,7 @@ jobs:
         with:
           subject-path: |
             dist/enclave/kms-worker.*.js
-            dist/enclave/enclave-client.*.js
+            dist/enclave/enclave-client.js
             dist/enclave/enclave.css
 
       - name: Extract Rekor URL and update manifest

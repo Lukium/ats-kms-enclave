@@ -2102,10 +2102,11 @@ export class KMSUser {
     userId: string,
     options?: { signedPreKeyId?: number; oneTimePrekeyCount?: number }
   ): Promise<{ bundle: PublicPreKeyBundle }> {
-    // Auth is collected in the enclave modal (see authRequiredMethods in client.ts);
-    // the PWA never constructs credentials. Show the iframe so the modal is visible.
+    // Auth is now collected in a top-level kms.ats.run POPUP (BUG-008), not the iframe
+    // modal — so the iframe must STAY HIDDEN. Revealing it here covered the whole page
+    // (it's a full-screen overlay) and made pages like /messages unusable.
     if (this.iframe) {
-      this.iframe.style.display = 'block';
+      this.iframe.style.display = 'none';
     }
     try {
       const result = await this.sendRequest<{ bundle: PublicPreKeyBundle }>('setupMessaging', {
@@ -2152,10 +2153,11 @@ export class KMSUser {
   async openMessaging(
     userId: string
   ): Promise<{ sid: string; token: string; exp: number }> {
-    // Auth is collected in the enclave modal (see authRequiredMethods in client.ts);
-    // the PWA never constructs credentials. Show the iframe so the modal is visible.
+    // Auth is now collected in a top-level kms.ats.run POPUP (BUG-008), not the iframe
+    // modal — so the iframe must STAY HIDDEN. Revealing it here covered the whole page
+    // (it's a full-screen overlay) and made pages like /messages unusable.
     if (this.iframe) {
-      this.iframe.style.display = 'block';
+      this.iframe.style.display = 'none';
     }
     try {
       const result = await this.sendRequest<{ sid: string; token: string; exp: number }>('openMessaging', {
@@ -2205,10 +2207,11 @@ export class KMSUser {
    * @category Account Root Operations
    */
   async setupAccountRoot(userId: string): Promise<{ mnemonic: string }> {
-    // Auth is collected in the enclave modal (see authRequiredMethods in client.ts);
-    // the PWA never constructs credentials. Show the iframe so the modal is visible.
+    // Auth is now collected in a top-level kms.ats.run POPUP (BUG-008), not the iframe
+    // modal — so the iframe must STAY HIDDEN. Revealing it here covered the whole page
+    // (it's a full-screen overlay) and made pages like /messages unusable.
     if (this.iframe) {
-      this.iframe.style.display = 'block';
+      this.iframe.style.display = 'none';
     }
     try {
       const result = await this.sendRequest<{ mnemonic: string }>('setupAccountRoot', { userId });

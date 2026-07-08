@@ -324,8 +324,26 @@ export class KMSClient {
       'setupAccountRoot',
       'openMessaging',
     ];
+    // Messaging unlock (setupMessaging / setupAccountRoot / openMessaging) now
+    // collects ALL credentials — passphrase AND passkey — in the top-level
+    // kms.ats.run popup. The iframe modal is NOT shown for these; the popup owns
+    // the UI so the password manager and PRF appSalt work at the top level. Every
+    // OTHER authRequired method keeps using the iframe modal (showUnlockModal).
+    const messagingUnlockMethods = ['setupMessaging', 'setupAccountRoot', 'openMessaging'];
     if (request?.method && authRequiredMethods.includes(request.method)) {
-      this.showUnlockModal(request);
+      if (messagingUnlockMethods.includes(request.method)) {
+        void this.handleMessagingUnlockViaPopup(request).catch((err: unknown) => {
+          console.error('[KMS Client] Messaging unlock via popup failed:', err);
+          if (request.id) {
+            this.sendToParent({
+              id: request.id,
+              error: formatError('Messaging unlock failed', err),
+            });
+          }
+        });
+      } else {
+        this.showUnlockModal(request);
+      }
       return; // Don't forward to worker yet
     }
 
@@ -1039,6 +1057,61 @@ export class KMSClient {
   }
 
   /**
+   * Fetch the messaging unlock options from the worker (BUG-008 follow-up).
+   *
+   * Mirrors {@link getPasskeyUnlockParams}' round-trip but returns the boolean
+   * method flags (`hasPassphrase` / `hasPasskeyPrf` / `hasPasskeyGate`) the
+   * top-level popup needs to render its unlock modal, plus the PRF `appSalt`,
+   * stored `credentialId`, and `rpId` (all sourced from the worker config).
+   */
+  private async getMessagingUnlockOptions(userId: string): Promise<{
+    hasPassphrase: boolean;
+    hasPasskeyPrf: boolean;
+    hasPasskeyGate: boolean;
+    appSalt?: string;
+    credentialId?: string;
+    rpId?: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      const requestId = `get-messaging-unlock-options-${Date.now()}`;
+      const request: RPCRequest = {
+        id: requestId,
+        method: 'getMessagingUnlockOptions',
+        params: { userId },
+      };
+
+      const handler = (event: MessageEvent): void => {
+        const response = event.data as RPCResponse;
+        if (response.id === requestId) {
+          this.worker?.removeEventListener('message', handler);
+          if (response.error) {
+            const errorMsg = typeof response.error === 'string' ? response.error : response.error.message;
+            reject(new Error(errorMsg));
+          } else {
+            resolve(response.result as {
+              hasPassphrase: boolean;
+              hasPasskeyPrf: boolean;
+              hasPasskeyGate: boolean;
+              appSalt?: string;
+              credentialId?: string;
+              rpId?: string;
+            });
+          }
+        }
+      };
+
+      this.worker?.addEventListener('message', handler);
+      this.worker?.postMessage(request);
+
+      // Timeout after 5s
+      setTimeout(() => {
+        this.worker?.removeEventListener('message', handler);
+        reject(new Error('getMessagingUnlockOptions timeout'));
+      }, 5000);
+    });
+  }
+
+  /**
    * Run the passkey unlock via a top-level kms.ats.run popup (BUG-008, approach B).
    *
    * Opens a `mode=unlock` popup through the parent broker, hands it the unlock
@@ -1159,6 +1232,132 @@ export class KMSClient {
   }
 
   /**
+   * Run messaging unlock via a top-level kms.ats.run popup (BUG-008 follow-up).
+   *
+   * ALL messaging auth (passphrase AND passkey) happens in the popup: the iframe
+   * modal is never shown. We fetch the unlock options from the worker, open the
+   * `mode=unlock` popup, hand it the options over the private MessagePort, and
+   * await whichever credential the user produces. Credentials travel back as
+   * PLAINTEXT over the port (both ends are enclave code); the reconstructed
+   * `AuthCredentials` is injected downstream IDENTICALLY to
+   * {@link handleWebAuthnUnlockViaPopup} / {@link handlePassphraseUnlock}.
+   */
+  private async handleMessagingUnlockViaPopup(request: RPCRequest): Promise<void> {
+    this.pendingUnlockRequest = request;
+
+    const userId = (request.params as { userId?: string } | undefined)?.userId;
+    if (!userId) {
+      throw new Error('userId not found in request params');
+    }
+
+    // Authoritative flags + PRF appSalt from the worker config (never localStorage).
+    const options = await this.getMessagingUnlockOptions(userId);
+
+    const requestId = `unlock-popup-${Date.now()}`;
+    const popupURL = `${location.origin}/?mode=unlock&parentOrigin=${this.parentOrigin}`;
+    const port = await this.openPopupChannel(popupURL, requestId);
+
+    // Await whichever credential the user picks in the popup modal.
+    const credentialsPromise = new Promise<{
+      method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+      passphrase?: string;
+      prfOutput?: number[];
+    }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        port.close();
+        reject(new Error('Popup unlock timeout'));
+      }, 120000); // ~2 minutes for the user to complete the ceremony
+
+      port.onmessage = (event: MessageEvent): void => {
+        const data = event.data as {
+          type?: string;
+          method?: 'passphrase' | 'passkey-prf' | 'passkey-gate';
+          passphrase?: string;
+          prfOutput?: number[];
+          error?: string;
+        };
+
+        if (data?.type === 'popup:credentials') {
+          clearTimeout(timeout);
+          port.close();
+          resolve({
+            method: data.method ?? 'passphrase',
+            ...(data.passphrase !== undefined ? { passphrase: data.passphrase } : {}),
+            ...(data.prfOutput ? { prfOutput: data.prfOutput } : {}),
+          });
+        } else if (data?.type === 'popup:error') {
+          clearTimeout(timeout);
+          port.close();
+          reject(new Error(data.error || 'Popup unlock error'));
+        } else if (data?.type === 'popup:connected') {
+          /* eslint-disable-next-line no-console */
+          console.log('[KMS Client] Messaging unlock popup connected, awaiting credentials...');
+        }
+      };
+    });
+
+    // Tell the popup to render the unlock modal (plaintext — enclave-to-enclave).
+    port.postMessage({
+      type: 'kms:connect',
+      operation: 'unlock',
+      options,
+      appSalt: options.appSalt,
+      credentialId: options.credentialId,
+      userId,
+    });
+
+    const popupResult = await credentialsPromise;
+
+    // Reconstruct AuthCredentials in exactly the shape the worker expects.
+    let credentials: AuthCredentials;
+    if (popupResult.method === 'passphrase') {
+      if (!popupResult.passphrase) {
+        throw new Error('No passphrase returned from popup');
+      }
+      credentials = { method: 'passphrase', passphrase: popupResult.passphrase, userId };
+    } else if (popupResult.method === 'passkey-prf') {
+      if (!popupResult.prfOutput) {
+        throw new Error('No PRF output returned from popup');
+      }
+      // Port carries a plain number[]; reconstruct the ArrayBuffer the worker wants.
+      const prfOutput = new Uint8Array(popupResult.prfOutput).buffer;
+      credentials = { method: 'passkey-prf', prfOutput, userId };
+    } else {
+      credentials = { method: 'passkey-gate', userId };
+    }
+
+    if (!this.pendingUnlockRequest) {
+      throw new Error('No pending operation');
+    }
+
+    // IDENTICAL downstream injection to handleWebAuthnUnlockViaPopup.
+    if (this.pendingUnlockRequestId) {
+      this.worker?.postMessage({
+        type: 'worker:unlock-credentials',
+        requestId: this.pendingUnlockRequestId,
+        credentials,
+      });
+
+      this.pendingUnlockRequestId = null;
+      this.pendingUnlockRequest = null;
+
+      this.hideModal();
+      this.hideLoading();
+    } else {
+      const requestWithCredentials: RPCRequest = {
+        ...this.pendingUnlockRequest,
+        params: {
+          ...(this.pendingUnlockRequest.params as Record<string, unknown>),
+          credentials,
+        },
+      };
+
+      this.setupUnlockResponseListener(requestWithCredentials);
+      this.worker?.postMessage(requestWithCredentials);
+    }
+  }
+
+  /**
    * Popup-side WebAuthn unlock ceremony (BUG-008). Runs in the top-level
    * kms.ats.run popup after it receives `kms:connect` with `operation: 'unlock'`.
    *
@@ -1174,61 +1373,160 @@ export class KMSClient {
     }
 
     try {
-      const method = this.unlockMethod ?? 'passkey-prf';
-      // Pass allowCredentials only when a credentialId is stored; otherwise omit it
-      // entirely so the browser runs a discoverable-credential get().
-      const allowCredentials: PublicKeyCredentialDescriptor[] | undefined = this.unlockCredentialId
-        ? [{ type: 'public-key', id: base64urlToArrayBuffer(this.unlockCredentialId) }]
-        : undefined;
+      await this.performPopupUnlockAssertion(port);
+    } catch (err: unknown) {
+      // Legacy passkey-only path (non-messaging iframe modal → popup): any failure
+      // is fatal for this popup, so surface it to the iframe.
+      port.postMessage({ type: 'popup:error', error: getErrorMessage(err) });
+    }
+  }
 
-      if (method === 'passkey-prf') {
-        if (!this.appSalt) {
-          throw new Error('Missing appSalt for PRF unlock');
-        }
-        const appSalt = base64urlToArrayBuffer(this.appSalt);
+  /**
+   * Run the WebAuthn assertion (PRF or gate) and post the credential back over
+   * the private port. THROWS on failure (does not post `popup:error`) so callers
+   * can decide whether the failure is fatal ({@link runPopupUnlockCeremony}) or
+   * recoverable ({@link setupPopupUnlockModal}'s passkey button → retry).
+   *
+   * Reads `this.unlockMethod` / `this.appSalt` / `this.unlockCredentialId`.
+   */
+  private async performPopupUnlockAssertion(port: MessagePort): Promise<void> {
+    const method = this.unlockMethod ?? 'passkey-prf';
+    // Pass allowCredentials only when a credentialId is stored; otherwise omit it
+    // entirely so the browser runs a discoverable-credential get().
+    const allowCredentials: PublicKeyCredentialDescriptor[] | undefined = this.unlockCredentialId
+      ? [{ type: 'public-key', id: base64urlToArrayBuffer(this.unlockCredentialId) }]
+      : undefined;
 
-        // NOTE: this entire method lives inside the class-level `c8 ignore` region
-        // (DOM/WebAuthn ceremony cannot be unit-tested without a real authenticator).
-        const assertion = await navigator.credentials.get({
-          publicKey: {
-            challenge: crypto.getRandomValues(new Uint8Array(32)),
-            timeout: 60000,
-            userVerification: 'required',
-            ...(allowCredentials ? { allowCredentials } : {}),
-            extensions: {
-              prf: {
-                eval: {
-                  first: appSalt,
-                },
+    if (method === 'passkey-prf') {
+      if (!this.appSalt) {
+        throw new Error('Missing appSalt for PRF unlock');
+      }
+      const appSalt = base64urlToArrayBuffer(this.appSalt);
+
+      // NOTE: this entire method lives inside the class-level `c8 ignore` region
+      // (DOM/WebAuthn ceremony cannot be unit-tested without a real authenticator).
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          timeout: 60000,
+          userVerification: 'required',
+          ...(allowCredentials ? { allowCredentials } : {}),
+          extensions: {
+            prf: {
+              eval: {
+                first: appSalt,
               },
             },
           },
-        }) as PublicKeyCredential;
+        },
+      }) as PublicKeyCredential;
 
-        const prfOutput = getPRFResults(assertion)?.results?.first;
-        if (!prfOutput) {
-          throw new Error('PRF output not available from assertion');
-        }
-
-        port.postMessage({
-          type: 'popup:credentials',
-          method: 'passkey-prf',
-          prfOutput: Array.from(new Uint8Array(prfOutput)),
-        });
-      } else {
-        await navigator.credentials.get({
-          publicKey: {
-            challenge: crypto.getRandomValues(new Uint8Array(32)),
-            timeout: 60000,
-            userVerification: 'required',
-            ...(allowCredentials ? { allowCredentials } : {}),
-          },
-        });
-
-        port.postMessage({ type: 'popup:credentials', method: 'passkey-gate' });
+      const prfOutput = getPRFResults(assertion)?.results?.first;
+      if (!prfOutput) {
+        throw new Error('PRF output not available from assertion');
       }
-    } catch (err: unknown) {
-      port.postMessage({ type: 'popup:error', error: getErrorMessage(err) });
+
+      port.postMessage({
+        type: 'popup:credentials',
+        method: 'passkey-prf',
+        prfOutput: Array.from(new Uint8Array(prfOutput)),
+      });
+    } else {
+      await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          timeout: 60000,
+          userVerification: 'required',
+          ...(allowCredentials ? { allowCredentials } : {}),
+        },
+      });
+
+      port.postMessage({ type: 'popup:credentials', method: 'passkey-gate' });
+    }
+  }
+
+  /**
+   * Popup-side messaging unlock modal (BUG-008 follow-up). Runs in the top-level
+   * kms.ats.run popup after it receives `kms:connect` with `operation: 'unlock'`
+   * AND an `options` payload (messaging flow). Reuses the enclave HTML's existing
+   * `#unlock-modal`.
+   *
+   * Reveals the modal, shows/hides the passphrase field and the passkey button
+   * per the option flags, and wires both credential paths. The passphrase is
+   * posted straight over the port as plaintext (`popup:credentials`,
+   * `method: 'passphrase'`); the passkey button runs
+   * {@link performPopupUnlockAssertion}. Recoverable errors are shown in the
+   * popup (`#kms-modal-error`) so the user can retry — only a missing modal/port
+   * posts `popup:error`.
+   */
+  setupPopupUnlockModal(options: {
+    hasPassphrase: boolean;
+    hasPasskeyPrf: boolean;
+    hasPasskeyGate: boolean;
+  }): void {
+    const port = this.credentialPort;
+    const modal = document.getElementById('unlock-modal');
+    const webauthnBtn = document.getElementById('kms-webauthn-btn');
+    const passphraseInput = document.getElementById('kms-passphrase-input') as HTMLInputElement | null;
+    const passphraseBtn = document.getElementById('kms-passphrase-btn');
+
+    if (!port) {
+      console.error('[KMS Client] No credential port for unlock modal');
+      return;
+    }
+    if (!modal) {
+      console.error('[KMS Client] Unlock modal element not found');
+      port.postMessage({ type: 'popup:error', error: 'Unlock modal UI not found' });
+      return;
+    }
+
+    // Reveal the modal.
+    modal.classList.remove('hidden');
+    this.hideError();
+    this.hideLoading();
+
+    // Hide the passkey button when the user has no passkey enrollment.
+    const hasPasskey = options.hasPasskeyPrf || options.hasPasskeyGate;
+    if (webauthnBtn && !hasPasskey) {
+      webauthnBtn.style.display = 'none';
+    }
+    // Hide the passphrase group when the user has no passphrase enrollment.
+    if (!options.hasPassphrase) {
+      if (passphraseInput) passphraseInput.style.display = 'none';
+      if (passphraseBtn) passphraseBtn.style.display = 'none';
+    }
+
+    // Passphrase path: post the value straight over the private port (plaintext).
+    const submitPassphrase = (): void => {
+      const value = passphraseInput?.value ?? '';
+      if (!value || value.trim().length === 0) {
+        this.showError('Please enter a passphrase');
+        return;
+      }
+      port.postMessage({ type: 'popup:credentials', method: 'passphrase', passphrase: value });
+    };
+    if (passphraseBtn) {
+      passphraseBtn.onclick = submitPassphrase;
+    }
+    if (passphraseInput) {
+      passphraseInput.onkeydown = (e): void => {
+        if (e.key === 'Enter') submitPassphrase();
+      };
+    }
+
+    // Passkey path: run the assertion; keep the modal open for retry on error.
+    if (webauthnBtn) {
+      webauthnBtn.onclick = (): void => {
+        this.hideError();
+        this.showLoading();
+        void this.performPopupUnlockAssertion(port)
+          .catch((err: unknown) => {
+            this.showError(`Passkey failed: ${getErrorMessage(err)}`);
+          })
+          .finally(() => {
+            this.hideLoading();
+          });
+      };
     }
   }
 
@@ -2477,6 +2775,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 type?: string;
                 operation?: 'setup' | 'unlock';
                 method?: 'passkey-prf' | 'passkey-gate';
+                options?: {
+                  hasPassphrase: boolean;
+                  hasPasskeyPrf: boolean;
+                  hasPasskeyGate: boolean;
+                  appSalt?: string;
+                  credentialId?: string;
+                  rpId?: string;
+                };
                 transportKey?: string;
                 transportKeyId?: string;
                 appSalt?: string;
@@ -2492,17 +2798,27 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
                 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access */
                 if (portData.operation === 'unlock') {
-                  // BUG-008: top-level passkey unlock ceremony (approach B).
+                  // BUG-008: top-level unlock in the popup (approach B).
                   (client as any).appSalt = portData.appSalt ?? null;
                   (client as any).unlockCredentialId = portData.credentialId ?? null;
-                  (client as any).unlockMethod = portData.method ?? 'passkey-prf';
                   (client as any).userId = portData.userId!;
                   (client as any).credentialPort = port;
 
-                  // Confirm connection, then run the WebAuthn assertion ceremony
-                  // (top-level, so the password manager and PRF salt work).
-                  port.postMessage({ type: 'popup:connected' });
-                  void client.runPopupUnlockCeremony();
+                  if (portData.options) {
+                    // Messaging unlock: the user picks passphrase OR passkey in the
+                    // popup modal. Default the passkey method to PRF when available.
+                    const opts = portData.options;
+                    (client as any).unlockMethod = opts.hasPasskeyPrf ? 'passkey-prf' : 'passkey-gate';
+                    port.postMessage({ type: 'popup:connected' });
+                    client.setupPopupUnlockModal(opts);
+                  } else {
+                    // Legacy passkey-only unlock (non-messaging iframe modal → popup):
+                    // the user already chose passkey in the iframe, so auto-run the
+                    // ceremony (top-level, so the password manager and PRF salt work).
+                    (client as any).unlockMethod = portData.method ?? 'passkey-prf';
+                    port.postMessage({ type: 'popup:connected' });
+                    void client.runPopupUnlockCeremony();
+                  }
                 } else {
                   // Setup flow (unchanged): store transport params, show setup modal.
                   (client as any).transportPublicKey = portData.transportKey!;

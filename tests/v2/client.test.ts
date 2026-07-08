@@ -582,8 +582,13 @@ describe('authentication interception', () => {
     'openMessaging',
   ];
 
+  // Messaging methods route to the top-level popup, which first makes a
+  // getMessagingUnlockOptions worker round-trip; the ORIGINAL request must still
+  // not be forwarded to the worker until credentials are collected.
+  const messagingUnlockMethods = ['setupMessaging', 'setupAccountRoot', 'openMessaging'];
+
   authRequiredMethods.forEach((method) => {
-    it(`should intercept ${method} and not forward to worker immediately`, () => {
+    it(`should intercept ${method} and not forward the request to worker immediately`, () => {
       const request = createRequest(method, { userId: 'test-user' });
       const worker = env.getMockWorker();
       const postMessageSpy = vi.spyOn(worker!, 'postMessage');
@@ -591,8 +596,14 @@ describe('authentication interception', () => {
       // Simulate parent sending auth-required request
       simulateParentMessage(client, request);
 
-      // Should NOT be forwarded to worker immediately (modal shown instead)
-      expect(postMessageSpy).not.toHaveBeenCalled();
+      if (messagingUnlockMethods.includes(method)) {
+        // Popup flow: a getMessagingUnlockOptions RPC may be sent, but never the
+        // original auth-required request.
+        expect(postMessageSpy).not.toHaveBeenCalledWith(request);
+      } else {
+        // Iframe modal flow: nothing forwarded to the worker at all.
+        expect(postMessageSpy).not.toHaveBeenCalled();
+      }
     });
   });
 

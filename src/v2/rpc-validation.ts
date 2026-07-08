@@ -501,6 +501,16 @@ export function validateGetPasskeyUnlockParams(params: unknown): { userId?: stri
   return userId !== undefined ? { userId } : {};
 }
 
+export function validateGetMessagingUnlockOptions(params: unknown): { userId?: string } {
+  // getMessagingUnlockOptions takes an optional userId (defaults to 'default')
+  if (params === undefined || params === null) {
+    return {};
+  }
+  const p = validateParamsObject('getMessagingUnlockOptions', params);
+  const userId = validateOptionalString('getMessagingUnlockOptions', 'userId', p.userId);
+  return userId !== undefined ? { userId } : {};
+}
+
 export function validateVerifyAuditChain(_params: unknown): Record<string, never> {
   // No params required
   return {};

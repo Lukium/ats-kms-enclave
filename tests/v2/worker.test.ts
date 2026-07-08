@@ -1715,6 +1715,60 @@ describe('getPasskeyUnlockParams', () => {
   });
 });
 
+describe('getMessagingUnlockOptions', () => {
+  it('should report no methods for an unenrolled user', async () => {
+    const response = await handleMessage(
+      createRequest('getMessagingUnlockOptions', { userId: 'nobody@example.com' })
+    );
+
+    expect(response.error).toBeUndefined();
+    const result = getResult<{
+      hasPassphrase: boolean;
+      hasPasskeyPrf: boolean;
+      hasPasskeyGate: boolean;
+      appSalt?: string;
+    }>(response);
+
+    expect(result.hasPassphrase).toBe(false);
+    expect(result.hasPasskeyPrf).toBe(false);
+    expect(result.hasPasskeyGate).toBe(false);
+    expect(result.appSalt).toBeUndefined();
+  });
+
+  it('should report flags and appSalt for passphrase + PRF enrollments', async () => {
+    const credentialId = new Uint8Array([1, 2, 3, 4, 5]).buffer;
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32)).buffer;
+
+    await handleMessage(
+      createRequest('setupPassphrase', { userId: 'test@example.com', passphrase: 'unlock-options-123' })
+    );
+    await handleMessage(
+      createRequest('setupPasskeyPRF', { userId: 'test@example.com', credentialId, prfOutput })
+    );
+
+    const response = await handleMessage(
+      createRequest('getMessagingUnlockOptions', { userId: 'test@example.com' })
+    );
+
+    expect(response.error).toBeUndefined();
+    const result = getResult<{
+      hasPassphrase: boolean;
+      hasPasskeyPrf: boolean;
+      hasPasskeyGate: boolean;
+      appSalt?: string;
+      credentialId?: string;
+    }>(response);
+
+    expect(result.hasPassphrase).toBe(true);
+    expect(result.hasPasskeyPrf).toBe(true);
+    expect(result.hasPasskeyGate).toBe(false);
+    // appSalt is sourced from the stored PRF config (never fabricated), 32 bytes.
+    expect(typeof result.appSalt).toBe('string');
+    expect(base64urlToArrayBuffer(result.appSalt!).byteLength).toBe(32);
+    expect(result.credentialId).toBe(arrayBufferToBase64url(credentialId));
+  });
+});
+
 describe('verifyAuditChain', () => {
   it('should verify empty audit chain', async () => {
     const request = createRequest('verifyAuditChain');

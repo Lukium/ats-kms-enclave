@@ -1195,6 +1195,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleGetPasskeyUnlockParams(validators.validateGetPasskeyUnlockParams(params));
         break;
 
+      case 'getMessagingUnlockOptions':
+        result = await handleGetMessagingUnlockOptions(validators.validateGetMessagingUnlockOptions(params));
+        break;
+
       case 'verifyAuditChain':
         result = await handleVerifyAuditChain();
         break;
@@ -2934,6 +2938,48 @@ async function handleGetPasskeyUnlockParams(params?: { userId?: string }): Promi
   }
 
   throw new Error('No passkey enrollment found for this user');
+}
+
+/**
+ * Resolve everything the top-level unlock popup needs to render the messaging
+ * unlock UI and run whichever ceremony the user picks.
+ *
+ * Unlike {@link handleGetPasskeyUnlockParams} (passkey-only), this returns the
+ * boolean method flags so the popup can show/hide the passphrase field and the
+ * passkey button. The authoritative PRF `appSalt` still comes ONLY from the
+ * stored `PasskeyPRFConfigV2.kdf.appSalt` (never localStorage). `credentialId`
+ * and `rpId` prefer the PRF enrollment, falling back to gate.
+ */
+async function handleGetMessagingUnlockOptions(params?: { userId?: string }): Promise<{
+  hasPassphrase: boolean;
+  hasPasskeyPrf: boolean;
+  hasPasskeyGate: boolean;
+  appSalt?: string;
+  credentialId?: string;
+  rpId?: string;
+}> {
+  const userId = params?.userId ?? 'default';
+
+  const passphraseConfig = await getMeta(`enrollment:passphrase:v2:${userId}`);
+  const prfConfig = await getMeta<PasskeyPRFConfigV2>(`enrollment:passkey-prf:v2:${userId}`);
+  const gateConfig = await getMeta<PasskeyGateConfigV2>(`enrollment:passkey-gate:v2:${userId}`);
+
+  // appSalt only exists for PRF enrollments.
+  const appSalt = prfConfig ? arrayBufferToBase64url(prfConfig.kdf.appSalt) : undefined;
+
+  // credentialId / rpId prefer PRF, fall back to gate.
+  const credentialSource = prfConfig?.credentialId ?? gateConfig?.credentialId;
+  const credentialId = credentialSource ? arrayBufferToBase64url(credentialSource) : undefined;
+  const rpId = prfConfig?.rpId ?? gateConfig?.rpId;
+
+  return {
+    hasPassphrase: !!passphraseConfig,
+    hasPasskeyPrf: !!prfConfig,
+    hasPasskeyGate: !!gateConfig,
+    ...(appSalt ? { appSalt } : {}),
+    ...(credentialId ? { credentialId } : {}),
+    ...(rpId ? { rpId } : {}),
+  };
 }
 
 /**

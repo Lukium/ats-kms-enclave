@@ -2,7 +2,7 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "7cf40daab79b80f6c281b8d8ee10831c7b7c7586",
+    "commit": "95d444cbfcc80521f7cc5ade3531bf7bb98e51a3",
     "artifact": "kms-worker.d2cecb39.js",
     "sha256": "d2cecb39d8417a08e66da7ff28342560b62b9db2ff43ca359a88ffdd264d516a",
     "files": {
@@ -17,14 +17,14 @@
       },
       "css": {
         "filename": "enclave.css",
-        "sri": "sha384-huQYtm+nv7AwyGEzPnfIZ1PaF+SZrFjRmkueJmDGxwVbY7PdXBq3zAD0sfkMM3JN"
+        "sri": "sha384-I2VJ9WT3OAodrDtFkg/E4xFe/xt7eQ6L9f1rfWfF/H89sJ+Z6DullKnvww+E89J/"
       }
     },
-    "timestamp": "2026-07-08T02:55:07.654Z",
+    "timestamp": "2026-07-08T17:03:21.325Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1783476762"
+      "SOURCE_DATE_EPOCH": "1783479471"
     }
   },
   "allowed": [

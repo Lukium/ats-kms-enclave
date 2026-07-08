@@ -588,6 +588,11 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 5px;
   font-size: 0.8125rem;
+  box-sizing: border-box;
+  /* Allow the grid cell to shrink below the intrinsic width of its <input> so
+     the 3 columns fit the modal instead of overflowing it. */
+  min-width: 0;
+  overflow: hidden;
 }
 .kms-mnemonic-num {
   opacity: 0.5;
@@ -604,8 +609,10 @@ h1 {
   background: rgba(99, 179, 237, 0.08);
 }
 .kms-mnemonic-input {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);

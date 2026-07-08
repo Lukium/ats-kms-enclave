@@ -131,7 +131,7 @@ async function buildEnclaveWorker(): Promise<{ outputPath: string; hash: string;
  * Includes both iframe status styles and modal UI styles
  * @returns SRI hash for the CSS file
  */
-function generateEnclaveCSS(): string {
+function generateEnclaveCSS(): { sri: string; filename: string } {
   const css = `/* ============================================
    Base Styles
    ============================================ */
@@ -653,17 +653,24 @@ h1 {
 }
 `;
 
-  const cssPath = join(distDir, 'enclave/enclave.css');
-  writeFileSync(cssPath, css, 'utf-8');
-
-  // Compute SRI hash
+  // Content-address the stylesheet (enclave.{hash}.css), exactly like the client
+  // and worker. A stable enclave.css filename + SRI meant a CSS-only deploy could
+  // leave a returning browser/edge serving a stale enclave.css that failed SRI
+  // against the fresh index.html for the duration of its cache TTL → the whole
+  // KMS rendered unstyled. A hashed name changes the URL whenever the bytes do, so
+  // stale copies are simply never requested and SRI can never mismatch.
   const cssBuffer = Buffer.from(css, 'utf-8');
   const sri = computeSRIHash(cssBuffer);
+  const shortHash = createHash('sha256').update(cssBuffer).digest('hex').substring(0, 8);
+  const filename = `enclave.${shortHash}.css`;
+  const cssPath = join(distDir, 'enclave', filename);
+  writeFileSync(cssPath, css, 'utf-8');
 
   console.log(`✅ Generated: ${cssPath}`);
   console.log(`🔒 SRI: ${sri}`);
+  console.log(`📝 Filename: ${filename}`);
 
-  return sri;
+  return { sri, filename };
 }
 
 /**
@@ -735,7 +742,13 @@ async function buildEnclaveClient(workerFilename: string): Promise<{ sri: string
  * Generate the HTML wrapper for the enclave
  * Includes both iframe status display and modal UI for popup windows
  */
-function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: string, clientFilename: string): void {
+function generateEnclaveHTML(
+  workerHash: string,
+  cssSRI: string,
+  cssFilename: string,
+  clientSRI: string,
+  clientFilename: string
+): void {
   console.log('\n📝 Generating KMS Enclave HTML...');
 
   const html = `<!DOCTYPE html>
@@ -746,7 +759,7 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
   <title>AllTheServices KMS Enclave</title>
   <meta name="description" content="AllTheServices Key Management System Enclave">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="enclave.css" integrity="${cssSRI}" crossorigin="anonymous">
+  <link rel="stylesheet" href="${cssFilename}" integrity="${cssSRI}" crossorigin="anonymous">
 </head>
 <body>
   <!-- Iframe Status Display (shown when embedded in iframe) -->
@@ -986,9 +999,9 @@ async function main() {
     const { hash, filename, sri: workerSRI } = await buildEnclaveWorker();
 
     // Generate CSS, client script, and HTML
-    const cssSRI = generateEnclaveCSS();
+    const { sri: cssSRI, filename: cssFilename } = generateEnclaveCSS();
     const { sri: clientSRI, filename: clientFilename } = await buildEnclaveClient(filename);
-    generateEnclaveHTML(hash, cssSRI, clientSRI, clientFilename);
+    generateEnclaveHTML(hash, cssSRI, cssFilename, clientSRI, clientFilename);
 
     // Copy static assets (logo, favicon) to dist/enclave/
     const staticAssetsDir = join(rootDir, 'placeholders/cf-pages');
@@ -1019,7 +1032,8 @@ async function main() {
           sri: clientSRI
         },
         css: {
-          path: 'enclave/enclave.css',
+          path: `enclave/${cssFilename}`,
+          filename: cssFilename,
           sri: cssSRI
         },
         html: {
@@ -1050,7 +1064,9 @@ async function main() {
       (f) =>
         (f.startsWith('kms-worker.') && f.endsWith('.js') && f !== filename) ||
         (f.startsWith('enclave-client.') && f.endsWith('.js') && f !== clientFilename) ||
-        f === 'enclave-client.js'
+        f === 'enclave-client.js' ||
+        // Content-addressed CSS (enclave.{hash}.css) + the legacy fixed-name enclave.css.
+        (f.startsWith('enclave.') && f.endsWith('.css') && f !== cssFilename)
     );
 
     for (const stale of staleArtifacts) {
@@ -1064,9 +1080,9 @@ async function main() {
     writeFileSync(cfWorkerPath, readFileSync(join(distDir, `enclave/${filename}`)));
     console.log(`  ✅ ${cfWorkerPath}`);
 
-    // Copy CSS file
-    const cfCssPath = join(cfPagesDir, 'enclave.css');
-    writeFileSync(cfCssPath, readFileSync(join(distDir, 'enclave/enclave.css')));
+    // Copy CSS file (content-addressed)
+    const cfCssPath = join(cfPagesDir, cssFilename);
+    writeFileSync(cfCssPath, readFileSync(join(distDir, `enclave/${cssFilename}`)));
     console.log(`  ✅ ${cfCssPath}`);
 
     // Copy client JS file (content-addressed)
@@ -1108,7 +1124,7 @@ async function main() {
             sri: clientSRI
           },
           css: {
-            filename: 'enclave.css',
+            filename: cssFilename,
             sri: cssSRI
           }
         },

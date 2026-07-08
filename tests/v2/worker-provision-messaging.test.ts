@@ -18,6 +18,11 @@ import type { RPCRequest, RPCResponse } from '@/v2/types';
 import { initDB, closeDB } from '@/v2/storage';
 import { resetAuditLogger } from '@/v2/audit';
 
+// The mint path does real crypto (PBKDF2 unlock + 20 X25519 prekeys + BIP39) and a
+// worker↔client confirm round-trip, which can exceed the 10s global default on a
+// cold/slow CI runner. Give this file more headroom so it's not timing-flaky.
+vi.setConfig({ testTimeout: 30000 });
+
 const ALICE_PASS = 'correct-horse-battery-staple-1';
 const aliceCreds = { method: 'passphrase' as const, userId: 'alice', passphrase: ALICE_PASS };
 
@@ -53,22 +58,36 @@ async function provision(
   const req = createRequest('provisionMessaging', { credentials: aliceCreds, ...params });
   const responsePromise = handleMessage(req);
 
+  // The RPC never rejects (handleMessage returns { error }); track settlement so a
+  // slow/failed mint doesn't make us poll forever.
+  let settled = false;
+  void responsePromise.finally(() => {
+    settled = true;
+  });
+
   let shown: ShownMnemonic | undefined;
   if (action !== 'none') {
-    for (let i = 0; i < 200 && !shown; i++) {
-      await new Promise((r) => setTimeout(r, 5));
+    // WAIT for worker:show-mnemonic before replying: on a cold/slow CI runner the
+    // mint (PBKDF2 unlock + 20 X25519 prekeys + BIP39) can take a while to emit it,
+    // and dispatching the confirm before the worker is listening would hang.
+    // requireMnemonicConfirmation registers the pending entry in the SAME tick as
+    // the postMessage, so observing the message means the reply will be received.
+    for (let i = 0; i < 1500 && !shown && !settled; i++) {
+      await new Promise((r) => setTimeout(r, 10));
       shown = postSpy.mock.calls
         .map((c) => c[0] as ShownMnemonic)
         .find((m) => m?.type === 'worker:show-mnemonic');
     }
-    self.dispatchEvent(
-      new MessageEvent('message', {
-        data: {
-          type: action === 'confirm' ? 'worker:mnemonic-confirmed' : 'worker:mnemonic-cancelled',
-          requestId: req.id,
-        },
-      })
-    );
+    if (shown && !settled) {
+      self.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: action === 'confirm' ? 'worker:mnemonic-confirmed' : 'worker:mnemonic-cancelled',
+            requestId: req.id,
+          },
+        })
+      );
+    }
   }
 
   const response = await responsePromise;

@@ -82,6 +82,16 @@
   Cache-Control: public, max-age=31536000, immutable
   X-Content-Type-Options: nosniff
 
+# Content-addressed stylesheet (enclave.{hash}.css). Same rationale as the worker/
+# client: a fixed-name enclave.css that changed could leave a returning browser/edge
+# serving a stale copy that failed SRI against the fresh index.html for its cache TTL,
+# rendering the whole KMS unstyled. Hashed name → immutable, no SRI mismatch ever.
+/enclave.*.css
+  Content-Type: text/css; charset=utf-8
+  Cross-Origin-Resource-Policy: same-origin
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
+
 # Fallback for any other JS. Short, revalidating cache; never immutable. With the worker
 # and client now both content-addressed, no fixed-name JS is expected here — this is a
 # safety net only.
@@ -103,14 +113,16 @@
   # Standard security headers
   X-Content-Type-Options: nosniff
 
-# Static CSS files
+# Fallback for any other CSS. The enclave stylesheet is content-addressed above
+# (/enclave.*.css, immutable); this short revalidating cache is a safety net for any
+# non-hashed CSS and must never be immutable.
 /*.css
   Content-Type: text/css; charset=utf-8
 
   # Same-origin only (no COEP, so no need for cross-origin)
   Cross-Origin-Resource-Policy: same-origin
 
-  # Cache for 5 minutes (can be updated without content addressing)
+  # Cache for 5 minutes (non-content-addressed fallback)
   Cache-Control: public, max-age=300
 
   # Standard security headers

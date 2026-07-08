@@ -2,7 +2,7 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "95d444cbfcc80521f7cc5ade3531bf7bb98e51a3",
+    "commit": "f902d477b4b4adfffe0fd990ad0f6e7c0fc1e235",
     "artifact": "kms-worker.d2cecb39.js",
     "sha256": "d2cecb39d8417a08e66da7ff28342560b62b9db2ff43ca359a88ffdd264d516a",
     "files": {
@@ -16,15 +16,15 @@
         "sri": "sha384-7RSKkSXu8/F430trnLzQoqanqM/6zclfd5o6QWyZ+T6O4suPb/VuQFkEpYB/heDK"
       },
       "css": {
-        "filename": "enclave.css",
+        "filename": "enclave.7c66255a.css",
         "sri": "sha384-I2VJ9WT3OAodrDtFkg/E4xFe/xt7eQ6L9f1rfWfF/H89sJ+Z6DullKnvww+E89J/"
       }
     },
-    "timestamp": "2026-07-08T17:03:21.325Z",
+    "timestamp": "2026-07-08T17:38:23.193Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1783479471"
+      "SOURCE_DATE_EPOCH": "1783530344"
     }
   },
   "allowed": [

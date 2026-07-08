@@ -6,7 +6,7 @@
   <title>AllTheServices KMS Enclave</title>
   <meta name="description" content="AllTheServices Key Management System Enclave">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="enclave.css" integrity="sha384-0m6H57PFrArZ+cnrslj5TL4eTidgfi8RMA9WwzXfg/mMJ1AEenTpxckR7C6y/DxQ" crossorigin="anonymous">
+  <link rel="stylesheet" href="enclave.css" integrity="sha384-EIFNziQhE8crA2jAarOLlZPbRk9qz/evkGWuVI+zgSUG3hN/1T8+T+IcSRCwJci3" crossorigin="anonymous">
 </head>
 <body>
   <!-- Iframe Status Display (shown when embedded in iframe) -->
@@ -23,7 +23,7 @@
     <p><span class="status">Active</span> - Worker loaded and ready</p>
     <div>
       <strong>Worker Hash:</strong>
-      <div class="hash">b9a655dfef9a9cc7ee3fca1775ac5ad8f2eb746cb77515fd9d71b6909204a886</div>
+      <div class="hash">5b41df7073a9be264f2ee0a1c82ca6a59e10adbfaf84b87fada412a96e2dceb2</div>
     </div>
     <p class="description">
       This iframe runs in a sandboxed cross-origin context.
@@ -42,7 +42,7 @@
 
       <div class="kms-modal-body">
         <!-- WebAuthn Option -->
-        <div class="kms-auth-option">
+        <div class="kms-auth-option" id="kms-unlock-passkey-option">
           <button id="kms-webauthn-btn" class="kms-auth-btn kms-primary">
             <span class="kms-auth-icon">🔑</span>
             <span class="kms-auth-label">Use Passkey</span>
@@ -50,13 +50,13 @@
           <p class="kms-auth-hint">Authenticate with your device biometrics</p>
         </div>
 
-        <!-- Divider -->
-        <div class="kms-divider">
+        <!-- Divider (shown only when BOTH passkey and passphrase are offered) -->
+        <div class="kms-divider" id="kms-unlock-divider">
           <span>or</span>
         </div>
 
         <!-- Passphrase Option -->
-        <div class="kms-auth-option">
+        <div class="kms-auth-option" id="kms-unlock-passphrase-option">
           <form id="kms-unlock-form">
             <input type="text" name="username" autocomplete="username" class="kms-hidden-username" value="kms-user" readonly />
             <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
@@ -82,6 +82,17 @@
         <div id="kms-modal-loading" class="kms-modal-loading hidden">
           <span class="kms-spinner"></span>
           <span>Unlocking...</span>
+        </div>
+
+        <!-- Unlock Success (post-unlock confirmation + auto-close footer injected by JS) -->
+        <div id="kms-unlock-success" class="kms-setup-success hidden">
+          <div class="kms-success-content">
+            <span class="kms-success-icon">✅</span>
+            <div>
+              <div class="kms-success-title">Messaging Unlocked</div>
+              <div class="kms-success-message">You can return to the app.</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -169,6 +180,6 @@
     </div>
   </div>
 
-  <script type="module" src="enclave-client.f6479d72.js" integrity="sha384-72hg8zXZHtLGuMr7p1ElLh3o7BPdUo096aCPryrV0mnI+NNvUTQcoCa3NWcGLPXB" crossorigin="anonymous"></script>
+  <script type="module" src="enclave-client.9b0cf0cb.js" integrity="sha384-FGxiYdh6Eq/FBKYqX3XtYD2FrX1L5YxFxZbJk8t1E1vL+Ff6ezGWs6oDhL9zF2Gc" crossorigin="anonymous"></script>
 </body>
 </html>

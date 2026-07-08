@@ -977,7 +977,9 @@ describe('setup UI helpers', () => {
   });
 
   describe('showSetupSuccess', () => {
-    it('should remove hidden class from success div', () => {
+    it('should remove hidden class from success div and append the auto-close footer', () => {
+      // Disable auto-close so no countdown timer leaks from this sync test.
+      localStorage.setItem('kms:autoclose', '0');
       const successDiv = document.createElement('div');
       successDiv.id = 'kms-setup-success';
       successDiv.classList.add('hidden');
@@ -986,8 +988,10 @@ describe('setup UI helpers', () => {
       (client as any).showSetupSuccess();
 
       expect(successDiv.classList.contains('hidden')).toBe(false);
+      expect(successDiv.querySelector('.kms-popup-close')).not.toBeNull();
 
       document.body.removeChild(successDiv);
+      localStorage.removeItem('kms:autoclose');
     });
 
     it('should handle missing success div gracefully', () => {
@@ -1014,6 +1018,172 @@ describe('setup UI helpers', () => {
       expect(() => {
         (client as any).hideSetupSuccess();
       }).not.toThrow();
+    });
+  });
+});
+
+// ============================================================================
+// Popup auto-close footer + unlock success + method visibility (BUG-011 UX)
+// ============================================================================
+
+describe('popup unlock UX (BUG-011)', () => {
+  let client: KMSClient;
+  let env: ReturnType<typeof setupTestEnvironment>;
+
+  beforeEach(() => {
+    env = setupTestEnvironment();
+    client = new KMSClient({ parentOrigin: 'https://allthe.services' });
+    localStorage.removeItem('kms:autoclose');
+    document.body.innerHTML = ''; // isolate DOM (avoid duplicate-id bleed between tests)
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    localStorage.removeItem('kms:autoclose');
+    vi.useRealTimers();
+    env.cleanup();
+  });
+
+  /** Build the unlock modal DOM (blocks + success panel) the client expects. */
+  function buildUnlockModal(): HTMLElement {
+    const modal = document.createElement('div');
+    modal.id = 'unlock-modal';
+    modal.innerHTML = `
+      <div class="kms-modal-body">
+        <div class="kms-auth-option" id="kms-unlock-passkey-option">
+          <button id="kms-webauthn-btn"></button>
+        </div>
+        <div class="kms-divider" id="kms-unlock-divider"><span>or</span></div>
+        <div class="kms-auth-option" id="kms-unlock-passphrase-option">
+          <form id="kms-unlock-form">
+            <input id="kms-passphrase-input" />
+            <button id="kms-passphrase-btn"></button>
+          </form>
+        </div>
+        <div id="kms-modal-error" class="hidden"></div>
+        <div id="kms-modal-loading" class="hidden"></div>
+        <div id="kms-unlock-success" class="hidden">
+          <div class="kms-success-content"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  describe('renderPopupClose', () => {
+    it('auto-closes after the countdown when the flag is on (default)', () => {
+      vi.useFakeTimers();
+      const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {});
+      const container = document.createElement('div');
+
+      (client as any).renderPopupClose(container, { countdown: true });
+
+      // Footer + checkbox rendered, checkbox reflects the default-on state.
+      const checkbox = container.querySelector('.kms-autoclose-checkbox') as HTMLInputElement;
+      expect(checkbox).not.toBeNull();
+      expect(checkbox.checked).toBe(true);
+
+      // Not closed before the countdown elapses; closed after 2s.
+      vi.advanceTimersByTime(1000);
+      expect(closeSpy).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start a countdown when the flag is off', () => {
+      vi.useFakeTimers();
+      const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {});
+      localStorage.setItem('kms:autoclose', '0');
+      const container = document.createElement('div');
+
+      (client as any).renderPopupClose(container, { countdown: true });
+
+      const checkbox = container.querySelector('.kms-autoclose-checkbox') as HTMLInputElement;
+      expect(checkbox.checked).toBe(false);
+      vi.advanceTimersByTime(5000);
+      expect(closeSpy).not.toHaveBeenCalled();
+    });
+
+    it('"Close now" closes immediately', () => {
+      const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {});
+      localStorage.setItem('kms:autoclose', '0'); // avoid a background timer
+      const container = document.createElement('div');
+
+      (client as any).renderPopupClose(container, { countdown: true });
+      (container.querySelector('.kms-popup-close-btn') as HTMLButtonElement).click();
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('toggling the checkbox persists to localStorage and starts/stops the countdown', () => {
+      vi.useFakeTimers();
+      const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {});
+      localStorage.setItem('kms:autoclose', '0');
+      const container = document.createElement('div');
+      (client as any).renderPopupClose(container, { countdown: true });
+
+      const checkbox = container.querySelector('.kms-autoclose-checkbox') as HTMLInputElement;
+      // Enable → persists '1' and starts a countdown that closes.
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event('change'));
+      expect(localStorage.getItem('kms:autoclose')).toBe('1');
+      // Disable mid-countdown → persists '0' and cancels the close.
+      checkbox.checked = false;
+      checkbox.dispatchEvent(new Event('change'));
+      expect(localStorage.getItem('kms:autoclose')).toBe('0');
+      vi.advanceTimersByTime(5000);
+      expect(closeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('showUnlockSuccess / handlePopupUnlockResult', () => {
+    it('reveals the success panel and hides the auth options + divider', () => {
+      localStorage.setItem('kms:autoclose', '0');
+      buildUnlockModal();
+
+      client.showUnlockSuccess();
+
+      expect((document.getElementById('kms-unlock-success') as HTMLElement).classList.contains('hidden')).toBe(false);
+      expect((document.getElementById('kms-unlock-passkey-option') as HTMLElement).style.display).toBe('none');
+      expect((document.getElementById('kms-unlock-divider') as HTMLElement).style.display).toBe('none');
+      expect((document.getElementById('kms-unlock-passphrase-option') as HTMLElement).style.display).toBe('none');
+    });
+
+    it('on failure shows the error and does not reveal success', () => {
+      buildUnlockModal();
+
+      client.handlePopupUnlockResult(false, 'decryption failed');
+
+      const err = document.getElementById('kms-modal-error') as HTMLElement;
+      expect(err.textContent).toContain('decryption failed');
+      expect(err.classList.contains('hidden')).toBe(false);
+      expect((document.getElementById('kms-unlock-success') as HTMLElement).classList.contains('hidden')).toBe(true);
+    });
+  });
+
+  describe('setupPopupUnlockModal method visibility', () => {
+    beforeEach(() => {
+      buildUnlockModal();
+      (client as any).credentialPort = { postMessage: vi.fn() };
+    });
+
+    it('hides the passphrase block AND the divider when there is no passphrase', () => {
+      client.setupPopupUnlockModal({ hasPassphrase: false, hasPasskeyPrf: true, hasPasskeyGate: false });
+      expect((document.getElementById('kms-unlock-passphrase-option') as HTMLElement).style.display).toBe('none');
+      expect((document.getElementById('kms-unlock-divider') as HTMLElement).style.display).toBe('none');
+      expect((document.getElementById('kms-unlock-passkey-option') as HTMLElement).style.display).not.toBe('none');
+    });
+
+    it('hides the passkey block AND the divider when there is no passkey', () => {
+      client.setupPopupUnlockModal({ hasPassphrase: true, hasPasskeyPrf: false, hasPasskeyGate: false });
+      expect((document.getElementById('kms-unlock-passkey-option') as HTMLElement).style.display).toBe('none');
+      expect((document.getElementById('kms-unlock-divider') as HTMLElement).style.display).toBe('none');
+      expect((document.getElementById('kms-unlock-passphrase-option') as HTMLElement).style.display).not.toBe('none');
+    });
+
+    it('shows the divider only when BOTH methods are offered', () => {
+      client.setupPopupUnlockModal({ hasPassphrase: true, hasPasskeyPrf: true, hasPasskeyGate: false });
+      expect((document.getElementById('kms-unlock-divider') as HTMLElement).style.display).not.toBe('none');
     });
   });
 });

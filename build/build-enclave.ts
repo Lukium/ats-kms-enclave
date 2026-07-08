@@ -539,6 +539,35 @@ h1 {
 .kms-success-message {
   opacity: 0.9;
 }
+
+/* Shared popup auto-close footer (setup + unlock success) */
+.kms-popup-close {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.kms-countdown {
+  font-size: 0.8125rem;
+  opacity: 0.85;
+}
+.kms-autoclose-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  opacity: 0.9;
+  cursor: pointer;
+  user-select: none;
+}
+.kms-autoclose-label input {
+  cursor: pointer;
+}
+.kms-popup-close-btn {
+  align-self: flex-start;
+}
 `;
 
   const cssPath = join(distDir, 'enclave/enclave.css');
@@ -670,7 +699,7 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
 
       <div class="kms-modal-body">
         <!-- WebAuthn Option -->
-        <div class="kms-auth-option">
+        <div class="kms-auth-option" id="kms-unlock-passkey-option">
           <button id="kms-webauthn-btn" class="kms-auth-btn kms-primary">
             <span class="kms-auth-icon">🔑</span>
             <span class="kms-auth-label">Use Passkey</span>
@@ -678,13 +707,13 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
           <p class="kms-auth-hint">Authenticate with your device biometrics</p>
         </div>
 
-        <!-- Divider -->
-        <div class="kms-divider">
+        <!-- Divider (shown only when BOTH passkey and passphrase are offered) -->
+        <div class="kms-divider" id="kms-unlock-divider">
           <span>or</span>
         </div>
 
         <!-- Passphrase Option -->
-        <div class="kms-auth-option">
+        <div class="kms-auth-option" id="kms-unlock-passphrase-option">
           <form id="kms-unlock-form">
             <input type="text" name="username" autocomplete="username" class="kms-hidden-username" value="kms-user" readonly />
             <label for="kms-passphrase-input" class="kms-input-label">Passphrase</label>
@@ -710,6 +739,17 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
         <div id="kms-modal-loading" class="kms-modal-loading hidden">
           <span class="kms-spinner"></span>
           <span>Unlocking...</span>
+        </div>
+
+        <!-- Unlock Success (post-unlock confirmation + auto-close footer injected by JS) -->
+        <div id="kms-unlock-success" class="kms-setup-success hidden">
+          <div class="kms-success-content">
+            <span class="kms-success-icon">✅</span>
+            <div>
+              <div class="kms-success-title">Messaging Unlocked</div>
+              <div class="kms-success-message">You can return to the app.</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

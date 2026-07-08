@@ -26,6 +26,16 @@ import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils.j
 declare const __WORKER_FILENAME__: string;
 
 /**
+ * localStorage flag (first-party kms.ats.run) shared by the setup and unlock
+ * popups: whether their success panel auto-closes the window. Default on when
+ * unset; a "Close automatically" checkbox writes '1'/'0'.
+ */
+const POPUP_AUTOCLOSE_KEY = 'kms:autoclose';
+
+/** Seconds the popup success panel counts down before auto-closing. */
+const POPUP_CLOSE_COUNTDOWN_SECONDS = 2;
+
+/**
  * Configuration for KMSClient
  */
 export interface KMSClientConfig {
@@ -1285,7 +1295,9 @@ export class KMSClient {
 
         if (data?.type === 'popup:credentials') {
           clearTimeout(timeout);
-          port.close();
+          // Keep the port OPEN so we can relay the unlock outcome back to the
+          // popup (popup:unlock-result) once the worker responds — the popup
+          // uses it to show the green confirmation + auto-close.
           resolve({
             method: data.method ?? 'passphrase',
             ...(data.passphrase !== undefined ? { passphrase: data.passphrase } : {}),
@@ -1357,6 +1369,43 @@ export class KMSClient {
           credentials,
         },
       };
+
+      // Relay the unlock outcome to the popup so it can confirm + auto-close (or
+      // show the error). This is IN ADDITION to setupUnlockResponseListener,
+      // which forwards the RPC response to the parent — we only post to the
+      // popup port here, so there is no double-forward to the parent.
+      const relayToPopup = (event: MessageEvent): void => {
+        const resp = event.data as RPCResponse;
+        if (resp.id !== requestWithCredentials.id) return;
+        this.worker?.removeEventListener('message', relayToPopup);
+        const errMsg =
+          resp.error === undefined
+            ? undefined
+            : typeof resp.error === 'string'
+              ? resp.error
+              : resp.error.message;
+        try {
+          port.postMessage({
+            type: 'popup:unlock-result',
+            success: resp.error === undefined,
+            ...(errMsg !== undefined ? { error: errMsg } : {}),
+          });
+        } catch {
+          /* popup may already be gone */
+        }
+        // On success the popup confirms + closes itself; drop our port end after
+        // a grace period. On error keep it open (the popup shows the error).
+        if (resp.error === undefined) {
+          setTimeout(() => {
+            try {
+              port.close();
+            } catch {
+              /* ignore */
+            }
+          }, 8000);
+        }
+      };
+      this.worker?.addEventListener('message', relayToPopup);
 
       this.setupUnlockResponseListener(requestWithCredentials);
       this.worker?.postMessage(requestWithCredentials);
@@ -1491,24 +1540,28 @@ export class KMSClient {
     this.hideError();
     this.hideLoading();
 
-    // Hide the passkey button when the user has no passkey enrollment.
+    // Show only the methods the user actually has, hiding the WHOLE block for a
+    // missing method — not just its input/button — so we never leave an orphaned
+    // "Passphrase" label or a dangling "── or ──" divider. The divider is shown
+    // only when BOTH methods are offered.
     const hasPasskey = options.hasPasskeyPrf || options.hasPasskeyGate;
-    if (webauthnBtn && !hasPasskey) {
-      webauthnBtn.style.display = 'none';
-    }
-    // Hide the passphrase group when the user has no passphrase enrollment.
-    if (!options.hasPassphrase) {
-      if (passphraseInput) passphraseInput.style.display = 'none';
-      if (passphraseBtn) passphraseBtn.style.display = 'none';
-    }
+    const passkeyOption = document.getElementById('kms-unlock-passkey-option');
+    const passphraseOption = document.getElementById('kms-unlock-passphrase-option');
+    const divider = document.getElementById('kms-unlock-divider');
+    if (passkeyOption) passkeyOption.style.display = hasPasskey ? '' : 'none';
+    if (passphraseOption) passphraseOption.style.display = options.hasPassphrase ? '' : 'none';
+    if (divider) divider.style.display = hasPasskey && options.hasPassphrase ? '' : 'none';
 
     // Passphrase path: post the value straight over the private port (plaintext).
+    // Keep the spinner up until the iframe relays popup:unlock-result.
     const submitPassphrase = (): void => {
       const value = passphraseInput?.value ?? '';
       if (!value || value.trim().length === 0) {
         this.showError('Please enter a passphrase');
         return;
       }
+      this.hideError();
+      this.showLoading();
       port.postMessage({ type: 'popup:credentials', method: 'passphrase', passphrase: value });
     };
     if (passphraseBtn) {
@@ -1521,17 +1574,16 @@ export class KMSClient {
     }
 
     // Passkey path: run the assertion; keep the modal open for retry on error.
+    // On a successful assertion the spinner stays up until the iframe relays
+    // popup:unlock-result (the actual key unlock happens there).
     if (webauthnBtn) {
       webauthnBtn.onclick = (): void => {
         this.hideError();
         this.showLoading();
-        void this.performPopupUnlockAssertion(port)
-          .catch((err: unknown) => {
-            this.showError(`Passkey failed: ${getErrorMessage(err)}`);
-          })
-          .finally(() => {
-            this.hideLoading();
-          });
+        void this.performPopupUnlockAssertion(port).catch((err: unknown) => {
+          this.showError(`Passkey failed: ${getErrorMessage(err)}`);
+          this.hideLoading();
+        });
       };
     }
   }
@@ -2610,13 +2662,146 @@ export class KMSClient {
   }
 
   /**
-   * Show setup success message
+   * Show setup success message + the shared auto-close footer (countdown +
+   * "Close automatically" checkbox + "Close now"). Called from the popup setup
+   * ceremony once credentials have been produced.
    */
   private showSetupSuccess(): void {
     const successDiv = document.getElementById('kms-setup-success');
     if (successDiv) {
       successDiv.classList.remove('hidden');
+      this.renderPopupClose(successDiv, { countdown: true });
     }
+  }
+
+  /**
+   * Show the messaging-unlock success panel + auto-close footer. Hides the auth
+   * options + spinner (the unlock is done) and reveals the green confirmation.
+   * Called on a confirmed `popup:unlock-result { success: true }` from the iframe.
+   */
+  showUnlockSuccess(): void {
+    this.hideLoading();
+    this.hideError();
+    for (const id of ['kms-unlock-passkey-option', 'kms-unlock-divider', 'kms-unlock-passphrase-option']) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    }
+    const successDiv = document.getElementById('kms-unlock-success');
+    if (successDiv) {
+      successDiv.classList.remove('hidden');
+      this.renderPopupClose(successDiv, { countdown: true });
+    }
+  }
+
+  /**
+   * Handle the iframe's relayed unlock outcome in the popup (BUG-011 follow-up).
+   * Success → green confirmation + auto-close. Failure → surface the error and
+   * stop the spinner (the parent RPC also rejects; the user retries from the app).
+   */
+  handlePopupUnlockResult(success: boolean, error?: string): void {
+    if (success) {
+      this.showUnlockSuccess();
+    } else {
+      this.hideLoading();
+      this.showError(error || 'Unlock failed');
+    }
+  }
+
+  /** Close the popup window, tolerating environments where close() is blocked. */
+  private closePopupWindow(): void {
+    try {
+      window.close();
+    } catch {
+      /* jsdom / blocked — ignore */
+    }
+  }
+
+  /**
+   * Render the shared popup auto-close footer into `container` (a success panel).
+   * With `countdown`, reads the `kms:autoclose` localStorage flag (default on):
+   * when on, counts down {@link POPUP_CLOSE_COUNTDOWN_SECONDS}s then closes; the
+   * checkbox persists the choice and starts/stops the countdown live. A "Close
+   * now" button always closes immediately. Idempotent (replaces any prior footer).
+   */
+  private renderPopupClose(container: HTMLElement, opts: { countdown: boolean }): void {
+    container.querySelector('.kms-popup-close')?.remove();
+
+    const footer = document.createElement('div');
+    footer.className = 'kms-popup-close';
+
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const clearTimer = (): void => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'kms-auth-btn kms-secondary kms-popup-close-btn';
+    closeBtn.textContent = 'Close now';
+    closeBtn.onclick = (): void => {
+      clearTimer();
+      this.closePopupWindow();
+    };
+    footer.appendChild(closeBtn);
+
+    if (opts.countdown) {
+      let autoClose = true;
+      try {
+        autoClose = localStorage.getItem(POPUP_AUTOCLOSE_KEY) !== '0';
+      } catch {
+        /* ignore */
+      }
+
+      const countdownEl = document.createElement('div');
+      countdownEl.className = 'kms-countdown';
+
+      const label = document.createElement('label');
+      label.className = 'kms-autoclose-label';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'kms-autoclose-checkbox';
+      checkbox.checked = autoClose;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode('Close automatically'));
+
+      footer.appendChild(countdownEl);
+      footer.appendChild(label);
+
+      const startCountdown = (): void => {
+        let remaining = POPUP_CLOSE_COUNTDOWN_SECONDS;
+        countdownEl.textContent = `Closing in ${remaining}s…`;
+        timer = setInterval(() => {
+          remaining -= 1;
+          if (remaining <= 0) {
+            clearTimer();
+            this.closePopupWindow();
+            return;
+          }
+          countdownEl.textContent = `Closing in ${remaining}s…`;
+        }, 1000);
+      };
+
+      checkbox.onchange = (): void => {
+        try {
+          localStorage.setItem(POPUP_AUTOCLOSE_KEY, checkbox.checked ? '1' : '0');
+        } catch {
+          /* ignore */
+        }
+        if (checkbox.checked) {
+          startCountdown();
+        } else {
+          clearTimer();
+          countdownEl.textContent = '';
+        }
+      };
+
+      if (autoClose) startCountdown();
+    }
+
+    container.appendChild(footer);
   }
 
   /**
@@ -2795,7 +2980,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 credentialId?: string;
                 hkdfSalt?: string;
                 userId?: string;
+                success?: boolean;
+                error?: string;
               };
+
+              // Iframe relayed the unlock outcome (BUG-011 follow-up): confirm +
+              // auto-close on success, or surface the error in the popup.
+              if (portData?.type === 'popup:unlock-result') {
+                client.handlePopupUnlockResult(portData.success === true, portData.error);
+                return;
+              }
 
               if (portData?.type === 'kms:connect') {
                 /* eslint-disable no-console */

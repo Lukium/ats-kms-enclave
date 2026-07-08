@@ -405,3 +405,32 @@ h1 {
 .kms-success-message {
   opacity: 0.9;
 }
+
+/* Shared popup auto-close footer (setup + unlock success) */
+.kms-popup-close {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.kms-countdown {
+  font-size: 0.8125rem;
+  opacity: 0.85;
+}
+.kms-autoclose-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  opacity: 0.9;
+  cursor: pointer;
+  user-select: none;
+}
+.kms-autoclose-label input {
+  cursor: pointer;
+}
+.kms-popup-close-btn {
+  align-self: flex-start;
+}

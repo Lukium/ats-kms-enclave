@@ -35,6 +35,14 @@ const POPUP_AUTOCLOSE_KEY = 'kms:autoclose';
 /** Seconds the popup success panel counts down before auto-closing. */
 const POPUP_CLOSE_COUNTDOWN_SECONDS = 2;
 
+/** How many words the user must re-enter to confirm a recovery-phrase backup (BUG-007). */
+const MNEMONIC_CONFIRM_REQUIRED = 3;
+
+/** Normalize a mnemonic word for comparison (BIP39 is lowercase, whitespace-trimmed). */
+function normalizeMnemonicWord(word: string): string {
+  return word.trim().toLowerCase();
+}
+
 /**
  * Configuration for KMSClient
  */
@@ -82,6 +90,11 @@ export class KMSClient {
   private credentialPort: MessagePort | null = null; // MessagePort back to the iframe
   private unlockMethod: 'passkey-prf' | 'passkey-gate' | null = null;
   private unlockCredentialId: string | null = null;
+
+  // IFRAME-side handle to the live messaging-unlock popup's port, so the worker's
+  // BUG-007 recovery-phrase ceremony (worker:show-mnemonic) can be relayed to the
+  // popup UI. Set while handleMessagingUnlockViaPopup is in flight; else null.
+  private messagingPopupPort: MessagePort | null = null;
 
   /**
    * Create a new KMS client bridge
@@ -424,6 +437,26 @@ export class KMSClient {
           requestId: data.requestId as string,
           userId: data.userId as string,
         });
+        return;
+      }
+
+      // BUG-007: worker minted a fresh account root and wants the user to back up
+      // the recovery phrase. Relay it to the top-level popup (where the messaging
+      // UI lives) over the private port — it must NOT reach the parent PWA.
+      if ('type' in data && data.type === 'worker:show-mnemonic') {
+        if (this.messagingPopupPort) {
+          this.messagingPopupPort.postMessage({
+            type: 'popup:show-mnemonic',
+            mnemonic: data.mnemonic as string,
+          });
+        } else {
+          // No popup channel to show it in → cancel so the worker persists nothing.
+          this.worker?.postMessage({
+            type: 'worker:mnemonic-cancelled',
+            requestId: data.requestId as string,
+            reason: 'No popup available to confirm the recovery phrase',
+          });
+        }
         return;
       }
 
@@ -1272,6 +1305,10 @@ export class KMSClient {
     const requestId = `unlock-popup-${Date.now()}`;
     const popupURL = `${location.origin}/?mode=unlock&parentOrigin=${this.parentOrigin}`;
     const port = await this.openPopupChannel(popupURL, requestId);
+    // Expose the port so the worker's BUG-007 recovery-phrase ceremony
+    // (worker:show-mnemonic) can be relayed to this popup. Cleared when done.
+    this.messagingPopupPort = port;
+    const rpcId = request.id;
 
     // Await whichever credential the user picks in the popup modal.
     const credentialsPromise = new Promise<{
@@ -1303,6 +1340,21 @@ export class KMSClient {
             ...(data.passphrase !== undefined ? { passphrase: data.passphrase } : {}),
             ...(data.prfOutput ? { prfOutput: data.prfOutput } : {}),
           });
+        } else if (data?.type === 'popup:mnemonic-confirmed') {
+          // BUG-007: user confirmed the recovery-phrase backup in the popup →
+          // let the worker persist the account root (keyed by the RPC id).
+          if (rpcId) {
+            this.worker?.postMessage({ type: 'worker:mnemonic-confirmed', requestId: rpcId });
+          }
+        } else if (data?.type === 'popup:mnemonic-cancelled') {
+          // BUG-007: user cancelled the backup → worker persists nothing.
+          if (rpcId) {
+            this.worker?.postMessage({
+              type: 'worker:mnemonic-cancelled',
+              requestId: rpcId,
+              reason: 'Recovery-phrase backup was cancelled',
+            });
+          }
         } else if (data?.type === 'popup:error') {
           clearTimeout(timeout);
           port.close();
@@ -1378,6 +1430,9 @@ export class KMSClient {
         const resp = event.data as RPCResponse;
         if (resp.id !== requestWithCredentials.id) return;
         this.worker?.removeEventListener('message', relayToPopup);
+        // The messaging RPC is done (incl. any BUG-007 mnemonic ceremony) — drop
+        // the port handle so a later worker:show-mnemonic can't target a stale popup.
+        this.messagingPopupPort = null;
         const errMsg =
           resp.error === undefined
             ? undefined
@@ -2680,6 +2735,10 @@ export class KMSClient {
    * Called on a confirmed `popup:unlock-result { success: true }` from the iframe.
    */
   showUnlockSuccess(): void {
+    // The BUG-007 ceremony may have hidden the unlock modal; restore it so the
+    // success panel is visible, and drop the mnemonic modal.
+    document.getElementById('unlock-modal')?.classList.remove('hidden');
+    document.getElementById('mnemonic-modal')?.classList.add('hidden');
     this.hideLoading();
     this.hideError();
     for (const id of ['kms-unlock-passkey-option', 'kms-unlock-divider', 'kms-unlock-passphrase-option']) {
@@ -2702,8 +2761,186 @@ export class KMSClient {
     if (success) {
       this.showUnlockSuccess();
     } else {
+      // Restore the unlock modal (the BUG-007 ceremony may have covered it) so the
+      // error is visible, and drop the mnemonic modal.
+      document.getElementById('unlock-modal')?.classList.remove('hidden');
+      document.getElementById('mnemonic-modal')?.classList.add('hidden');
       this.hideLoading();
       this.showError(error || 'Unlock failed');
+    }
+  }
+
+  /**
+   * BUG-007 recovery-phrase backup ceremony, run in the top-level popup after the
+   * worker mints a fresh account root and relays `popup:show-mnemonic`. Two steps:
+   * (1) reveal the 12 words (with a copy button); (2) a SEPARATE confirm screen —
+   * words hidden — where the user re-enters a highlighted required subset (paste of
+   * the whole phrase is supported). Posts `popup:mnemonic-confirmed` on success or
+   * `popup:mnemonic-cancelled` on cancel; the phrase never leaves this popup.
+   */
+  showMnemonicCeremony(mnemonic: string): void {
+    const port = this.credentialPort;
+    const modal = document.getElementById('mnemonic-modal');
+    const words = mnemonic.trim().split(/\s+/).filter(Boolean);
+    const reveal = document.getElementById('kms-mnemonic-reveal');
+    const confirm = document.getElementById('kms-mnemonic-confirm');
+    const wordsEl = document.getElementById('kms-mnemonic-words');
+    if (!port || !modal || !reveal || !confirm || !wordsEl || words.length === 0) {
+      // Can't render → cancel so the worker persists nothing.
+      port?.postMessage({ type: 'popup:mnemonic-cancelled' });
+      return;
+    }
+
+    // Cover the unlock modal with the ceremony.
+    document.getElementById('unlock-modal')?.classList.add('hidden');
+    document.getElementById('kms-mnemonic-finishing')?.classList.add('hidden');
+    modal.classList.remove('hidden');
+
+    // --- Step 1: reveal the words ---
+    wordsEl.innerHTML = '';
+    for (let i = 0; i < words.length; i++) {
+      const li = document.createElement('li');
+      li.className = 'kms-mnemonic-word';
+      const num = document.createElement('span');
+      num.className = 'kms-mnemonic-num';
+      num.textContent = String(i + 1);
+      const text = document.createElement('span');
+      text.className = 'kms-mnemonic-text';
+      text.textContent = words[i]!;
+      li.appendChild(num);
+      li.appendChild(text);
+      wordsEl.appendChild(li);
+    }
+    reveal.classList.remove('hidden');
+    confirm.classList.add('hidden');
+
+    const copyBtn = document.getElementById('kms-mnemonic-copy');
+    if (copyBtn) {
+      copyBtn.onclick = (): void => {
+        if (!navigator.clipboard) return; // no clipboard API — the user can read the words
+        void navigator.clipboard
+          .writeText(words.join(' '))
+          .then(() => {
+            copyBtn.textContent = 'Copied ✓';
+          })
+          .catch(() => {
+            /* clipboard blocked — the user can still read the words */
+          });
+      };
+    }
+
+    const cancel = (): void => {
+      modal.classList.add('hidden');
+      port.postMessage({ type: 'popup:mnemonic-cancelled' });
+    };
+    const cancelBtn = document.getElementById('kms-mnemonic-cancel');
+    if (cancelBtn) cancelBtn.onclick = cancel;
+
+    // Required-subset positions the user must re-enter on the confirm screen.
+    const required = this.pickRequiredMnemonicIndices(words.length, MNEMONIC_CONFIRM_REQUIRED);
+
+    const continueBtn = document.getElementById('kms-mnemonic-continue');
+    if (continueBtn) {
+      continueBtn.onclick = (): void => {
+        reveal.classList.add('hidden');
+        confirm.classList.remove('hidden');
+        this.renderMnemonicConfirmGrid(words, required, port, modal);
+      };
+    }
+  }
+
+  /** Pick `count` distinct random positions in `[0,total)` for the confirm screen. */
+  private pickRequiredMnemonicIndices(total: number, count: number): Set<number> {
+    const picks = new Set<number>();
+    const n = Math.min(count, total);
+    while (picks.size < n) {
+      picks.add(crypto.getRandomValues(new Uint32Array(1))[0]! % total);
+    }
+    return picks;
+  }
+
+  /**
+   * Render the confirm-screen input grid (words hidden). Required positions are
+   * highlighted; pasting the whole phrase into any field distributes it across
+   * all inputs. On verify: every required field must be filled + correct, and
+   * every OTHER filled field must also match — then post `popup:mnemonic-confirmed`.
+   */
+  private renderMnemonicConfirmGrid(
+    words: string[],
+    required: Set<number>,
+    port: MessagePort,
+    modal: HTMLElement
+  ): void {
+    const grid = document.getElementById('kms-mnemonic-confirm-grid');
+    const errEl = document.getElementById('kms-mnemonic-confirm-error');
+    if (!grid) return;
+    grid.innerHTML = '';
+    errEl?.classList.add('hidden');
+
+    const inputs: HTMLInputElement[] = [];
+    for (let i = 0; i < words.length; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'kms-mnemonic-cell' + (required.has(i) ? ' kms-required' : '');
+      const num = document.createElement('span');
+      num.className = 'kms-mnemonic-num';
+      num.textContent = String(i + 1);
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.className = 'kms-mnemonic-input';
+      input.onpaste = (e: ClipboardEvent): void => {
+        const text = e.clipboardData?.getData('text') ?? '';
+        const parts = text.trim().split(/\s+/).filter(Boolean);
+        if (parts.length > 1) {
+          e.preventDefault();
+          for (let j = 0; j < inputs.length; j++) {
+            if (parts[j] !== undefined) inputs[j]!.value = normalizeMnemonicWord(parts[j]!);
+          }
+        }
+      };
+      inputs.push(input);
+      cell.appendChild(num);
+      cell.appendChild(input);
+      grid.appendChild(cell);
+    }
+
+    const backBtn = document.getElementById('kms-mnemonic-back');
+    if (backBtn) {
+      backBtn.onclick = (): void => {
+        document.getElementById('kms-mnemonic-confirm')?.classList.add('hidden');
+        document.getElementById('kms-mnemonic-reveal')?.classList.remove('hidden');
+      };
+    }
+
+    const verifyBtn = document.getElementById('kms-mnemonic-verify');
+    if (verifyBtn) {
+      verifyBtn.onclick = (): void => {
+        let ok = true;
+        for (let i = 0; i < inputs.length; i++) {
+          const val = normalizeMnemonicWord(inputs[i]!.value);
+          const missingRequired = required.has(i) && val === '';
+          const wrong = val !== '' && val !== words[i];
+          const bad = missingRequired || wrong;
+          if (bad) ok = false;
+          inputs[i]!.classList.toggle('kms-invalid', bad);
+        }
+        if (!ok) {
+          if (errEl) {
+            errEl.textContent = "Some words don't match. Check the highlighted fields.";
+            errEl.classList.remove('hidden');
+          }
+          return;
+        }
+        // Confirmed → let the worker persist; show a finishing state until the
+        // relayed unlock result swaps in the success panel (or an error).
+        errEl?.classList.add('hidden');
+        document.getElementById('kms-mnemonic-reveal')?.classList.add('hidden');
+        document.getElementById('kms-mnemonic-confirm')?.classList.add('hidden');
+        document.getElementById('kms-mnemonic-finishing')?.classList.remove('hidden');
+        void modal; // kept visible; handlePopupUnlockResult/showUnlockSuccess hides it
+        port.postMessage({ type: 'popup:mnemonic-confirmed' });
+      };
     }
   }
 
@@ -2982,12 +3219,21 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 userId?: string;
                 success?: boolean;
                 error?: string;
+                mnemonic?: string;
               };
 
               // Iframe relayed the unlock outcome (BUG-011 follow-up): confirm +
               // auto-close on success, or surface the error in the popup.
               if (portData?.type === 'popup:unlock-result') {
                 client.handlePopupUnlockResult(portData.success === true, portData.error);
+                return;
+              }
+
+              // BUG-007: worker minted a fresh account root — run the in-popup
+              // recovery-phrase backup ceremony (reveal → confirm). The phrase
+              // stays in this enclave popup; only confirmed/cancelled goes back.
+              if (portData?.type === 'popup:show-mnemonic') {
+                client.showMnemonicCeremony(portData.mnemonic ?? '');
                 return;
               }
 

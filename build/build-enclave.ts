@@ -568,6 +568,82 @@ h1 {
 .kms-popup-close-btn {
   align-self: flex-start;
 }
+
+/* Recovery-phrase backup ceremony (BUG-007) */
+.kms-mnemonic-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kms-mnemonic-word,
+.kms-mnemonic-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.4rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  font-size: 0.8125rem;
+}
+.kms-mnemonic-num {
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.2em;
+  text-align: right;
+  font-size: 0.75rem;
+}
+.kms-mnemonic-text {
+  font-weight: 600;
+}
+.kms-mnemonic-cell.kms-required {
+  border-color: rgba(99, 179, 237, 0.6);
+  background: rgba(99, 179, 237, 0.08);
+}
+.kms-mnemonic-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  color: inherit;
+  font: inherit;
+  padding: 0.1rem 0.2rem;
+  outline: none;
+}
+.kms-mnemonic-input:focus {
+  border-bottom-color: rgba(99, 179, 237, 0.8);
+}
+.kms-mnemonic-input.kms-invalid {
+  border-bottom-color: #fc8181;
+}
+.kms-mnemonic-warning {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.6rem;
+  background: rgba(246, 173, 85, 0.1);
+  border: 1px solid rgba(246, 173, 85, 0.3);
+  border-radius: 6px;
+  color: #f6ad55;
+  font-size: 0.8125rem;
+}
+.kms-mnemonic-confirm-hint {
+  margin: 0 0 0.6rem;
+  font-size: 0.8125rem;
+  opacity: 0.85;
+}
+.kms-mnemonic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+.kms-auth-btn.kms-tertiary {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
 `;
 
   const cssPath = join(distDir, 'enclave/enclave.css');
@@ -750,6 +826,46 @@ function generateEnclaveHTML(workerHash: string, cssSRI: string, clientSRI: stri
               <div class="kms-success-message">You can return to the app.</div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recovery-phrase backup ceremony (BUG-007; shown in the popup after a fresh
+       account root is minted). Two steps: reveal, then a separate hidden-words
+       confirm. Word lists + inputs are built by client.ts. -->
+  <div id="mnemonic-modal" class="kms-modal hidden">
+    <div class="kms-modal-backdrop"></div>
+    <div class="kms-modal-content">
+      <div class="kms-modal-header">
+        <h3>🔑 Back up your recovery phrase</h3>
+        <p class="kms-modal-subtitle">These 12 words restore your messages if you lose this device. Write them down in order; keep them private.</p>
+      </div>
+      <div class="kms-modal-body">
+        <!-- Step 1: reveal -->
+        <div id="kms-mnemonic-reveal">
+          <ol id="kms-mnemonic-words" class="kms-mnemonic-grid"></ol>
+          <div class="kms-mnemonic-warning">⚠️ Anyone with these words can read your messages. We can't recover them for you.</div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-mnemonic-copy" type="button" class="kms-auth-btn kms-secondary">Copy</button>
+            <button id="kms-mnemonic-continue" type="button" class="kms-auth-btn kms-primary">I've saved it — continue</button>
+            <button id="kms-mnemonic-cancel" type="button" class="kms-auth-btn kms-tertiary">Cancel</button>
+          </div>
+        </div>
+        <!-- Step 2: confirm (words hidden) -->
+        <div id="kms-mnemonic-confirm" class="hidden">
+          <p class="kms-mnemonic-confirm-hint">Enter the highlighted words to confirm you saved them. You can paste the whole phrase.</p>
+          <div id="kms-mnemonic-confirm-grid" class="kms-mnemonic-grid"></div>
+          <div id="kms-mnemonic-confirm-error" class="kms-modal-error hidden"></div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-mnemonic-back" type="button" class="kms-auth-btn kms-tertiary">Back</button>
+            <button id="kms-mnemonic-verify" type="button" class="kms-auth-btn kms-primary">Verify &amp; finish</button>
+          </div>
+        </div>
+        <!-- Finishing state (after confirm, while the worker persists) -->
+        <div id="kms-mnemonic-finishing" class="kms-modal-loading hidden">
+          <span class="kms-spinner"></span>
+          <span>Finishing setup…</span>
         </div>
       </div>
     </div>

@@ -6,7 +6,7 @@
   <title>AllTheServices KMS Enclave</title>
   <meta name="description" content="AllTheServices Key Management System Enclave">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="enclave.css" integrity="sha384-EIFNziQhE8crA2jAarOLlZPbRk9qz/evkGWuVI+zgSUG3hN/1T8+T+IcSRCwJci3" crossorigin="anonymous">
+  <link rel="stylesheet" href="enclave.css" integrity="sha384-huQYtm+nv7AwyGEzPnfIZ1PaF+SZrFjRmkueJmDGxwVbY7PdXBq3zAD0sfkMM3JN" crossorigin="anonymous">
 </head>
 <body>
   <!-- Iframe Status Display (shown when embedded in iframe) -->
@@ -23,7 +23,7 @@
     <p><span class="status">Active</span> - Worker loaded and ready</p>
     <div>
       <strong>Worker Hash:</strong>
-      <div class="hash">5b41df7073a9be264f2ee0a1c82ca6a59e10adbfaf84b87fada412a96e2dceb2</div>
+      <div class="hash">d2cecb39d8417a08e66da7ff28342560b62b9db2ff43ca359a88ffdd264d516a</div>
     </div>
     <p class="description">
       This iframe runs in a sandboxed cross-origin context.
@@ -93,6 +93,46 @@
               <div class="kms-success-message">You can return to the app.</div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recovery-phrase backup ceremony (BUG-007; shown in the popup after a fresh
+       account root is minted). Two steps: reveal, then a separate hidden-words
+       confirm. Word lists + inputs are built by client.ts. -->
+  <div id="mnemonic-modal" class="kms-modal hidden">
+    <div class="kms-modal-backdrop"></div>
+    <div class="kms-modal-content">
+      <div class="kms-modal-header">
+        <h3>🔑 Back up your recovery phrase</h3>
+        <p class="kms-modal-subtitle">These 12 words restore your messages if you lose this device. Write them down in order; keep them private.</p>
+      </div>
+      <div class="kms-modal-body">
+        <!-- Step 1: reveal -->
+        <div id="kms-mnemonic-reveal">
+          <ol id="kms-mnemonic-words" class="kms-mnemonic-grid"></ol>
+          <div class="kms-mnemonic-warning">⚠️ Anyone with these words can read your messages. We can't recover them for you.</div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-mnemonic-copy" type="button" class="kms-auth-btn kms-secondary">Copy</button>
+            <button id="kms-mnemonic-continue" type="button" class="kms-auth-btn kms-primary">I've saved it — continue</button>
+            <button id="kms-mnemonic-cancel" type="button" class="kms-auth-btn kms-tertiary">Cancel</button>
+          </div>
+        </div>
+        <!-- Step 2: confirm (words hidden) -->
+        <div id="kms-mnemonic-confirm" class="hidden">
+          <p class="kms-mnemonic-confirm-hint">Enter the highlighted words to confirm you saved them. You can paste the whole phrase.</p>
+          <div id="kms-mnemonic-confirm-grid" class="kms-mnemonic-grid"></div>
+          <div id="kms-mnemonic-confirm-error" class="kms-modal-error hidden"></div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-mnemonic-back" type="button" class="kms-auth-btn kms-tertiary">Back</button>
+            <button id="kms-mnemonic-verify" type="button" class="kms-auth-btn kms-primary">Verify &amp; finish</button>
+          </div>
+        </div>
+        <!-- Finishing state (after confirm, while the worker persists) -->
+        <div id="kms-mnemonic-finishing" class="kms-modal-loading hidden">
+          <span class="kms-spinner"></span>
+          <span>Finishing setup…</span>
         </div>
       </div>
     </div>
@@ -180,6 +220,6 @@
     </div>
   </div>
 
-  <script type="module" src="enclave-client.9b0cf0cb.js" integrity="sha384-FGxiYdh6Eq/FBKYqX3XtYD2FrX1L5YxFxZbJk8t1E1vL+Ff6ezGWs6oDhL9zF2Gc" crossorigin="anonymous"></script>
+  <script type="module" src="enclave-client.c20d525d.js" integrity="sha384-7RSKkSXu8/F430trnLzQoqanqM/6zclfd5o6QWyZ+T6O4suPb/VuQFkEpYB/heDK" crossorigin="anonymous"></script>
 </body>
 </html>

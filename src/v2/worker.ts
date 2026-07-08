@@ -360,6 +360,44 @@ const pendingUnlockRequests = new Map<
 >();
 
 /**
+ * Pending recovery-phrase backup confirmations (BUG-007). When a fresh account
+ * root is minted, the worker shows the mnemonic in the enclave's OWN popup UI
+ * (never the PWA) and pauses here until the user confirms the seed backup — only
+ * THEN is the root persisted. Mirrors {@link pendingUnlockRequests}.
+ *
+ * - Key: requestId (the RPC id) → { resolve, reject, timeout }
+ * - resolve() = user confirmed; reject() = cancelled/timeout → nothing persisted.
+ */
+const pendingMnemonicConfirms = new Map<
+  string,
+  {
+    resolve: () => void;
+    reject: (reason: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
+
+/** Timeout for the user to complete the seed-backup confirmation (5 minutes). */
+const MNEMONIC_CONFIRM_TIMEOUT_MS = 300000;
+
+/**
+ * Show `mnemonic` in the enclave popup and resolve once the user confirms the
+ * backup (BUG-007). The phrase is posted worker → client → popup, all within the
+ * kms.ats.run origin — it NEVER reaches the PWA. Rejects on cancel/timeout so the
+ * caller can leave nothing persisted.
+ */
+function requireMnemonicConfirmation(requestId: string, mnemonic: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingMnemonicConfirms.delete(requestId);
+      reject(new Error('Recovery-phrase backup confirmation timed out'));
+    }, MNEMONIC_CONFIRM_TIMEOUT_MS);
+    pendingMnemonicConfirms.set(requestId, { resolve, reject, timeout });
+    self.postMessage({ type: 'worker:show-mnemonic', requestId, mnemonic });
+  });
+}
+
+/**
  * Pending fullSetup requests (multi-step orchestration).
  * Maps requestId to promise resolvers for async operations (push subscription, test notification).
  *
@@ -1016,6 +1054,34 @@ const handleWorkerMessage = (event: MessageEvent): void => {
         clearTimeout(pending.timeout);
         pendingUnlockRequests.delete(requestId);
         pending.reject(new Error(message.reason || 'Unlock failed'));
+      }
+    }
+    return;
+  }
+
+  // BUG-007: user confirmed the recovery-phrase backup in the enclave popup.
+  if ('type' in message && message.type === 'worker:mnemonic-confirmed') {
+    const requestId = message.requestId;
+    if (requestId) {
+      const pending = pendingMnemonicConfirms.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingMnemonicConfirms.delete(requestId);
+        pending.resolve();
+      }
+    }
+    return;
+  }
+
+  // BUG-007: user cancelled the backup (or it failed) → persist nothing.
+  if ('type' in message && message.type === 'worker:mnemonic-cancelled') {
+    const requestId = message.requestId;
+    if (requestId) {
+      const pending = pendingMnemonicConfirms.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingMnemonicConfirms.delete(requestId);
+        pending.reject(new Error(message.reason || 'Recovery-phrase backup was cancelled'));
       }
     }
     return;
@@ -3250,10 +3316,11 @@ async function handleSetupMessaging(
  *   3. Derive the self-channel key/scope (from the account root) and open a
  *      messaging session, caching it in memory keyed by `sid`.
  *
- * Returns the public bundle (for directory upload), the mnemonic when a root was
- * freshly minted (first device only — otherwise omitted), and the session
- * handle. Mnemonic handling is unchanged from `setupAccountRoot` (returned to the
- * PWA as-is); moving it fully in-enclave is tracked separately (BUG-007).
+ * Returns the public bundle (for directory upload) and the session handle. When
+ * a fresh account root is minted (first device), the recovery mnemonic is shown
+ * and confirmed in the enclave's OWN popup (BUG-007) — it is NEVER returned to
+ * the PWA — and the root is persisted ONLY after the user confirms the backup.
+ * A cancelled/timed-out confirmation persists nothing and throws.
  */
 async function handleProvisionMessaging(
   params: {
@@ -3264,7 +3331,6 @@ async function handleProvisionMessaging(
   requestId: string
 ): Promise<{
   bundle: PublicPreKeyBundle;
-  mnemonic?: string;
   sid: string;
   token: string;
   exp: number;
@@ -3272,84 +3338,96 @@ async function handleProvisionMessaging(
   const { credentials, signedPreKeyId, oneTimePrekeyCount } = params;
   const sid = crypto.randomUUID();
 
-  const result = await withUnlock(credentials, async (mkek, ms) => {
+  // Phase 1 (under one unlock): provision keys + derive the messaging KEK, and
+  // MINT the account root in memory WITHOUT persisting it yet. Capture the
+  // non-extractable keys (mkek/messagingKEK) + the raw root out of withUnlock so
+  // the MASTER SECRET is zeroized immediately — the seed-backup confirmation that
+  // follows must not hold the MS during human interaction (see account-store.ts:
+  // storeAccountRoot needs only the MKEK).
+  const capture = await withUnlock(credentials, async (mkek, ms) => {
     await ensureAuditKey(mkek);
     const messagingKEK = await deriveMessagingKEK(ms);
 
-    // 1) setupMessaging — this device's Signal identity + prekeys.
+    // setupMessaging — this device's Signal identity + prekeys.
     await generateIdentity(credentials.userId, messagingKEK);
     await generateSignedPrekey(credentials.userId, messagingKEK, signedPreKeyId);
     await generateOneTimePrekeys(credentials.userId, messagingKEK, 1, oneTimePrekeyCount);
     const bundle = await getPublicBundle(credentials.userId);
 
-    // 2) setupAccountRoot — first device on the account mints the root + phrase;
-    //    later devices load the existing one. (Multi-device onboard via
-    //    importWrappedAccountRoot is a separate, non-setup path.)
-    let mnemonic: string | undefined;
+    // setupAccountRoot — first device mints the root + phrase (NOT persisted yet,
+    // BUG-007 confirm-before-persist); later devices load the existing one.
     let accountRoot: Uint8Array | null;
+    let mnemonic: string | undefined;
+    let minted = false;
     if (await hasAccountRoot(credentials.userId)) {
       accountRoot = await loadAccountRoot(credentials.userId, mkek);
     } else {
       accountRoot = generateAccountRoot();
       mnemonic = await accountRootToMnemonic(accountRoot);
-      await storeAccountRoot(credentials.userId, accountRoot, mkek);
+      minted = true;
     }
 
-    // 3) openMessaging — derive the self-channel key/scope from the root now (the
-    //    MKEK is in hand) and mint the per-session capability token.
-    let selfKey: CryptoKey | undefined;
-    let selfScope: string | undefined;
-    if (accountRoot) {
-      selfKey = await deriveSelfKey(accountRoot);
-      selfScope = await deriveSelfScope(accountRoot);
-      accountRoot.fill(0);
-    }
-
-    const capKeyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
-    const nowMs = Date.now();
-    const iat = Math.floor(nowMs / 1000);
-    const exp = iat + Math.floor(MESSAGING_ABSOLUTE_MAX_MS / 1000);
-    const token = await mintCapabilityToken(sid, capKeyPair.privateKey, iat, exp);
-
-    const session: MessagingSession = {
-      messagingKEK,
-      userId: credentials.userId,
-      capPubKey: capKeyPair.publicKey,
-      absoluteExp: nowMs + MESSAGING_ABSOLUTE_MAX_MS,
-      idleExp: nowMs + MESSAGING_IDLE_TIMEOUT_MS,
-    };
-    if (selfKey && selfScope) {
-      session.selfKey = selfKey;
-      session.selfScope = selfScope;
-    }
-    messagingSessions.set(sid, session);
-
-    return { bundle, mnemonic, token, exp };
+    return { mkek, messagingKEK, bundle, accountRoot, mnemonic, minted };
   });
+
+  const { mkek, messagingKEK, bundle, accountRoot, mnemonic, minted } = capture.result;
+
+  // Phase 2 (freshly minted root only): show the mnemonic in the enclave popup
+  // and require the user to confirm the backup BEFORE persisting. On cancel /
+  // timeout: zeroize the root and abort — nothing is committed, so there is no
+  // orphaned "root exists but the phrase was never saved" trap.
+  if (minted) {
+    try {
+      await requireMnemonicConfirmation(requestId, mnemonic as string);
+    } catch (err) {
+      accountRoot?.fill(0);
+      throw err;
+    }
+    await storeAccountRoot(credentials.userId, accountRoot as Uint8Array, mkek);
+  }
+
+  // Phase 3: open the session — derive the self-channel key/scope from the root
+  // (no MS needed) and mint the capability token. Uses the retained
+  // non-extractable messagingKEK; MS is already gone.
+  let selfKey: CryptoKey | undefined;
+  let selfScope: string | undefined;
+  if (accountRoot) {
+    selfKey = await deriveSelfKey(accountRoot);
+    selfScope = await deriveSelfScope(accountRoot);
+    accountRoot.fill(0);
+  }
+
+  const capKeyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+  const nowMs = Date.now();
+  const iat = Math.floor(nowMs / 1000);
+  const exp = iat + Math.floor(MESSAGING_ABSOLUTE_MAX_MS / 1000);
+  const token = await mintCapabilityToken(sid, capKeyPair.privateKey, iat, exp);
+
+  const session: MessagingSession = {
+    messagingKEK,
+    userId: credentials.userId,
+    capPubKey: capKeyPair.publicKey,
+    absoluteExp: nowMs + MESSAGING_ABSOLUTE_MAX_MS,
+    idleExp: nowMs + MESSAGING_IDLE_TIMEOUT_MS,
+  };
+  if (selfKey && selfScope) {
+    session.selfKey = selfKey;
+    session.selfScope = selfScope;
+  }
+  messagingSessions.set(sid, session);
 
   await logOperation({
     op: 'messaging.provision',
     kid: `messaging:${credentials.userId}`,
     requestId,
     userId: credentials.userId,
-    unlockTime: result.unlockTime,
-    lockTime: result.lockTime,
-    duration: result.duration,
-    details: {
-      signedPreKeyId,
-      oneTimePrekeyCount,
-      sid,
-      mintedAccountRoot: result.result.mnemonic !== undefined,
-    },
+    unlockTime: capture.unlockTime,
+    lockTime: capture.lockTime,
+    duration: capture.duration,
+    details: { signedPreKeyId, oneTimePrekeyCount, sid, mintedAccountRoot: minted },
   });
 
-  return {
-    bundle: result.result.bundle,
-    ...(result.result.mnemonic !== undefined ? { mnemonic: result.result.mnemonic } : {}),
-    sid,
-    token: result.result.token,
-    exp: result.result.exp,
-  };
+  return { bundle, sid, token, exp };
 }
 
 /**

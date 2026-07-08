@@ -2,33 +2,33 @@
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "090057919e31c538ec002a592fac92a1602e92fc",
-    "artifact": "kms-worker.5b41df70.js",
-    "sha256": "5b41df7073a9be264f2ee0a1c82ca6a59e10adbfaf84b87fada412a96e2dceb2",
+    "commit": "7cf40daab79b80f6c281b8d8ee10831c7b7c7586",
+    "artifact": "kms-worker.d2cecb39.js",
+    "sha256": "d2cecb39d8417a08e66da7ff28342560b62b9db2ff43ca359a88ffdd264d516a",
     "files": {
       "worker": {
-        "filename": "kms-worker.5b41df70.js",
-        "sha256": "5b41df7073a9be264f2ee0a1c82ca6a59e10adbfaf84b87fada412a96e2dceb2",
-        "sri": "sha384-IbgMsNlq5xS4845rw8mDzSAyaXOCBH5DIM4lbqnhnqoo9jT9jn9uuJL2YRoQtgag"
+        "filename": "kms-worker.d2cecb39.js",
+        "sha256": "d2cecb39d8417a08e66da7ff28342560b62b9db2ff43ca359a88ffdd264d516a",
+        "sri": "sha384-r1uUyzzzlmxQd6iMLtzVYsrK2dQ2p605AdvyzqrRNinP5D8WKfqL6oH9Uc9tVSZB"
       },
       "client": {
-        "filename": "enclave-client.9b0cf0cb.js",
-        "sri": "sha384-FGxiYdh6Eq/FBKYqX3XtYD2FrX1L5YxFxZbJk8t1E1vL+Ff6ezGWs6oDhL9zF2Gc"
+        "filename": "enclave-client.c20d525d.js",
+        "sri": "sha384-7RSKkSXu8/F430trnLzQoqanqM/6zclfd5o6QWyZ+T6O4suPb/VuQFkEpYB/heDK"
       },
       "css": {
         "filename": "enclave.css",
-        "sri": "sha384-EIFNziQhE8crA2jAarOLlZPbRk9qz/evkGWuVI+zgSUG3hN/1T8+T+IcSRCwJci3"
+        "sri": "sha384-huQYtm+nv7AwyGEzPnfIZ1PaF+SZrFjRmkueJmDGxwVbY7PdXBq3zAD0sfkMM3JN"
       }
     },
-    "timestamp": "2026-07-08T02:09:34.388Z",
+    "timestamp": "2026-07-08T02:55:07.654Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1783473560"
+      "SOURCE_DATE_EPOCH": "1783476762"
     }
   },
   "allowed": [
-    "5b41df7073a9be264f2ee0a1c82ca6a59e10adbfaf84b87fada412a96e2dceb2"
+    "d2cecb39d8417a08e66da7ff28342560b62b9db2ff43ca359a88ffdd264d516a"
   ],
   "deprecated": [],
   "comment": "Phase 2.1: Deterministic builds with SRI (Subresource Integrity)"

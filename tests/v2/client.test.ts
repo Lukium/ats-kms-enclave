@@ -1186,6 +1186,113 @@ describe('popup unlock UX (BUG-011)', () => {
       expect((document.getElementById('kms-unlock-divider') as HTMLElement).style.display).not.toBe('none');
     });
   });
+
+  describe('recovery-phrase ceremony (BUG-007)', () => {
+    const MNEMONIC = 'aa bb cc dd ee ff gg hh ii jj kk ll';
+    const WORDS = MNEMONIC.split(' ');
+
+    function buildMnemonicModal(): void {
+      const unlock = document.createElement('div');
+      unlock.id = 'unlock-modal';
+      unlock.innerHTML = '<div class="kms-modal-body"><div id="kms-unlock-success" class="hidden"></div></div>';
+      document.body.appendChild(unlock);
+
+      const modal = document.createElement('div');
+      modal.id = 'mnemonic-modal';
+      modal.className = 'kms-modal hidden';
+      modal.innerHTML = `
+        <div id="kms-mnemonic-reveal">
+          <ol id="kms-mnemonic-words"></ol>
+          <button id="kms-mnemonic-copy"></button>
+          <button id="kms-mnemonic-continue"></button>
+          <button id="kms-mnemonic-cancel"></button>
+        </div>
+        <div id="kms-mnemonic-confirm" class="hidden">
+          <div id="kms-mnemonic-confirm-grid"></div>
+          <div id="kms-mnemonic-confirm-error" class="hidden"></div>
+          <button id="kms-mnemonic-back"></button>
+          <button id="kms-mnemonic-verify"></button>
+        </div>
+        <div id="kms-mnemonic-finishing" class="hidden"></div>`;
+      document.body.appendChild(modal);
+    }
+
+    /** Read the required-word positions the ceremony highlighted (post-continue). */
+    function requiredInputs(): { input: HTMLInputElement; pos: number }[] {
+      const cells = Array.from(document.querySelectorAll('#kms-mnemonic-confirm-grid .kms-mnemonic-cell'));
+      return cells
+        .map((c, i) => ({ req: c.classList.contains('kms-required'), input: c.querySelector('input') as HTMLInputElement, pos: i }))
+        .filter((x) => x.req)
+        .map((x) => ({ input: x.input, pos: x.pos }));
+    }
+
+    let port: { postMessage: ReturnType<typeof vi.fn> };
+    beforeEach(() => {
+      buildMnemonicModal();
+      port = { postMessage: vi.fn() };
+      (client as any).credentialPort = port;
+    });
+
+    it('renders the 12 words on the reveal step and hides the confirm step', () => {
+      client.showMnemonicCeremony(MNEMONIC);
+      expect(document.getElementById('mnemonic-modal')!.classList.contains('hidden')).toBe(false);
+      expect(document.querySelectorAll('#kms-mnemonic-words .kms-mnemonic-word')).toHaveLength(12);
+      expect(document.getElementById('kms-mnemonic-confirm')!.classList.contains('hidden')).toBe(true);
+    });
+
+    it('cancels (persists nothing) when the user clicks Cancel', () => {
+      client.showMnemonicCeremony(MNEMONIC);
+      (document.getElementById('kms-mnemonic-cancel') as HTMLButtonElement).click();
+      expect(port.postMessage).toHaveBeenCalledWith({ type: 'popup:mnemonic-cancelled' });
+    });
+
+    it('reveals a highlighted required subset on Continue', () => {
+      client.showMnemonicCeremony(MNEMONIC);
+      (document.getElementById('kms-mnemonic-continue') as HTMLButtonElement).click();
+      expect(document.getElementById('kms-mnemonic-confirm')!.classList.contains('hidden')).toBe(false);
+      expect(document.querySelectorAll('#kms-mnemonic-confirm-grid input')).toHaveLength(12);
+      expect(requiredInputs().length).toBe(3);
+    });
+
+    it('confirms when the required words are entered correctly', () => {
+      client.showMnemonicCeremony(MNEMONIC);
+      (document.getElementById('kms-mnemonic-continue') as HTMLButtonElement).click();
+      for (const { input, pos } of requiredInputs()) input.value = WORDS[pos]!;
+      (document.getElementById('kms-mnemonic-verify') as HTMLButtonElement).click();
+      expect(port.postMessage).toHaveBeenCalledWith({ type: 'popup:mnemonic-confirmed' });
+      expect(document.getElementById('kms-mnemonic-finishing')!.classList.contains('hidden')).toBe(false);
+    });
+
+    it('rejects a wrong required word (no confirm posted)', () => {
+      client.showMnemonicCeremony(MNEMONIC);
+      (document.getElementById('kms-mnemonic-continue') as HTMLButtonElement).click();
+      const reqs = requiredInputs();
+      reqs.forEach(({ input, pos }, k) => (input.value = k === 0 ? 'WRONGWORD' : WORDS[pos]!));
+      (document.getElementById('kms-mnemonic-verify') as HTMLButtonElement).click();
+      expect(port.postMessage).not.toHaveBeenCalledWith({ type: 'popup:mnemonic-confirmed' });
+      expect(document.getElementById('kms-mnemonic-confirm-error')!.classList.contains('hidden')).toBe(false);
+      expect(reqs[0]!.input.classList.contains('kms-invalid')).toBe(true);
+    });
+
+    it('smart-paste distributes the whole phrase across all inputs', () => {
+      client.showMnemonicCeremony(MNEMONIC);
+      (document.getElementById('kms-mnemonic-continue') as HTMLButtonElement).click();
+      const first = document.querySelector('#kms-mnemonic-confirm-grid input') as HTMLInputElement;
+      const evt = new Event('paste') as unknown as ClipboardEvent;
+      Object.defineProperty(evt, 'clipboardData', { value: { getData: () => MNEMONIC } });
+      first.onpaste!(evt);
+      const values = Array.from(document.querySelectorAll('#kms-mnemonic-confirm-grid input')).map(
+        (i) => (i as HTMLInputElement).value
+      );
+      expect(values).toEqual(WORDS);
+    });
+
+    it('cancels when there is no port (worker persists nothing)', () => {
+      (client as any).credentialPort = null;
+      // Should not throw; nothing to post to.
+      expect(() => client.showMnemonicCeremony(MNEMONIC)).not.toThrow();
+    });
+  });
 });
 
 // ============================================================================

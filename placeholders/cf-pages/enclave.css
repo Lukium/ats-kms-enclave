@@ -434,3 +434,79 @@ h1 {
 .kms-popup-close-btn {
   align-self: flex-start;
 }
+
+/* Recovery-phrase backup ceremony (BUG-007) */
+.kms-mnemonic-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kms-mnemonic-word,
+.kms-mnemonic-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.4rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  font-size: 0.8125rem;
+}
+.kms-mnemonic-num {
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.2em;
+  text-align: right;
+  font-size: 0.75rem;
+}
+.kms-mnemonic-text {
+  font-weight: 600;
+}
+.kms-mnemonic-cell.kms-required {
+  border-color: rgba(99, 179, 237, 0.6);
+  background: rgba(99, 179, 237, 0.08);
+}
+.kms-mnemonic-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  color: inherit;
+  font: inherit;
+  padding: 0.1rem 0.2rem;
+  outline: none;
+}
+.kms-mnemonic-input:focus {
+  border-bottom-color: rgba(99, 179, 237, 0.8);
+}
+.kms-mnemonic-input.kms-invalid {
+  border-bottom-color: #fc8181;
+}
+.kms-mnemonic-warning {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.6rem;
+  background: rgba(246, 173, 85, 0.1);
+  border: 1px solid rgba(246, 173, 85, 0.3);
+  border-radius: 6px;
+  color: #f6ad55;
+  font-size: 0.8125rem;
+}
+.kms-mnemonic-confirm-hint {
+  margin: 0 0 0.6rem;
+  font-size: 0.8125rem;
+  opacity: 0.85;
+}
+.kms-mnemonic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+.kms-auth-btn.kms-tertiary {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}

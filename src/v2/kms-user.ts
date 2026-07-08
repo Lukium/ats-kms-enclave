@@ -2131,9 +2131,10 @@ export class KMSUser {
    * into one enclave call, so first-run messaging setup prompts the user for
    * credentials once instead of three times.
    *
-   * Returns the public bundle (upload it to the directory), the recovery
-   * `mnemonic` ONLY when this call freshly minted the account root (first device;
-   * omitted otherwise), and the open session handle (`sid`/`token`/`exp`).
+   * Returns the public bundle (upload it to the directory) and the open session
+   * handle (`sid`/`token`/`exp`). When this call mints a fresh account root
+   * (first device), the recovery phrase is shown and confirmed in the enclave's
+   * OWN popup UI (BUG-007) — it is NEVER returned here.
    *
    * Auth is collected in the top-level kms.ats.run POPUP (BUG-008), so the iframe
    * stays hidden throughout — see {@link setupMessaging}.
@@ -2145,7 +2146,6 @@ export class KMSUser {
     options?: { signedPreKeyId?: number; oneTimePrekeyCount?: number }
   ): Promise<{
     bundle: PublicPreKeyBundle;
-    mnemonic?: string;
     sid: string;
     token: string;
     exp: number;
@@ -2156,7 +2156,6 @@ export class KMSUser {
     try {
       const result = await this.sendRequest<{
         bundle: PublicPreKeyBundle;
-        mnemonic?: string;
         sid: string;
         token: string;
         exp: number;

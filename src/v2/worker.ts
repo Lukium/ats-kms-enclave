@@ -1253,6 +1253,10 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleSetupMessaging(validators.validateSetupMessaging(params), id);
         break;
 
+      case 'provisionMessaging':
+        result = await handleProvisionMessaging(validators.validateProvisionMessaging(params), id);
+        break;
+
       case 'getMessagingBundle':
         result = await handleGetMessagingBundle(validators.validateGetMessagingBundle(params));
         break;
@@ -3231,6 +3235,121 @@ async function handleSetupMessaging(
   });
 
   return { bundle: result.result };
+}
+
+/**
+ * Provision messaging in a SINGLE unlock (BUG-011). Composes the work of
+ * {@link handleSetupMessaging} + {@link handleSetupAccountRoot} +
+ * {@link handleOpenMessaging} inside one `withUnlock`, so first-run messaging
+ * setup prompts the user for credentials exactly once instead of three times.
+ *
+ * Steps (all under one MKEK/MS):
+ *   1. Provision this device's Signal identity, signed prekey, one-time prekeys.
+ *   2. Mint the account root + recovery mnemonic IF this account has none yet
+ *      (first device); later devices reuse the existing root.
+ *   3. Derive the self-channel key/scope (from the account root) and open a
+ *      messaging session, caching it in memory keyed by `sid`.
+ *
+ * Returns the public bundle (for directory upload), the mnemonic when a root was
+ * freshly minted (first device only — otherwise omitted), and the session
+ * handle. Mnemonic handling is unchanged from `setupAccountRoot` (returned to the
+ * PWA as-is); moving it fully in-enclave is tracked separately (BUG-007).
+ */
+async function handleProvisionMessaging(
+  params: {
+    credentials: AuthCredentials;
+    signedPreKeyId: number;
+    oneTimePrekeyCount: number;
+  },
+  requestId: string
+): Promise<{
+  bundle: PublicPreKeyBundle;
+  mnemonic?: string;
+  sid: string;
+  token: string;
+  exp: number;
+}> {
+  const { credentials, signedPreKeyId, oneTimePrekeyCount } = params;
+  const sid = crypto.randomUUID();
+
+  const result = await withUnlock(credentials, async (mkek, ms) => {
+    await ensureAuditKey(mkek);
+    const messagingKEK = await deriveMessagingKEK(ms);
+
+    // 1) setupMessaging — this device's Signal identity + prekeys.
+    await generateIdentity(credentials.userId, messagingKEK);
+    await generateSignedPrekey(credentials.userId, messagingKEK, signedPreKeyId);
+    await generateOneTimePrekeys(credentials.userId, messagingKEK, 1, oneTimePrekeyCount);
+    const bundle = await getPublicBundle(credentials.userId);
+
+    // 2) setupAccountRoot — first device on the account mints the root + phrase;
+    //    later devices load the existing one. (Multi-device onboard via
+    //    importWrappedAccountRoot is a separate, non-setup path.)
+    let mnemonic: string | undefined;
+    let accountRoot: Uint8Array | null;
+    if (await hasAccountRoot(credentials.userId)) {
+      accountRoot = await loadAccountRoot(credentials.userId, mkek);
+    } else {
+      accountRoot = generateAccountRoot();
+      mnemonic = await accountRootToMnemonic(accountRoot);
+      await storeAccountRoot(credentials.userId, accountRoot, mkek);
+    }
+
+    // 3) openMessaging — derive the self-channel key/scope from the root now (the
+    //    MKEK is in hand) and mint the per-session capability token.
+    let selfKey: CryptoKey | undefined;
+    let selfScope: string | undefined;
+    if (accountRoot) {
+      selfKey = await deriveSelfKey(accountRoot);
+      selfScope = await deriveSelfScope(accountRoot);
+      accountRoot.fill(0);
+    }
+
+    const capKeyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+    const nowMs = Date.now();
+    const iat = Math.floor(nowMs / 1000);
+    const exp = iat + Math.floor(MESSAGING_ABSOLUTE_MAX_MS / 1000);
+    const token = await mintCapabilityToken(sid, capKeyPair.privateKey, iat, exp);
+
+    const session: MessagingSession = {
+      messagingKEK,
+      userId: credentials.userId,
+      capPubKey: capKeyPair.publicKey,
+      absoluteExp: nowMs + MESSAGING_ABSOLUTE_MAX_MS,
+      idleExp: nowMs + MESSAGING_IDLE_TIMEOUT_MS,
+    };
+    if (selfKey && selfScope) {
+      session.selfKey = selfKey;
+      session.selfScope = selfScope;
+    }
+    messagingSessions.set(sid, session);
+
+    return { bundle, mnemonic, token, exp };
+  });
+
+  await logOperation({
+    op: 'messaging.provision',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: result.unlockTime,
+    lockTime: result.lockTime,
+    duration: result.duration,
+    details: {
+      signedPreKeyId,
+      oneTimePrekeyCount,
+      sid,
+      mintedAccountRoot: result.result.mnemonic !== undefined,
+    },
+  });
+
+  return {
+    bundle: result.result.bundle,
+    ...(result.result.mnemonic !== undefined ? { mnemonic: result.result.mnemonic } : {}),
+    sid,
+    token: result.result.token,
+    exp: result.result.exp,
+  };
 }
 
 /**

@@ -577,6 +577,7 @@ export type RPCMethod =
   | 'getPushSubscription'
   // === Signal messaging (Phase 2) ===
   | 'setupMessaging'
+  | 'provisionMessaging'
   | 'getMessagingBundle'
   | 'getPrekeyCount'
   | 'openMessaging'

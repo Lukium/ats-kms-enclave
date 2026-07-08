@@ -578,6 +578,7 @@ describe('authentication interception', () => {
     'regenerateVAPID',
     'addEnrollment',
     'setupMessaging',
+    'provisionMessaging',
     'setupAccountRoot',
     'openMessaging',
   ];
@@ -585,7 +586,12 @@ describe('authentication interception', () => {
   // Messaging methods route to the top-level popup, which first makes a
   // getMessagingUnlockOptions worker round-trip; the ORIGINAL request must still
   // not be forwarded to the worker until credentials are collected.
-  const messagingUnlockMethods = ['setupMessaging', 'setupAccountRoot', 'openMessaging'];
+  const messagingUnlockMethods = [
+    'setupMessaging',
+    'provisionMessaging',
+    'setupAccountRoot',
+    'openMessaging',
+  ];
 
   authRequiredMethods.forEach((method) => {
     it(`should intercept ${method} and not forward the request to worker immediately`, () => {

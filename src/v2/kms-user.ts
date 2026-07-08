@@ -2126,6 +2126,57 @@ export class KMSUser {
   }
 
   /**
+   * Provision messaging in a SINGLE authentication (BUG-011). Combines
+   * {@link setupMessaging} + {@link setupAccountRoot} + {@link openMessaging}
+   * into one enclave call, so first-run messaging setup prompts the user for
+   * credentials once instead of three times.
+   *
+   * Returns the public bundle (upload it to the directory), the recovery
+   * `mnemonic` ONLY when this call freshly minted the account root (first device;
+   * omitted otherwise), and the open session handle (`sid`/`token`/`exp`).
+   *
+   * Auth is collected in the top-level kms.ats.run POPUP (BUG-008), so the iframe
+   * stays hidden throughout — see {@link setupMessaging}.
+   *
+   * @category Messaging Operations
+   */
+  async provisionMessaging(
+    userId: string,
+    options?: { signedPreKeyId?: number; oneTimePrekeyCount?: number }
+  ): Promise<{
+    bundle: PublicPreKeyBundle;
+    mnemonic?: string;
+    sid: string;
+    token: string;
+    exp: number;
+  }> {
+    if (this.iframe) {
+      this.iframe.style.display = 'none';
+    }
+    try {
+      const result = await this.sendRequest<{
+        bundle: PublicPreKeyBundle;
+        mnemonic?: string;
+        sid: string;
+        token: string;
+        exp: number;
+      }>('provisionMessaging', {
+        userId,
+        ...options,
+      });
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Fetch a user's public prekey bundle (public bytes only, no authentication).
    *
    * @category Messaging Operations

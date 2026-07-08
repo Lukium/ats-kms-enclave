@@ -165,6 +165,97 @@ describe('openMessaging', () => {
   });
 });
 
+describe('provisionMessaging (single-unlock, BUG-011)', () => {
+  type ProvisionResult = {
+    bundle: PublicPreKeyBundle;
+    mnemonic?: string;
+    sid: string;
+    token: string;
+    exp: number;
+  };
+
+  async function enrollAlice(): Promise<void> {
+    const enroll = await handleMessage(
+      createRequest('setupPassphrase', { userId: 'alice', passphrase: ALICE_PASS })
+    );
+    expect(enroll.error).toBeUndefined();
+  }
+
+  it('provisions identity + account root + open session in a single call', async () => {
+    await enrollAlice();
+    const before = Math.floor(Date.now() / 1000);
+    const res = await handleMessage(createRequest('provisionMessaging', { credentials: aliceCreds }));
+    expect(res.error).toBeUndefined();
+    const out = getResult<ProvisionResult>(res);
+
+    // (1) setupMessaging: a real bundle with the default 20 one-time prekeys.
+    expect(out.bundle.identityKey.byteLength).toBe(33);
+    expect(out.bundle.oneTimePreKeys.length).toBe(20);
+    const fetched = getResult<{ bundle: PublicPreKeyBundle }>(
+      await handleMessage(createRequest('getMessagingBundle', { userId: 'alice' }))
+    );
+    expect(fetched.bundle.signedPreKey.keyId).toBe(out.bundle.signedPreKey.keyId);
+
+    // (2) setupAccountRoot: first device mints a 12-word recovery phrase + a root.
+    expect(typeof out.mnemonic).toBe('string');
+    expect(out.mnemonic!.trim().split(/\s+/)).toHaveLength(12);
+    const hasRoot = getResult<{ present: boolean }>(
+      await handleMessage(createRequest('hasAccountRoot', { userId: 'alice' }))
+    );
+    expect(hasRoot.present).toBe(true);
+
+    // (3) openMessaging: a usable session whose self-channel key/scope is wired
+    // (getSelfScope needs the session's selfScope, proving step 3 ran).
+    expect(out.sid).toMatch(/[0-9a-f-]{36}/);
+    expect(out.token.split('.')).toHaveLength(3);
+    expect(out.exp).toBeGreaterThan(before + 8 * 3600 - 60);
+    const selfScope = await handleMessage(
+      createRequest('getSelfScope', { sid: out.sid, token: out.token })
+    );
+    expect(selfScope.error).toBeUndefined();
+    expect(getResult<{ selfScope: string }>(selfScope).selfScope.length).toBeGreaterThan(0);
+  });
+
+  it('omits the mnemonic when the account root already exists', async () => {
+    await enrollAlice();
+    // Pre-mint the account root, then provision — no new phrase should be returned.
+    const first = await handleMessage(createRequest('setupAccountRoot', { credentials: aliceCreds }));
+    expect(first.error).toBeUndefined();
+
+    const res = await handleMessage(createRequest('provisionMessaging', { credentials: aliceCreds }));
+    expect(res.error).toBeUndefined();
+    const out = getResult<ProvisionResult>(res);
+    expect(out.mnemonic).toBeUndefined();
+    // The session is still opened with the existing root's self-channel wired.
+    const selfScope = await handleMessage(
+      createRequest('getSelfScope', { sid: out.sid, token: out.token })
+    );
+    expect(selfScope.error).toBeUndefined();
+  });
+
+  it('honors a custom one-time prekey count', async () => {
+    await enrollAlice();
+    const res = await handleMessage(
+      createRequest('provisionMessaging', { credentials: aliceCreds, oneTimePrekeyCount: 3 })
+    );
+    expect(res.error).toBeUndefined();
+    const count = getResult<{ count: number }>(
+      await handleMessage(createRequest('getPrekeyCount', { userId: 'alice' }))
+    );
+    expect(count.count).toBe(3);
+  });
+
+  it('rejects provisioning with wrong credentials', async () => {
+    await enrollAlice();
+    const res = await handleMessage(
+      createRequest('provisionMessaging', {
+        credentials: { method: 'passphrase', userId: 'alice', passphrase: 'wrong' },
+      })
+    );
+    expect(res.error).toBeDefined();
+  });
+});
+
 describe('buildBundle/openBundle round trip (exit criteria)', () => {
   it('builds a bundle over RPC a library peer opens, and opens the reply over RPC', async () => {
     await setupAlice();

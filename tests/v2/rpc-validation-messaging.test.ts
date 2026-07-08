@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateSetupMessaging,
+  validateProvisionMessaging,
   validateGetMessagingBundle,
   validateGetPrekeyCount,
   validateOpenMessaging,
@@ -58,6 +59,28 @@ describe('validateSetupMessaging', () => {
 
   it('rejects missing credentials', () => {
     expect(() => validateSetupMessaging({})).toThrow();
+  });
+});
+
+describe('validateProvisionMessaging', () => {
+  it('applies the same defaults as setupMessaging', () => {
+    const r = validateProvisionMessaging({ credentials: creds });
+    expect(r.signedPreKeyId).toBe(1);
+    expect(r.oneTimePrekeyCount).toBe(20);
+    expect(r.credentials.userId).toBe('alice');
+  });
+
+  it('accepts explicit in-range values', () => {
+    const r = validateProvisionMessaging({ credentials: creds, signedPreKeyId: 5, oneTimePrekeyCount: 50 });
+    expect(r.signedPreKeyId).toBe(5);
+    expect(r.oneTimePrekeyCount).toBe(50);
+  });
+
+  it('rejects out-of-range values and missing credentials', () => {
+    expect(() => validateProvisionMessaging({ credentials: creds, oneTimePrekeyCount: 101 })).toThrow();
+    expect(() => validateProvisionMessaging({ credentials: creds, oneTimePrekeyCount: 0 })).toThrow();
+    expect(() => validateProvisionMessaging({ credentials: creds, signedPreKeyId: 0 })).toThrow();
+    expect(() => validateProvisionMessaging({})).toThrow();
   });
 });
 

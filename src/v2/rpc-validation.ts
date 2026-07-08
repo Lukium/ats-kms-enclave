@@ -833,6 +833,36 @@ export function validateSetupMessaging(params: unknown): {
   return { credentials, signedPreKeyId, oneTimePrekeyCount };
 }
 
+export function validateProvisionMessaging(params: unknown): {
+  credentials: AuthCredentials;
+  signedPreKeyId: number;
+  oneTimePrekeyCount: number;
+} {
+  const p = validateParamsObject('provisionMessaging', params);
+  const credentials = validateAuthCredentials('provisionMessaging', p.credentials);
+  const signedPreKeyId =
+    p.signedPreKeyId === undefined
+      ? 1
+      : validateKeyId('provisionMessaging', 'signedPreKeyId', p.signedPreKeyId);
+  let oneTimePrekeyCount = 20;
+  if (p.oneTimePrekeyCount !== undefined) {
+    oneTimePrekeyCount = validateNumber('provisionMessaging', 'oneTimePrekeyCount', p.oneTimePrekeyCount);
+    if (
+      !Number.isInteger(oneTimePrekeyCount) ||
+      oneTimePrekeyCount < 1 ||
+      oneTimePrekeyCount > MAX_ONETIME_PREKEY_COUNT
+    ) {
+      throw new RPCValidationError(
+        'provisionMessaging',
+        'oneTimePrekeyCount',
+        `integer in [1, ${MAX_ONETIME_PREKEY_COUNT}]`,
+        p.oneTimePrekeyCount
+      );
+    }
+  }
+  return { credentials, signedPreKeyId, oneTimePrekeyCount };
+}
+
 export function validateGetMessagingBundle(params: unknown): { userId: string } {
   const p = validateParamsObject('getMessagingBundle', params);
   return { userId: validateString('getMessagingBundle', 'userId', p.userId) };

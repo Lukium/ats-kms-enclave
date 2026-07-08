@@ -321,6 +321,7 @@ export class KMSClient {
       'regenerateVAPID',
       'addEnrollment',
       'setupMessaging',
+      'provisionMessaging',
       'setupAccountRoot',
       'openMessaging',
     ];
@@ -329,7 +330,12 @@ export class KMSClient {
     // kms.ats.run popup. The iframe modal is NOT shown for these; the popup owns
     // the UI so the password manager and PRF appSalt work at the top level. Every
     // OTHER authRequired method keeps using the iframe modal (showUnlockModal).
-    const messagingUnlockMethods = ['setupMessaging', 'setupAccountRoot', 'openMessaging'];
+    const messagingUnlockMethods = [
+      'setupMessaging',
+      'provisionMessaging',
+      'setupAccountRoot',
+      'openMessaging',
+    ];
     if (request?.method && authRequiredMethods.includes(request.method)) {
       if (messagingUnlockMethods.includes(request.method)) {
         void this.handleMessagingUnlockViaPopup(request).catch((err: unknown) => {

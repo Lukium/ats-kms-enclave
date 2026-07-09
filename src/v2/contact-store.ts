@@ -2,7 +2,7 @@
  * Contact pairing-secret persistence (secure-messaging §5).
  *
  * Wraps each per-contact pairing secret under the device's messagingKEK (session
- * tier — so pairIDs derive within an open messaging session without a fresh
+ * tier — so scopes derive within an open messaging session without a fresh
  * unlock), binding it by AAD to (userId, peerUserId). The plaintext secret is
  * shared with the peer out-of-band and synced across the account's own devices
  * via the self-channel; each device wraps its own copy under its own messagingKEK.

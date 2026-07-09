@@ -10,7 +10,7 @@
  *
  *  - `selfScope = KDF(accountRoot, "self")` — the opaque channel address. The
  *    relay transport forms the scope key `self:<selfScope>` (mirrors
- *    `dm:<pairID>`); relays route by it and never learn what it means.
+ *    `dm:<scope>`); relays route by it and never learn what it means.
  *  - `selfKey = KDF(accountRoot, "key")` — a symmetric AES-GCM key that encrypts
  *    announcements and the snapshot. Because it is symmetric (derived, not
  *    exchanged), self-sync content does NOT depend on keyserver pubkey
@@ -62,8 +62,8 @@ async function importAccountRootIKM(accountRoot: Uint8Array): Promise<CryptoKey>
  *
  * Deterministic across every device of the account. Returned as a base64url
  * string of 32 derived bytes — an opaque identifier the relay transport places
- * after the `self:` topic prefix. Does NOT include the prefix (mirrors how
- * `pairID` excludes the `dm:` prefix).
+ * after the `self:` topic prefix. Does NOT include the prefix (mirrors how the
+ * channel `scope` excludes the `dm:` prefix).
  */
 export async function deriveSelfScope(accountRoot: Uint8Array): Promise<string> {
   const salt = await deriveDeterministicSalt('ATS/KMS/self/scope/salt/v1');

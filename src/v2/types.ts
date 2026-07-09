@@ -368,7 +368,7 @@ export interface MessagingAccountRecord {
 
 /**
  * A per-contact pairing secret at rest (secure-messaging §5). Wrapped under the
- * device's messagingKEK (session tier, so pairIDs derive within an open session
+ * device's messagingKEK (session tier, so scopes derive within an open session
  * without re-unlock), bound by AAD to (userId, peerUserId). The plaintext secret
  * is shared with the peer out-of-band and across the account's own devices (via
  * the self-channel); each device stores its own copy wrapped under its own

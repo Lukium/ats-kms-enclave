@@ -107,7 +107,7 @@ import {
   encryptSelfMessage,
   decryptSelfMessage,
 } from './self-channel';
-import { derivePairID, deriveExchangeKey } from './pairing';
+import { deriveScope, deriveExchangeKey } from './pairing';
 import {
   masterSigningPublicRaw,
   masterEncryptionPublicRaw,
@@ -1435,8 +1435,8 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
         result = await handleSetContactSecret(validators.validateSetContactSecret(params), id);
         break;
 
-      case 'getContactPairID':
-        result = await handleGetContactPairID(validators.validateGetContactPairID(params));
+      case 'getContactScope':
+        result = await handleGetContactScope(validators.validateGetContactScope(params));
         break;
 
       case 'listContacts':
@@ -4117,16 +4117,16 @@ async function requireContactSecret(
 
 /**
  * Store a contact's pairing secret (from a QR / word-pair, supplied by the PWA at
- * pairing time) and return the derived pairID. Overwrites any existing record.
+ * pairing time) and return the derived scope. Overwrites any existing record.
  */
 async function handleSetContactSecret(
   params: { sid: string; token: string; peerUserId: string; secret: ArrayBuffer },
   requestId: string
-): Promise<{ pairID: string }> {
+): Promise<{ scope: string }> {
   const session = await requireCapability(params.sid, params.token);
   const secret = new Uint8Array(params.secret);
   await storeContactSecret(session.userId, params.peerUserId, secret, session.messagingKEK);
-  const pairID = await derivePairID(secret, session.userId, params.peerUserId);
+  const scope = await deriveScope(secret);
 
   await logOperation({
     op: 'messaging.contact.set',
@@ -4136,32 +4136,32 @@ async function handleSetContactSecret(
     details: { peer: params.peerUserId },
   });
 
-  return { pairID };
+  return { scope };
 }
 
-/** Derive the pairID for an existing contact (to subscribe to its pair-topic). */
-async function handleGetContactPairID(params: {
+/** Derive the scope for an existing contact (to subscribe to its topic). */
+async function handleGetContactScope(params: {
   sid: string;
   token: string;
   peerUserId: string;
-}): Promise<{ pairID: string }> {
+}): Promise<{ scope: string }> {
   const session = await requireCapability(params.sid, params.token);
   const secret = await requireContactSecret(session.userId, params.peerUserId, session.messagingKEK);
-  return { pairID: await derivePairID(secret, session.userId, params.peerUserId) };
+  return { scope: await deriveScope(secret) };
 }
 
-/** List every contact's {peerUserId, pairID} — for subscribing all pair-topics on connect. */
+/** List every contact's {peerUserId, scope} — for subscribing all topics on connect. */
 async function handleListContacts(params: {
   sid: string;
   token: string;
-}): Promise<{ contacts: Array<{ peerUserId: string; pairID: string }> }> {
+}): Promise<{ contacts: Array<{ peerUserId: string; scope: string }> }> {
   const session = await requireCapability(params.sid, params.token);
   const peers = await listContactPeers(session.userId);
-  const contacts: Array<{ peerUserId: string; pairID: string }> = [];
+  const contacts: Array<{ peerUserId: string; scope: string }> = [];
   for (const peerUserId of peers) {
     const secret = await loadContactSecret(session.userId, peerUserId, session.messagingKEK);
     if (secret) {
-      contacts.push({ peerUserId, pairID: await derivePairID(secret, session.userId, peerUserId) });
+      contacts.push({ peerUserId, scope: await deriveScope(secret) });
     }
   }
   return { contacts };
@@ -4243,18 +4243,18 @@ async function handleSealContactAnnouncement(
 /**
  * Apply a self-channel contact announcement from another of the account's
  * devices: open it under the self-key, store the pairing secret locally, and
- * return {peerUserId, pairID} so the PWA can subscribe to the new pair-topic.
+ * return {peerUserId, scope} so the PWA can subscribe to the new topic.
  */
 async function handleApplyContactAnnouncement(
   params: { sid: string; token: string; ciphertext: ArrayBuffer },
   requestId: string
-): Promise<{ peerUserId: string; pairID: string }> {
+): Promise<{ peerUserId: string; scope: string }> {
   const session = await requireCapability(params.sid, params.token);
   const { selfKey } = requireSelfChannel(session);
   const bytes = await decryptSelfMessage(selfKey, params.ciphertext, CONTACT_ANNOUNCEMENT_CONTEXT);
   const { peerUserId, secret } = decodeContactAnnouncement(bytes);
   await storeContactSecret(session.userId, peerUserId, secret, session.messagingKEK);
-  const pairID = await derivePairID(secret, session.userId, peerUserId);
+  const scope = await deriveScope(secret);
 
   await logOperation({
     op: 'messaging.contact.applyAnnounce',
@@ -4264,7 +4264,7 @@ async function handleApplyContactAnnouncement(
     details: { peer: peerUserId },
   });
 
-  return { peerUserId, pairID };
+  return { peerUserId, scope };
 }
 
 // ============================================================================

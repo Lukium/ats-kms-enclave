@@ -1240,16 +1240,16 @@ export function validateSetContactSecret(params: unknown): {
   };
 }
 
-export function validateGetContactPairID(params: unknown): {
+export function validateGetContactScope(params: unknown): {
   sid: string;
   token: string;
   peerUserId: string;
 } {
-  const p = validateParamsObject('getContactPairID', params);
+  const p = validateParamsObject('getContactScope', params);
   return {
-    sid: validateString('getContactPairID', 'sid', p.sid),
-    token: validateString('getContactPairID', 'token', p.token),
-    peerUserId: validatePeerUserId('getContactPairID', p.peerUserId),
+    sid: validateString('getContactScope', 'sid', p.sid),
+    token: validateString('getContactScope', 'token', p.token),
+    peerUserId: validatePeerUserId('getContactScope', p.peerUserId),
   };
 }
 

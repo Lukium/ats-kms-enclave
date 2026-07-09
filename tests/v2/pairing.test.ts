@@ -1,11 +1,11 @@
 /**
  * Pairing crypto + contact-secret persistence tests (secure-messaging §5/§6).
  *
- * pairID/exchangeKey derivation is deterministic and order-independent (both
- * users, every device agree); different secrets/UUID-pairs diverge; the two legs
- * are domain-separated. Contact-store round-trips a secret under a messagingKEK
- * with per-(user,peer) AAD binding. A device-exchange payload sealed by one user
- * opens for the peer (same secret) but not for a wrong secret.
+ * scope/exchangeKey derivation is deterministic from the shared secret alone
+ * (everyone who holds the secret agrees, no user.id binding); different secrets
+ * diverge; the two legs are domain-separated. Contact-store round-trips a secret
+ * under a messagingKEK with per-(user,peer) AAD binding. A device-exchange payload
+ * sealed by one user opens for the peer (same secret) but not for a wrong secret.
  *
  * Runs in the `node` environment for native HKDF/AES-GCM.
  */
@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 
 import { initDB, closeDB } from '@/v2/storage';
-import { derivePairID, deriveExchangeKey } from '@/v2/pairing';
+import { deriveScope, deriveExchangeKey } from '@/v2/pairing';
 import { storeContactSecret, loadContactSecret, listContactPeers } from '@/v2/contact-store';
 import { encryptSelfMessage, decryptSelfMessage } from '@/v2/self-channel';
 
@@ -31,24 +31,23 @@ function secret(fill: number): Uint8Array {
   return new Uint8Array(32).fill(fill);
 }
 
-describe('derivePairID', () => {
-  it('is deterministic and order-independent (both users agree)', async () => {
+describe('deriveScope', () => {
+  it('is deterministic from the secret alone (everyone who holds it agrees)', async () => {
     const s = secret(0x11);
-    const a = await derivePairID(s, ALICE, BOB);
-    const b = await derivePairID(Uint8Array.from(s), BOB, ALICE); // swapped order
+    const a = await deriveScope(s);
+    const b = await deriveScope(Uint8Array.from(s)); // a fresh copy of the same secret
     expect(a).toBe(b);
   });
 
-  it('is a URL-safe base64url string with no dm: prefix', async () => {
-    const id = await derivePairID(secret(0x11), ALICE, BOB);
+  it('is a URL-safe base64url string with no topic prefix', async () => {
+    const id = await deriveScope(secret(0x11));
     expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(id.startsWith('dm:')).toBe(false);
   });
 
-  it('differs for a different secret or a different peer', async () => {
-    const base = await derivePairID(secret(0x11), ALICE, BOB);
-    expect(await derivePairID(secret(0x22), ALICE, BOB)).not.toBe(base); // different secret
-    expect(await derivePairID(secret(0x11), ALICE, CAROL)).not.toBe(base); // different peer
+  it('differs for a different secret', async () => {
+    const base = await deriveScope(secret(0x11));
+    expect(await deriveScope(secret(0x22))).not.toBe(base);
   });
 });
 
@@ -74,11 +73,11 @@ describe('deriveExchangeKey', () => {
     await expect(decryptSelfMessage(wrong, sealed, 'device-exchange')).rejects.toThrow();
   });
 
-  it('is domain-separated from pairID (both derive from the same secret)', async () => {
+  it('is domain-separated from scope (both derive from the same secret)', async () => {
     const s = secret(0x11);
-    const id = await derivePairID(s, ALICE, BOB);
+    const id = await deriveScope(s);
     const key = await deriveExchangeKey(s);
-    // Sealing the pairID string under the exchange key must not reproduce it.
+    // Sealing the scope string under the exchange key must not reproduce it.
     const sealed = await encryptSelfMessage(key, new TextEncoder().encode(id), 'device-exchange');
     expect(new TextDecoder().decode(sealed.subarray(12))).not.toBe(id);
   });

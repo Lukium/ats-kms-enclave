@@ -2460,35 +2460,35 @@ export class KMSUser {
   }
 
   // -------------------------------------------------------------------------
-  // Pairing / contacts (§5/§6). The pairing secret (from a QR / word-pair) is
-  // enclave-held; the PWA gets only the opaque pairID + sealed exchange blobs.
+  // Pairing / contacts (§5/§6). The shared secret (from a QR / word-pair) is
+  // enclave-held; the PWA gets only the opaque channel scope + sealed exchange blobs.
   // -------------------------------------------------------------------------
 
-  /** Store a contact's pairing secret and get its pairID (transport: `dm:<pairID>`). */
+  /** Store a contact's pairing secret and get its channel scope (transport topic). */
   async setContactSecret(args: {
     sid: string;
     token: string;
     peerUserId: string;
     secret: ArrayBuffer;
-  }): Promise<{ pairID: string }> {
-    return this.sendRequest<{ pairID: string }>('setContactSecret', args);
+  }): Promise<{ scope: string }> {
+    return this.sendRequest<{ scope: string }>('setContactSecret', args);
   }
 
-  /** Derive an existing contact's pairID (to subscribe to its pair-topic). */
-  async getContactPairID(
+  /** Derive an existing contact's channel scope (to subscribe to its topic). */
+  async getContactScope(
     sid: string,
     token: string,
     peerUserId: string
-  ): Promise<{ pairID: string }> {
-    return this.sendRequest<{ pairID: string }>('getContactPairID', { sid, token, peerUserId });
+  ): Promise<{ scope: string }> {
+    return this.sendRequest<{ scope: string }>('getContactScope', { sid, token, peerUserId });
   }
 
-  /** List every contact's {peerUserId, pairID} (to subscribe all pair-topics on connect). */
+  /** List every contact's {peerUserId, scope} (to subscribe all topics on connect). */
   async listContacts(
     sid: string,
     token: string
-  ): Promise<{ contacts: Array<{ peerUserId: string; pairID: string }> }> {
-    return this.sendRequest<{ contacts: Array<{ peerUserId: string; pairID: string }> }>(
+  ): Promise<{ contacts: Array<{ peerUserId: string; scope: string }> }> {
+    return this.sendRequest<{ contacts: Array<{ peerUserId: string; scope: string }> }>(
       'listContacts',
       { sid, token }
     );
@@ -2528,8 +2528,8 @@ export class KMSUser {
     sid: string;
     token: string;
     ciphertext: ArrayBuffer;
-  }): Promise<{ peerUserId: string; pairID: string }> {
-    return this.sendRequest<{ peerUserId: string; pairID: string }>(
+  }): Promise<{ peerUserId: string; scope: string }> {
+    return this.sendRequest<{ peerUserId: string; scope: string }>(
       'applyContactAnnouncement',
       args
     );

@@ -602,7 +602,7 @@ export type RPCMethod =
   | 'openBundle'
   // === Pairing / contacts (secure-messaging §5/§6) ===
   | 'setContactSecret'
-  | 'getContactPairID'
+  | 'getContactScope'
   | 'listContacts'
   | 'sealDeviceExchange'
   | 'openDeviceExchange'

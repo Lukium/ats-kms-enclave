@@ -4,7 +4,7 @@
  * Drives set/get/list contact secrets, the device-key exchange (seal for a peer
  * / open what a peer sealed), and the self-channel contact announcement
  * (propagate a stored secret to the account's other devices). Value checks are
- * closed test-side by deriving pairID/exchangeKey/selfKey from the raw secret /
+ * closed test-side by deriving scope/exchangeKey/selfKey from the raw secret /
  * recovery phrase and confirming the enclave agrees.
  *
  * Runs in the `node` environment for native HKDF/AES-GCM + Ed25519 tokens.
@@ -21,7 +21,7 @@ import { initDB, closeDB } from '@/v2/storage';
 import { resetAuditLogger } from '@/v2/audit';
 import { arrayBufferToBase64url } from '@/v2/crypto-utils';
 import { mnemonicToAccountRoot } from '@/v2/account-root';
-import { derivePairID, deriveExchangeKey } from '@/v2/pairing';
+import { deriveScope, deriveExchangeKey } from '@/v2/pairing';
 import { deriveSelfKey, encryptSelfMessage, decryptSelfMessage } from '@/v2/self-channel';
 
 const ALICE_PASS = 'correct-horse-battery-staple';
@@ -67,41 +67,41 @@ beforeEach(async () => {
 })
 afterEach(() => closeDB())
 
-describe('setContactSecret / getContactPairID / listContacts', () => {
-  it('stores a secret and derives the expected pairID', async () => {
+describe('setContactSecret / getContactScope / listContacts', () => {
+  it('stores a secret and derives the expected scope', async () => {
     const { sid, token } = await setupAndOpen()
     const secret = secretBuf(0x11)
 
     const set = expectOk(
       await handleMessage(createRequest('setContactSecret', { sid, token, peerUserId: BOB, secret }))
     )
-    const { pairID } = getResult<{ pairID: string }>(set)
-    const expected = await derivePairID(new Uint8Array(secret), 'alice', BOB)
-    expect(pairID).toBe(expected)
+    const { scope } = getResult<{ scope: string }>(set)
+    const expected = await deriveScope(new Uint8Array(secret))
+    expect(scope).toBe(expected)
 
-    // getContactPairID returns the same value.
+    // getContactScope returns the same value.
     const got = expectOk(
-      await handleMessage(createRequest('getContactPairID', { sid, token, peerUserId: BOB }))
+      await handleMessage(createRequest('getContactScope', { sid, token, peerUserId: BOB }))
     )
-    expect(getResult<{ pairID: string }>(got).pairID).toBe(expected)
+    expect(getResult<{ scope: string }>(got).scope).toBe(expected)
   })
 
-  it('getContactPairID errors for an unknown contact', async () => {
+  it('getContactScope errors for an unknown contact', async () => {
     const { sid, token } = await setupAndOpen()
-    const res = await handleMessage(createRequest('getContactPairID', { sid, token, peerUserId: BOB }))
+    const res = await handleMessage(createRequest('getContactScope', { sid, token, peerUserId: BOB }))
     expect(res.error).toMatch(/No pairing secret/)
   })
 
-  it('listContacts returns every contact with its pairID', async () => {
+  it('listContacts returns every contact with its scope', async () => {
     const { sid, token } = await setupAndOpen()
     await handleMessage(createRequest('setContactSecret', { sid, token, peerUserId: BOB, secret: secretBuf(0x11) }))
     await handleMessage(createRequest('setContactSecret', { sid, token, peerUserId: CAROL, secret: secretBuf(0x22) }))
 
     const res = expectOk(await handleMessage(createRequest('listContacts', { sid, token })))
-    const { contacts } = getResult<{ contacts: Array<{ peerUserId: string; pairID: string }> }>(res)
+    const { contacts } = getResult<{ contacts: Array<{ peerUserId: string; scope: string }> }>(res)
     expect(contacts.map((c) => c.peerUserId).sort()).toEqual([BOB, CAROL].sort())
     const bob = contacts.find((c) => c.peerUserId === BOB)!
-    expect(bob.pairID).toBe(await derivePairID(new Uint8Array(secretBuf(0x11)), 'alice', BOB))
+    expect(bob.scope).toBe(await deriveScope(new Uint8Array(secretBuf(0x11))))
   })
 })
 
@@ -184,15 +184,15 @@ describe('contact announcement (self-channel sync)', () => {
         createRequest('applyContactAnnouncement', { sid, token, ciphertext: ct.buffer.slice(0) })
       )
     )
-    const applied = getResult<{ peerUserId: string; pairID: string }>(res)
+    const applied = getResult<{ peerUserId: string; scope: string }>(res)
     expect(applied.peerUserId).toBe(CAROL)
-    expect(applied.pairID).toBe(await derivePairID(new Uint8Array(carolSecret), 'alice', CAROL))
+    expect(applied.scope).toBe(await deriveScope(new Uint8Array(carolSecret)))
 
-    // The secret is now stored locally — getContactPairID agrees.
+    // The secret is now stored locally — getContactScope agrees.
     const got = expectOk(
-      await handleMessage(createRequest('getContactPairID', { sid, token, peerUserId: CAROL }))
+      await handleMessage(createRequest('getContactScope', { sid, token, peerUserId: CAROL }))
     )
-    expect(getResult<{ pairID: string }>(got).pairID).toBe(applied.pairID)
+    expect(getResult<{ scope: string }>(got).scope).toBe(applied.scope)
   })
 
   it('sealContactAnnouncement errors without an account root (no self-key)', async () => {

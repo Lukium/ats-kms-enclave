@@ -13,9 +13,10 @@
  */
 
 import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils';
+import type { InviteType } from './types';
 
 /** Invite lifecycle type (rooms §3.3): a single-use 1:1, or a reusable room. */
-export type InviteType = 'connect-1:1' | 'room';
+export type { InviteType };
 
 /** Raw room-secret size (bytes). */
 const ROOM_SECRET_BYTES = 32;

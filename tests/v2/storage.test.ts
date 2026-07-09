@@ -978,8 +978,8 @@ describe('schema migration', () => {
     });
   }
 
-  it('DB_VERSION is 4', () => {
-    expect(DB_VERSION).toBe(4);
+  it('DB_VERSION is 5', () => {
+    expect(DB_VERSION).toBe(5);
   });
 
   it('a v1 database has no Signal stores', async () => {

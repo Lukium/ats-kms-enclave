@@ -26,6 +26,7 @@ import type {
   SignalTrustedIdentityRecord,
   MessagingAccountRecord,
   MessagingContactRecord,
+  MessagingInviteRecord,
 } from './types';
 import { buildKeyWrapAAD } from './crypto-utils';
 
@@ -39,7 +40,7 @@ export const DB_NAME = 'kms-v2';
  * account-root store; v4 the per-contact pairing-secret store (secure-messaging
  * §5). Every increment must add a numbered entry to {@link MIGRATIONS}.
  */
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 /** Names of the Signal messaging object stores (added in v2). */
 export type SignalStoreName =
@@ -134,6 +135,16 @@ const MIGRATIONS: Record<number, (db: IDBDatabase) => void> = {
       store.createIndex('by-userId', 'userId', { unique: false });
     }
   },
+  // v5: armed Connect invites (rooms-and-trust §3.2/§3.3). The room secret is
+  // wrapped under the messagingKEK so an armed invite survives the app closing —
+  // a link the peer opens LATER must still land. Keyed by inviteId, indexed by
+  // userId; additive, leaves all prior data untouched.
+  5: (database) => {
+    if (!database.objectStoreNames.contains('messaging-invite')) {
+      const store = database.createObjectStore('messaging-invite', { keyPath: 'inviteId' });
+      store.createIndex('by-userId', 'userId', { unique: false });
+    }
+  },
 };
 
 /**
@@ -166,6 +177,7 @@ let db: IDBDatabase | null = null;
  *       `signal-session`, `signal-trusted-identity`
  * - v3: `messaging-account`
  * - v4: `messaging-contact`
+ * - v5: `messaging-invite`
  *
  * This function is idempotent and safe to call multiple times. Upgrading an
  * existing database only runs the newer migrations and preserves prior data.
@@ -549,7 +561,7 @@ export async function unwrapBlob(
  * Generic indexed query over a store (e.g. all records for a given userId).
  */
 async function getAllByIndex<T>(
-  storeName: SignalStoreName | 'messaging-contact',
+  storeName: SignalStoreName | 'messaging-contact' | 'messaging-invite',
   indexName: string,
   query: IDBValidKey | IDBKeyRange
 ): Promise<T[]> {
@@ -748,6 +760,26 @@ export async function putMessagingContact(record: MessagingContactRecord): Promi
 
 export async function deleteMessagingContact(userId: string, peerUserId: string): Promise<void> {
   await del('messaging-contact', [userId, peerUserId]);
+}
+
+// ============================================================================
+// Messaging Invite Storage Operations (rooms-and-trust §3.2/§3.3)
+// ============================================================================
+
+export async function getMessagingInvite(inviteId: string): Promise<MessagingInviteRecord | null> {
+  return (await get<MessagingInviteRecord>('messaging-invite', inviteId)) ?? null;
+}
+
+export async function getMessagingInvites(userId: string): Promise<MessagingInviteRecord[]> {
+  return getAllByIndex<MessagingInviteRecord>('messaging-invite', 'by-userId', userId);
+}
+
+export async function putMessagingInvite(record: MessagingInviteRecord): Promise<void> {
+  await put('messaging-invite', record);
+}
+
+export async function deleteMessagingInvite(inviteId: string): Promise<void> {
+  await del('messaging-invite', inviteId);
 }
 
 // ============================================================================

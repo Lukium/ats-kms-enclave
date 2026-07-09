@@ -382,6 +382,33 @@ export interface MessagingContactRecord {
   createdAt: number;
 }
 
+/** Invite lifecycle type (rooms-and-trust §3.3): a single-use 1:1, or a reusable room. */
+export type InviteType = 'connect-1:1' | 'room';
+
+/**
+ * An armed Connect invite at rest (rooms-and-trust §3.2/§3.3). The room secret is
+ * wrapped under this device's messagingKEK so an invite survives the app closing
+ * — the whole point of a link you send and the peer opens LATER: on reopen the
+ * enclave reloads it and the PWA re-subscribes to `scope`, so a late join is still
+ * received. Only the (public) lifecycle fields and `scope` are stored in the clear;
+ * the secret is never legible without the messagingKEK, and never leaves the enclave.
+ * Store key: `inviteId`.
+ */
+export interface MessagingInviteRecord {
+  inviteId: string;
+  userId: string;
+  /** messagingKEK-wrapped room secret. */
+  wrappedSecret: WrappedBlob;
+  /** `deriveScope(secret)` — the (non-secret) channel topic to listen on. */
+  scope: string;
+  type: InviteType;
+  /** Absolute expiry (ms epoch), for `connect-1:1`. */
+  expiresAt?: number;
+  /** Single-use flag, for `connect-1:1`. */
+  singleUse?: boolean;
+  createdAt: number;
+}
+
 /**
  * An `accountRoot` sealed to a single device's X25519 identity public key for
  * server-blind auto-onboarding (secure-messaging §18.1). All fields are opaque

@@ -108,6 +108,13 @@ import {
   decryptSelfMessage,
 } from './self-channel';
 import { derivePairID, deriveExchangeKey } from './pairing';
+import {
+  masterSigningPublicRaw,
+  masterEncryptionPublicRaw,
+  signDeviceCert,
+  verifyDeviceCert,
+  type DeviceIdentityKeys,
+} from './master-identity';
 import { storeContactSecret, loadContactSecret, listContactPeers } from './contact-store';
 import {
   encryptEnvelope,
@@ -200,6 +207,21 @@ interface MessagingSession {
   selfKey?: CryptoKey;
   /** Self-channel address (opaque, non-secret), derived alongside {@link selfKey}. */
   selfScope?: string;
+  /**
+   * Master identity material (rooms-and-trust §2), derived from the account root
+   * at provision/open and cached memory-only for the session. All account-root
+   * derived, so stable across the account's devices and recoverable from the
+   * recovery phrase. Undefined until this device has an account root.
+   */
+  /** Raw 32-byte Ed25519 master signing public key (identity card §2.3, fingerprint §4). */
+  masterSigningPub?: Uint8Array;
+  /** Raw 32-byte X25519 master encryption public key (sealed Connect §3.2). */
+  masterEncryptionPub?: Uint8Array;
+  /**
+   * This device's certificate: `Ed25519(master_sign_priv, device identity keys)`.
+   * Rides device-key announcements so peers verify device→identity continuity (§2.2).
+   */
+  deviceCert?: Uint8Array;
 }
 
 /**
@@ -1393,6 +1415,19 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'openSelfMessage':
         result = await handleOpenSelfMessage(validators.validateOpenSelfMessage(params), id);
+        break;
+
+      // === Master identity — identity card / device cert / verify (rooms §2/§4) ===
+      case 'getIdentityCard':
+        result = await handleGetIdentityCard(validators.validateGetIdentityCard(params));
+        break;
+
+      case 'getDeviceCert':
+        result = await handleGetDeviceCert(validators.validateGetDeviceCert(params));
+        break;
+
+      case 'verifyContactDevice':
+        result = await handleVerifyContactDevice(validators.validateVerifyContactDevice(params));
         break;
 
       // === Pairing / Contact Operations (secure-messaging §5/§6) ===
@@ -3386,14 +3421,20 @@ async function handleProvisionMessaging(
     await storeAccountRoot(credentials.userId, accountRoot as Uint8Array, mkek);
   }
 
-  // Phase 3: open the session — derive the self-channel key/scope from the root
-  // (no MS needed) and mint the capability token. Uses the retained
-  // non-extractable messagingKEK; MS is already gone.
+  // Phase 3: open the session — derive the self-channel key/scope AND the master
+  // identity (rooms §2: master pubs + this device's certificate) from the root (no
+  // MS needed) and mint the capability token. Uses the retained non-extractable
+  // messagingKEK; MS is already gone.
   let selfKey: CryptoKey | undefined;
   let selfScope: string | undefined;
+  let masterIdentity: MasterIdentityMaterial | undefined;
   if (accountRoot) {
     selfKey = await deriveSelfKey(accountRoot);
     selfScope = await deriveSelfScope(accountRoot);
+    masterIdentity = await deriveMasterIdentity(accountRoot, {
+      identityKey: new Uint8Array(bundle.identityKey),
+      identitySigningKey: new Uint8Array(bundle.identitySigningKey),
+    });
     accountRoot.fill(0);
   }
 
@@ -3414,6 +3455,7 @@ async function handleProvisionMessaging(
     session.selfKey = selfKey;
     session.selfScope = selfScope;
   }
+  applyMasterIdentity(session, masterIdentity);
   messagingSessions.set(sid, session);
 
   await logOperation({
@@ -3471,14 +3513,20 @@ async function handleOpenMessaging(
     const messagingKEK = await deriveMessagingKEK(ms);
 
     // If this device has an account root, derive the self-channel key + address
-    // now (the master MKEK is in hand) and cache them memory-only for the
-    // session, so self-channel seal/open need no further unlock.
+    // AND the master identity (rooms §2: master pubs + this device's certificate)
+    // now (the master MKEK is in hand) and cache them memory-only for the session,
+    // so self-channel and identity-card ops need no further unlock.
     let selfKey: CryptoKey | undefined;
     let selfScope: string | undefined;
+    let masterIdentity: MasterIdentityMaterial | undefined;
     const accountRoot = await loadAccountRoot(credentials.userId, mkek);
     if (accountRoot) {
       selfKey = await deriveSelfKey(accountRoot);
       selfScope = await deriveSelfScope(accountRoot);
+      masterIdentity = await deriveMasterIdentity(accountRoot, {
+        identityKey: new Uint8Array(identity.identityPubKey),
+        identitySigningKey: new Uint8Array(identity.identitySigningPubKey),
+      });
       accountRoot.fill(0);
     }
 
@@ -3500,6 +3548,7 @@ async function handleOpenMessaging(
       session.selfKey = selfKey;
       session.selfScope = selfScope;
     }
+    applyMasterIdentity(session, masterIdentity);
     messagingSessions.set(sid, session);
 
     return { token, exp };
@@ -3855,6 +3904,52 @@ function requireSelfChannel(session: MessagingSession): { selfKey: CryptoKey; se
   return { selfKey: session.selfKey, selfScope: session.selfScope };
 }
 
+/** Master identity material derived from the account root (rooms-and-trust §2). */
+interface MasterIdentityMaterial {
+  masterSigningPub: Uint8Array;
+  masterEncryptionPub: Uint8Array;
+  deviceCert: Uint8Array;
+}
+
+/**
+ * Derive+sign this device's master-identity material (rooms-and-trust §2) from the
+ * account root: the two master public keys (identity card §2.3 / fingerprint §4)
+ * plus a certificate binding this device's Signal identity keys to the master
+ * signing key (continuity §2.2). All deterministic from the account root.
+ */
+async function deriveMasterIdentity(
+  accountRoot: Uint8Array,
+  deviceKeys: DeviceIdentityKeys
+): Promise<MasterIdentityMaterial> {
+  const [masterSigningPub, masterEncryptionPub, deviceCert] = await Promise.all([
+    masterSigningPublicRaw(accountRoot),
+    masterEncryptionPublicRaw(accountRoot),
+    signDeviceCert(accountRoot, deviceKeys),
+  ]);
+  return { masterSigningPub, masterEncryptionPub, deviceCert };
+}
+
+/** Cache derived master-identity material on the session (no-op when absent). */
+function applyMasterIdentity(session: MessagingSession, m: MasterIdentityMaterial | undefined): void {
+  if (m) {
+    session.masterSigningPub = m.masterSigningPub;
+    session.masterEncryptionPub = m.masterEncryptionPub;
+    session.deviceCert = m.deviceCert;
+  }
+}
+
+/** The session's cached master-identity material, or throw (no account root). */
+function requireMasterIdentity(session: MessagingSession): MasterIdentityMaterial {
+  if (!session.masterSigningPub || !session.masterEncryptionPub || !session.deviceCert) {
+    throw new Error('No account root on this device; set up or import one first');
+  }
+  return {
+    masterSigningPub: session.masterSigningPub,
+    masterEncryptionPub: session.masterEncryptionPub,
+    deviceCert: session.deviceCert,
+  };
+}
+
 /**
  * Return the account's self-channel address `selfScope` (opaque, non-secret).
  * The transport forms the scope key `self:<selfScope>`.
@@ -3911,6 +4006,78 @@ async function handleOpenSelfMessage(
   });
 
   return { payload: u8ToArrayBuffer(out) };
+}
+
+// ============================================================================
+// Master identity — identity card, device cert, peer verification (rooms §2/§4)
+// ============================================================================
+
+/**
+ * Return this account's **identity card** (rooms-and-trust §2.3): the stable,
+ * publishable master public keys. The PWA pairs these with a display-name hint to
+ * build a QR / deep link. Public keys only — no unlock (session-gated). Values are
+ * base64url so the card is directly JSON/QR encodable.
+ */
+async function handleGetIdentityCard(params: {
+  sid: string;
+  token: string;
+}): Promise<{ uid: string; msk: string; mek: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  const { masterSigningPub, masterEncryptionPub } = requireMasterIdentity(session);
+  return {
+    uid: session.userId,
+    msk: arrayBufferToBase64url(u8ToArrayBuffer(masterSigningPub)),
+    mek: arrayBufferToBase64url(u8ToArrayBuffer(masterEncryptionPub)),
+  };
+}
+
+/**
+ * Return this device's certificate plus the device identity keys it certifies
+ * (rooms-and-trust §2.2). The PWA attaches these to its device-key announcement so
+ * peers can verify device→identity continuity via {@link handleVerifyContactDevice}.
+ */
+async function handleGetDeviceCert(params: {
+  sid: string;
+  token: string;
+}): Promise<{ deviceCert: ArrayBuffer; identityKey: ArrayBuffer; identitySigningKey: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const { deviceCert } = requireMasterIdentity(session);
+  const identity = await getSignalIdentity(session.userId);
+  if (!identity) {
+    throw new Error('Messaging not set up for this user');
+  }
+  return {
+    deviceCert: u8ToArrayBuffer(deviceCert),
+    identityKey: identity.identityPubKey,
+    identitySigningKey: identity.identitySigningPubKey,
+  };
+}
+
+/**
+ * Verify a contact's device certificate against the master signing key held for
+ * that contact (rooms-and-trust §2.2/§4): `true` iff `cert` is a valid signature
+ * by `masterSigningPub` over exactly these device keys — i.e. the device provably
+ * belongs to that identity. A pure public-key check, kept in the enclave so all
+ * messaging crypto stays here. Session-gated; fails closed on any bad input.
+ */
+async function handleVerifyContactDevice(params: {
+  sid: string;
+  token: string;
+  masterSigningPub: ArrayBuffer;
+  identityKey: ArrayBuffer;
+  identitySigningKey: ArrayBuffer;
+  cert: ArrayBuffer;
+}): Promise<{ valid: boolean }> {
+  await requireCapability(params.sid, params.token);
+  const valid = await verifyDeviceCert(
+    new Uint8Array(params.masterSigningPub),
+    {
+      identityKey: new Uint8Array(params.identityKey),
+      identitySigningKey: new Uint8Array(params.identitySigningKey),
+    },
+    new Uint8Array(params.cert)
+  );
+  return { valid };
 }
 
 // ============================================================================

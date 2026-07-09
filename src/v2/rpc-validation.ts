@@ -1152,6 +1152,59 @@ export function validateOpenSelfMessage(params: unknown): {
   };
 }
 
+// === Master identity Operations (rooms-and-trust §2/§4) ===
+
+/** Max bytes for a device identity public key (raw 32, or 0x05-prefixed 33). */
+const MAX_DEVICE_PUBKEY_BYTES = 64;
+
+export function validateGetIdentityCard(params: unknown): { sid: string; token: string } {
+  const p = validateParamsObject('getIdentityCard', params);
+  return {
+    sid: validateString('getIdentityCard', 'sid', p.sid),
+    token: validateString('getIdentityCard', 'token', p.token),
+  };
+}
+
+export function validateGetDeviceCert(params: unknown): { sid: string; token: string } {
+  const p = validateParamsObject('getDeviceCert', params);
+  return {
+    sid: validateString('getDeviceCert', 'sid', p.sid),
+    token: validateString('getDeviceCert', 'token', p.token),
+  };
+}
+
+function validateDevicePubKey(method: string, paramName: string, value: unknown): ArrayBuffer {
+  const buf = validateBuffer(method, paramName, value);
+  if (buf.byteLength === 0 || buf.byteLength > MAX_DEVICE_PUBKEY_BYTES) {
+    throw new RPCValidationError(
+      method,
+      paramName,
+      `non-empty ArrayBuffer ≤ ${MAX_DEVICE_PUBKEY_BYTES} bytes`,
+      value
+    );
+  }
+  return buf;
+}
+
+export function validateVerifyContactDevice(params: unknown): {
+  sid: string;
+  token: string;
+  masterSigningPub: ArrayBuffer;
+  identityKey: ArrayBuffer;
+  identitySigningKey: ArrayBuffer;
+  cert: ArrayBuffer;
+} {
+  const p = validateParamsObject('verifyContactDevice', params);
+  return {
+    sid: validateString('verifyContactDevice', 'sid', p.sid),
+    token: validateString('verifyContactDevice', 'token', p.token),
+    masterSigningPub: validateBufferOfLength('verifyContactDevice', 'masterSigningPub', p.masterSigningPub, 32),
+    identityKey: validateDevicePubKey('verifyContactDevice', 'identityKey', p.identityKey),
+    identitySigningKey: validateDevicePubKey('verifyContactDevice', 'identitySigningKey', p.identitySigningKey),
+    cert: validateBufferOfLength('verifyContactDevice', 'cert', p.cert, 64),
+  };
+}
+
 // === Pairing / Contact Operations (secure-messaging §5/§6) ===
 
 /** Max pairing-secret bytes (QR high-entropy ~32; word-pair bytes; padded). */

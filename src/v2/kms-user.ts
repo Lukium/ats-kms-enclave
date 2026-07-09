@@ -2370,6 +2370,63 @@ export class KMSUser {
     return this.sendRequest<{ payload: ArrayBuffer }>('openSelfMessage', args);
   }
 
+  // -------------------------------------------------------------------------
+  // Master identity (rooms-and-trust §2/§4). Account-root-derived keys; only the
+  // public halves leave the enclave. Session-scoped (no extra unlock).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get this account's identity card (rooms §2.3): the master public keys as
+   * base64url. Pair with a display-name hint to build a QR / Connect deep link.
+   *
+   * @category Master Identity Operations
+   */
+  async getIdentityCard(
+    sid: string,
+    token: string
+  ): Promise<{ uid: string; msk: string; mek: string }> {
+    return this.sendRequest<{ uid: string; msk: string; mek: string }>('getIdentityCard', {
+      sid,
+      token,
+    });
+  }
+
+  /**
+   * Get this device's certificate + the identity keys it certifies (rooms §2.2),
+   * to attach to a device-key announcement so peers verify device→identity
+   * continuity via {@link verifyContactDevice}.
+   *
+   * @category Master Identity Operations
+   */
+  async getDeviceCert(
+    sid: string,
+    token: string
+  ): Promise<{ deviceCert: ArrayBuffer; identityKey: ArrayBuffer; identitySigningKey: ArrayBuffer }> {
+    return this.sendRequest<{
+      deviceCert: ArrayBuffer;
+      identityKey: ArrayBuffer;
+      identitySigningKey: ArrayBuffer;
+    }>('getDeviceCert', { sid, token });
+  }
+
+  /**
+   * Verify a contact's device certificate against a master signing public key you
+   * hold for that contact (rooms §2.2/§4). `true` iff the device provably belongs
+   * to that identity. A pure public-key check, kept in the enclave.
+   *
+   * @category Master Identity Operations
+   */
+  async verifyContactDevice(args: {
+    sid: string;
+    token: string;
+    masterSigningPub: ArrayBuffer;
+    identityKey: ArrayBuffer;
+    identitySigningKey: ArrayBuffer;
+    cert: ArrayBuffer;
+  }): Promise<{ valid: boolean }> {
+    return this.sendRequest<{ valid: boolean }>('verifyContactDevice', args);
+  }
+
   /**
    * Build one opaque fan-out bundle: encrypt `plaintext` once per recipient
    * device (pass `deviceBundle` on the first message to a device to establish the

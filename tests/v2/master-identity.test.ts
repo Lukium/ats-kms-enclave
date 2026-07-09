@@ -73,7 +73,7 @@ describe('master-identity: device certificates (continuity §2.2)', () => {
     const msk = await masterSigningPublicRaw(rootA);
     expect(await verifyDeviceCert(msk, device(8), cert)).toBe(false); // different keys
     const bad = new Uint8Array(cert);
-    bad[0] ^= 0xff;
+    bad[0] = ((bad[0] ?? 0) ^ 0xff) & 0xff;
     expect(await verifyDeviceCert(msk, d, bad)).toBe(false); // flipped signature byte
   });
 

@@ -593,6 +593,10 @@ export type RPCMethod =
   | 'getSelfScope'
   | 'sealSelfMessage'
   | 'openSelfMessage'
+  // === Master identity (rooms-and-trust §2/§4) ===
+  | 'getIdentityCard'
+  | 'getDeviceCert'
+  | 'verifyContactDevice'
   // === Fan-out bundle (secure-messaging §8/§12) ===
   | 'buildBundle'
   | 'openBundle'

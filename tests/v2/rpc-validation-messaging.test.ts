@@ -17,6 +17,9 @@ import {
   validateBuildBundle,
   validateOpenBundle,
   validateRotatePrekeys,
+  validateGetIdentityCard,
+  validateGetDeviceCert,
+  validateVerifyContactDevice,
   type MessagingDeviceBundle,
 } from '@/v2/rpc-validation';
 
@@ -198,5 +201,46 @@ describe('validateRotatePrekeys', () => {
     expect(() => validateRotatePrekeys({ ...ok, count: 0 })).toThrow();
     expect(() => validateRotatePrekeys({ ...ok, count: 101 })).toThrow();
     expect(() => validateRotatePrekeys({ ...ok, startKeyId: 0, count: 5 })).toThrow();
+  });
+});
+
+describe('validateGetIdentityCard / validateGetDeviceCert', () => {
+  it('require sid and token', () => {
+    expect(validateGetIdentityCard({ sid: 's', token: 't' })).toEqual({ sid: 's', token: 't' });
+    expect(validateGetDeviceCert({ sid: 's', token: 't' })).toEqual({ sid: 's', token: 't' });
+    expect(() => validateGetIdentityCard({ sid: 's' })).toThrow();
+    expect(() => validateGetDeviceCert({ token: 't' })).toThrow();
+  });
+});
+
+describe('validateVerifyContactDevice', () => {
+  const base = {
+    sid: 's',
+    token: 't',
+    masterSigningPub: new ArrayBuffer(32),
+    identityKey: new ArrayBuffer(33),
+    identitySigningKey: new ArrayBuffer(32),
+    cert: new ArrayBuffer(64),
+  };
+
+  it('accepts well-formed 32-byte master pub, ≤64-byte device keys, 64-byte cert', () => {
+    const r = validateVerifyContactDevice(base);
+    expect(r.masterSigningPub.byteLength).toBe(32);
+    expect(r.cert.byteLength).toBe(64);
+    expect(r.identityKey.byteLength).toBe(33);
+  });
+
+  it('rejects a wrong-length master pub or cert', () => {
+    expect(() => validateVerifyContactDevice({ ...base, masterSigningPub: new ArrayBuffer(31) })).toThrow();
+    expect(() => validateVerifyContactDevice({ ...base, cert: new ArrayBuffer(63) })).toThrow();
+  });
+
+  it('rejects an empty or oversized device key', () => {
+    expect(() => validateVerifyContactDevice({ ...base, identityKey: new ArrayBuffer(0) })).toThrow();
+    expect(() => validateVerifyContactDevice({ ...base, identitySigningKey: new ArrayBuffer(65) })).toThrow();
+  });
+
+  it('rejects missing sid/token', () => {
+    expect(() => validateVerifyContactDevice({ ...base, sid: undefined })).toThrow();
   });
 });

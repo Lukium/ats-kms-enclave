@@ -409,6 +409,32 @@ export interface MessagingInviteRecord {
   createdAt: number;
 }
 
+/** Public (non-secret) view of an armed Connect invite — safe to hand to the PWA. */
+export interface InviteMeta {
+  inviteId: string;
+  scope: string;
+  type: InviteType;
+  expiresAt?: number;
+  singleUse?: boolean;
+  createdAt: number;
+}
+
+/**
+ * The public identity a Connect peer presents (rooms-and-trust §2.3/§4): master
+ * public keys + fingerprint + a name HINT. No secret material; the PWA uses this
+ * for the trust ledger and the mutual-confirmation prompt.
+ */
+export interface ConnectPeer {
+  uid: string;
+  name?: string;
+  /** Master signing public key (Ed25519), base64url. */
+  msk: string;
+  /** Master encryption public key (X25519), base64url. */
+  mek: string;
+  /** Master-key fingerprint (§4) — the value compared out-of-band to verify. */
+  fingerprint: string;
+}
+
 /**
  * An `accountRoot` sealed to a single device's X25519 identity public key for
  * server-blind auto-onboarding (secure-messaging §18.1). All fields are opaque
@@ -634,7 +660,14 @@ export type RPCMethod =
   | 'sealDeviceExchange'
   | 'openDeviceExchange'
   | 'sealContactAnnouncement'
-  | 'applyContactAnnouncement';
+  | 'applyContactAnnouncement'
+  // === Connect invite ceremony (rooms-and-trust §3.2/§3.4) ===
+  | 'mintInvite'
+  | 'acceptInvite'
+  | 'openInviteJoin'
+  | 'approveInviteJoin'
+  | 'forgetInvite'
+  | 'listInvites';
 
 /* ------------------------------------------------------------------
  * VAPID lease and quota types (MVP)

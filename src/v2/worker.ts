@@ -113,8 +113,23 @@ import {
   masterEncryptionPublicRaw,
   signDeviceCert,
   verifyDeviceCert,
+  identityFingerprint,
   type DeviceIdentityKeys,
 } from './master-identity';
+import {
+  generateRoomSecret,
+  buildConnectInvite,
+  encodeInvite,
+  decodeInvite,
+  roomSecretFromB64url,
+  encodeAnnouncement,
+  decodeAnnouncement,
+  isInviteExpired,
+  type InviteCard,
+} from './invite';
+import { storeInvite, loadInvite, listInviteMeta, type InviteMeta } from './invite-store';
+import { deleteMessagingInvite } from './storage';
+import type { ConnectPeer } from './types';
 import { storeContactSecret, loadContactSecret, listContactPeers } from './contact-store';
 import {
   encryptEnvelope,
@@ -416,6 +431,57 @@ function requireMnemonicConfirmation(requestId: string, mnemonic: string): Promi
     }, MNEMONIC_CONFIRM_TIMEOUT_MS);
     pendingMnemonicConfirms.set(requestId, { resolve, reject, timeout });
     self.postMessage({ type: 'worker:show-mnemonic', requestId, mnemonic });
+  });
+}
+
+// ============================================================================
+// Connect invite ceremony (rooms-and-trust §3.2/§3.4) — popup handshakes
+// ============================================================================
+
+/** Timeout for a Connect popup ceremony (5 minutes). */
+const INVITE_CEREMONY_TIMEOUT_MS = 300000;
+
+type CeremonyResolvers<T> = {
+  resolve: (value: T) => void;
+  reject: (reason: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+/** Pending mint ceremonies: the popup is displaying the (secret-bearing) invite blob. */
+const pendingInviteShows = new Map<string, CeremonyResolvers<void>>();
+/** Pending accept ceremonies: awaiting the blob the popup collects (paste/scan + confirm). */
+const pendingInviteCollects = new Map<string, CeremonyResolvers<string>>();
+
+/**
+ * Show the invite blob in the enclave popup and resolve once the user has shared
+ * it / closed the ceremony. The blob carries the room secret, so it goes ONLY to
+ * the popup (same origin) — never returned to the PWA. Rejects on cancel/timeout.
+ */
+function showInviteInPopup(requestId: string, blob: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingInviteShows.delete(requestId);
+      reject(new Error('Invite display timed out'));
+    }, INVITE_CEREMONY_TIMEOUT_MS);
+    pendingInviteShows.set(requestId, { resolve, reject, timeout });
+    self.postMessage({ type: 'worker:show-invite', requestId, blob });
+  });
+}
+
+/**
+ * Ask the popup to collect + confirm an incoming invite blob (paste or QR scan,
+ * then confirm the sender's fingerprint) and resolve with the blob. The blob is
+ * entered IN the popup, so its secret never touches the PWA. Rejects on
+ * cancel/timeout.
+ */
+function collectInviteFromPopup(requestId: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingInviteCollects.delete(requestId);
+      reject(new Error('Invite entry timed out'));
+    }, INVITE_CEREMONY_TIMEOUT_MS);
+    pendingInviteCollects.set(requestId, { resolve, reject, timeout });
+    self.postMessage({ type: 'worker:collect-invite', requestId });
   });
 }
 
@@ -1109,6 +1175,46 @@ const handleWorkerMessage = (event: MessageEvent): void => {
     return;
   }
 
+  // Connect ceremony: the popup finished displaying the invite (mint) → resolve.
+  if ('type' in message && message.type === 'worker:invite-shown') {
+    const pending = message.requestId ? pendingInviteShows.get(message.requestId) : undefined;
+    if (pending && message.requestId) {
+      clearTimeout(pending.timeout);
+      pendingInviteShows.delete(message.requestId);
+      pending.resolve();
+    }
+    return;
+  }
+  if ('type' in message && message.type === 'worker:invite-show-cancelled') {
+    const pending = message.requestId ? pendingInviteShows.get(message.requestId) : undefined;
+    if (pending && message.requestId) {
+      clearTimeout(pending.timeout);
+      pendingInviteShows.delete(message.requestId);
+      pending.reject(new Error(message.reason || 'Invite display was cancelled'));
+    }
+    return;
+  }
+
+  // Connect ceremony: the popup collected + confirmed an incoming invite (accept).
+  if ('type' in message && message.type === 'worker:invite-blob') {
+    const pending = message.requestId ? pendingInviteCollects.get(message.requestId) : undefined;
+    if (pending && message.requestId) {
+      clearTimeout(pending.timeout);
+      pendingInviteCollects.delete(message.requestId);
+      pending.resolve(String((message as { blob?: string }).blob ?? ''));
+    }
+    return;
+  }
+  if ('type' in message && message.type === 'worker:invite-collect-cancelled') {
+    const pending = message.requestId ? pendingInviteCollects.get(message.requestId) : undefined;
+    if (pending && message.requestId) {
+      clearTimeout(pending.timeout);
+      pendingInviteCollects.delete(message.requestId);
+      pending.reject(new Error(message.reason || 'Invite entry was cancelled'));
+    }
+    return;
+  }
+
   // Handle push subscription result from client (fullSetup flow)
   if ('type' in message && message.type === 'worker:push-subscription-result') {
     const data = message as { type: string; requestId?: string; subscription?: StoredPushSubscription; error?: string };
@@ -1463,6 +1569,31 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
           validators.validateApplyContactAnnouncement(params),
           id
         );
+        break;
+
+      // === Connect invite ceremony (rooms-and-trust §3.2/§3.4) ===
+      case 'mintInvite':
+        result = await handleMintInvite(validators.validateMintInvite(params), id);
+        break;
+
+      case 'acceptInvite':
+        result = await handleAcceptInvite(validators.validateAcceptInvite(params), id);
+        break;
+
+      case 'openInviteJoin':
+        result = await handleOpenInviteJoin(validators.validateOpenInviteJoin(params), id);
+        break;
+
+      case 'approveInviteJoin':
+        result = await handleApproveInviteJoin(validators.validateApproveInviteJoin(params), id);
+        break;
+
+      case 'forgetInvite':
+        result = await handleForgetInvite(validators.validateForgetInvite(params), id);
+        break;
+
+      case 'listInvites':
+        result = await handleListInvites(validators.validateListInvites(params));
         break;
 
       default:
@@ -4265,6 +4396,215 @@ async function handleApplyContactAnnouncement(
   });
 
   return { peerUserId, scope };
+}
+
+// ============================================================================
+// Connect invite ceremony handlers (rooms-and-trust §3.2/§3.4)
+// ============================================================================
+
+/** Build THIS account's identity card from the session's cached master pubs. */
+function sessionCard(session: MessagingSession, name?: string): InviteCard {
+  const { masterSigningPub, masterEncryptionPub } = requireMasterIdentity(session);
+  const card: InviteCard = {
+    uid: session.userId,
+    msk: arrayBufferToBase64url(u8ToArrayBuffer(masterSigningPub)),
+    mek: arrayBufferToBase64url(u8ToArrayBuffer(masterEncryptionPub)),
+  };
+  if (name) card.name = name;
+  return card;
+}
+
+/** Compute the master-key fingerprint (§4) of an identity card. */
+async function cardFingerprint(card: InviteCard): Promise<string> {
+  return identityFingerprint(
+    new Uint8Array(base64urlToArrayBuffer(card.msk)),
+    new Uint8Array(base64urlToArrayBuffer(card.mek))
+  );
+}
+
+/** A card → the public peer view surfaced to the PWA (never any secret). */
+async function toConnectPeer(card: InviteCard): Promise<ConnectPeer> {
+  const peer: ConnectPeer = {
+    uid: card.uid,
+    msk: card.msk,
+    mek: card.mek,
+    fingerprint: await cardFingerprint(card),
+  };
+  if (card.name) peer.name = card.name;
+  return peer;
+}
+
+/**
+ * Mint a Connect invite (rooms §3.2): generate a room secret, arm it (persist
+ * wrapped so it survives the app closing), and DISPLAY the blob in the enclave
+ * popup. The blob carries the secret and reaches ONLY the popup; the PWA gets
+ * back just the (public) `inviteId` + `scope` to subscribe on.
+ */
+async function handleMintInvite(
+  params: { sid: string; token: string; nameHint?: string; ttlMs?: number; singleUse?: boolean },
+  requestId: string
+): Promise<{ inviteId: string; scope: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  const card = sessionCard(session, params.nameHint);
+  const secret = generateRoomSecret();
+  const scope = await deriveScope(secret);
+  const inviteId = crypto.randomUUID();
+  const singleUse = params.singleUse ?? true;
+  // exactOptionalPropertyTypes: only carry expiresAt when a TTL was given.
+  const withExpiry = params.ttlMs !== undefined ? { expiresAt: Date.now() + params.ttlMs } : {};
+
+  const blob = encodeInvite(buildConnectInvite(card, secret, { singleUse, ...withExpiry }));
+  await storeInvite(
+    { userId: session.userId, inviteId, secret, scope, type: 'connect-1:1', singleUse, ...withExpiry },
+    session.messagingKEK
+  );
+  secret.fill(0);
+
+  // Display the (secret-bearing) blob in the popup. If the user cancels/times out,
+  // don't leave an orphaned armed invite behind.
+  try {
+    await showInviteInPopup(requestId, blob);
+  } catch (err) {
+    await deleteMessagingInvite(inviteId);
+    throw err;
+  }
+
+  await logOperation({
+    op: 'messaging.invite.mint',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { inviteId, singleUse, hasExpiry: params.ttlMs !== undefined },
+  });
+  return { inviteId, scope };
+}
+
+/**
+ * Accept a Connect invite (rooms §3.2/§3.4): the popup collects + confirms the
+ * blob (its secret never touches the PWA), then we store the shared secret as a
+ * contact and seal OUR identity announcement for the minter. Returns the (public)
+ * peer card + fingerprint for the trust ledger and the opaque sealed announcement
+ * for the PWA to publish on `dm:<scope>`.
+ */
+async function handleAcceptInvite(
+  params: { sid: string; token: string; nameHint?: string },
+  requestId: string
+): Promise<{ scope: string; peer: ConnectPeer; announcement: ArrayBuffer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const myCard = sessionCard(session, params.nameHint); // requires our master identity
+
+  const blob = await collectInviteFromPopup(requestId);
+  const payload = decodeInvite(blob);
+  if (isInviteExpired(payload, Date.now())) {
+    throw new Error('This invite has expired');
+  }
+  const secret = roomSecretFromB64url(payload.s);
+  const scope = await deriveScope(secret);
+  await storeContactSecret(session.userId, payload.card.uid, secret, session.messagingKEK);
+
+  const key = await deriveExchangeKey(secret);
+  const sealed = await encryptSelfMessage(key, encodeAnnouncement(myCard), DEVICE_EXCHANGE_CONTEXT);
+  secret.fill(0);
+
+  await logOperation({
+    op: 'messaging.invite.accept',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { peer: payload.card.uid },
+  });
+  return { scope, peer: await toConnectPeer(payload.card), announcement: u8ToArrayBuffer(sealed) };
+}
+
+/**
+ * Open an incoming join on one of our armed invites (rooms §3.4): decrypt the
+ * joiner's announcement under the invite's stored secret and return their public
+ * identity + fingerprint so the PWA can prompt "X wants to connect". Nothing is
+ * committed yet — approval is a separate, explicit step.
+ */
+async function handleOpenInviteJoin(
+  params: { sid: string; token: string; inviteId: string; ciphertext: ArrayBuffer },
+  requestId: string
+): Promise<{ peer: ConnectPeer }> {
+  const session = await requireCapability(params.sid, params.token);
+  const loaded = await loadInvite(session.userId, params.inviteId, session.messagingKEK);
+  if (!loaded) {
+    throw new Error('No such armed invite');
+  }
+  if (loaded.meta.expiresAt !== undefined && Date.now() >= loaded.meta.expiresAt) {
+    loaded.secret.fill(0);
+    throw new Error('This invite has expired');
+  }
+  const key = await deriveExchangeKey(loaded.secret);
+  loaded.secret.fill(0);
+  const plain = await decryptSelfMessage(key, params.ciphertext, DEVICE_EXCHANGE_CONTEXT);
+  const card = decodeAnnouncement(new Uint8Array(plain));
+
+  await logOperation({
+    op: 'messaging.invite.join',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { inviteId: params.inviteId, peer: card.uid },
+  });
+  return { peer: await toConnectPeer(card) };
+}
+
+/**
+ * Approve a join (rooms §3.4 mutual confirmation): bind the invite's secret to the
+ * confirmed peer as a real contact; consume the invite if single-use. Returns the
+ * channel `scope` so the PWA can finish the device-key exchange.
+ */
+async function handleApproveInviteJoin(
+  params: { sid: string; token: string; inviteId: string; peerUserId: string },
+  requestId: string
+): Promise<{ scope: string }> {
+  const session = await requireCapability(params.sid, params.token);
+  const loaded = await loadInvite(session.userId, params.inviteId, session.messagingKEK);
+  if (!loaded) {
+    throw new Error('No such armed invite');
+  }
+  await storeContactSecret(session.userId, params.peerUserId, loaded.secret, session.messagingKEK);
+  loaded.secret.fill(0);
+  if (loaded.meta.singleUse !== false) {
+    await deleteMessagingInvite(params.inviteId); // consume a single-use invite (§3.3)
+  }
+
+  await logOperation({
+    op: 'messaging.invite.approve',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { inviteId: params.inviteId, peer: params.peerUserId },
+  });
+  return { scope: loaded.meta.scope };
+}
+
+/** Cancel one of our own armed invites (rooms §3.3), dropping its stored secret. */
+async function handleForgetInvite(
+  params: { sid: string; token: string; inviteId: string },
+  requestId: string
+): Promise<{ ok: true }> {
+  const session = await requireCapability(params.sid, params.token);
+  const loaded = await loadInvite(session.userId, params.inviteId, session.messagingKEK);
+  if (loaded) {
+    loaded.secret.fill(0);
+    await deleteMessagingInvite(params.inviteId);
+  }
+  await logOperation({
+    op: 'messaging.invite.forget',
+    kid: `messaging:${session.userId}`,
+    requestId,
+    userId: session.userId,
+    details: { inviteId: params.inviteId },
+  });
+  return { ok: true };
+}
+
+/** List this account's armed invites (public metadata) — for re-subscribing on open. */
+async function handleListInvites(params: { sid: string; token: string }): Promise<{ invites: InviteMeta[] }> {
+  const session = await requireCapability(params.sid, params.token);
+  return { invites: await listInviteMeta(session.userId) };
 }
 
 // ============================================================================

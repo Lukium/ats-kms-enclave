@@ -15,6 +15,8 @@ import {
   decodeInvite,
   buildConnectInvite,
   isInviteExpired,
+  encodeAnnouncement,
+  decodeAnnouncement,
   type InviteCard,
 } from '@/v2/invite';
 
@@ -87,6 +89,27 @@ describe('encodeInvite rejects an invalid payload', () => {
   it('throws rather than mint a malformed invite', () => {
     // @ts-expect-error — deliberately invalid type at the call site
     expect(() => encodeInvite({ v: 1, t: 'bad', card, s: 'x' })).toThrow(/Invalid invite/);
+  });
+});
+
+describe('encodeAnnouncement / decodeAnnouncement', () => {
+  it('round-trips the joiner identity card (no secret, no device keys)', () => {
+    const bytes = encodeAnnouncement(card);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(decodeAnnouncement(bytes)).toEqual(card);
+    // The announcement is identity-only — it must not carry a room secret.
+    expect(new TextDecoder().decode(bytes)).not.toContain('"s"');
+  });
+
+  it('rejects a malformed card or a non-announcement blob', () => {
+    // @ts-expect-error — missing msk/mek
+    expect(() => encodeAnnouncement({ uid: 'u' })).toThrow(/Invalid announcement/);
+    expect(() => decodeAnnouncement(new TextEncoder().encode('not json'))).toThrow(/Invalid announcement/);
+    // an invite blob decoded as an announcement (wrong kind) is rejected
+    const inviteJson = new TextEncoder().encode(
+      JSON.stringify({ v: 1, t: 'connect-1:1', card, s: 'x' })
+    );
+    expect(() => decodeAnnouncement(inviteJson)).toThrow(/Invalid announcement/);
   });
 });
 

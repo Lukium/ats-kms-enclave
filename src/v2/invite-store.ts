@@ -13,20 +13,12 @@
  */
 
 import { wrapBlob, unwrapBlob, getMessagingInvite, getMessagingInvites, putMessagingInvite } from './storage';
-import type { InviteType, MessagingInviteRecord } from './types';
+import type { InviteType, InviteMeta, MessagingInviteRecord } from './types';
+
+export type { InviteMeta };
 
 /** AAD schema version for a wrapped invite secret; bump if the binding changes. */
 const INVITE_SECRET_AAD_VERSION = 'invite-secret/1';
-
-/** Public (non-secret) fields of an armed invite — safe to hand to the PWA. */
-export interface InviteMeta {
-  inviteId: string;
-  scope: string;
-  type: InviteType;
-  expiresAt?: number;
-  singleUse?: boolean;
-  createdAt: number;
-}
 
 /**
  * Deterministic AAD binding a wrapped invite secret to (userId, inviteId), so a

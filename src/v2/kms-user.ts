@@ -30,7 +30,7 @@ import type {
   LeaseVerificationResult,
   StoredPushSubscription,
 } from './types.js';
-import type { PublicPreKeyBundle, WrappedAccountRoot } from './types.js';
+import type { PublicPreKeyBundle, WrappedAccountRoot, ConnectPeer, InviteMeta } from './types.js';
 import type { MessagingDeviceBundle } from './rpc-validation.js';
 import { formatError } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
@@ -2533,5 +2533,72 @@ export class KMSUser {
       'applyContactAnnouncement',
       args
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Connect invite ceremony (rooms-and-trust §3.2/§3.4). The room secret is
+  // generated, stored, and parsed ENTIRELY enclave-side and shown/scanned in the
+  // enclave popup — the PWA only ever handles opaque results + public identity.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Mint a Connect invite: the enclave generates the room secret, arms it, and
+   * displays the invite (link/QR) in its OWN popup. Returns only the public
+   * `inviteId` + `scope` to subscribe on — never the secret or the blob.
+   */
+  async mintInvite(args: {
+    sid: string;
+    token: string;
+    nameHint?: string;
+    ttlMs?: number;
+    singleUse?: boolean;
+  }): Promise<{ inviteId: string; scope: string }> {
+    return this.sendRequest<{ inviteId: string; scope: string }>('mintInvite', args);
+  }
+
+  /**
+   * Accept a Connect invite: the enclave popup collects + confirms the blob, then
+   * returns the (public) peer card + fingerprint and the opaque sealed
+   * announcement to publish on `dm:<scope>`. The invite secret never reaches here.
+   */
+  async acceptInvite(args: {
+    sid: string;
+    token: string;
+    nameHint?: string;
+  }): Promise<{ scope: string; peer: ConnectPeer; announcement: ArrayBuffer }> {
+    return this.sendRequest<{ scope: string; peer: ConnectPeer; announcement: ArrayBuffer }>(
+      'acceptInvite',
+      args
+    );
+  }
+
+  /** Open an incoming join on one of our armed invites → the joiner's public identity. */
+  async openInviteJoin(args: {
+    sid: string;
+    token: string;
+    inviteId: string;
+    ciphertext: ArrayBuffer;
+  }): Promise<{ peer: ConnectPeer }> {
+    return this.sendRequest<{ peer: ConnectPeer }>('openInviteJoin', args);
+  }
+
+  /** Approve a join (mutual confirmation): bind the peer as a contact; returns the scope. */
+  async approveInviteJoin(args: {
+    sid: string;
+    token: string;
+    inviteId: string;
+    peerUserId: string;
+  }): Promise<{ scope: string }> {
+    return this.sendRequest<{ scope: string }>('approveInviteJoin', args);
+  }
+
+  /** Cancel one of our own armed invites, dropping its stored secret. */
+  async forgetInvite(sid: string, token: string, inviteId: string): Promise<{ ok: true }> {
+    return this.sendRequest<{ ok: true }>('forgetInvite', { sid, token, inviteId });
+  }
+
+  /** List this account's armed invites (public metadata) — to re-subscribe on open. */
+  async listInvites(sid: string, token: string): Promise<{ invites: InviteMeta[] }> {
+    return this.sendRequest<{ invites: InviteMeta[] }>('listInvites', { sid, token });
   }
 }

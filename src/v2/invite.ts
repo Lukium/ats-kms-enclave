@@ -123,6 +123,35 @@ export function isInviteExpired(payload: InvitePayload, now: number): boolean {
   return typeof payload.exp === 'number' && now >= payload.exp;
 }
 
+/** Tag distinguishing a Connect join-announcement from an invite blob. */
+const ANNOUNCEMENT_KIND = 'connect-ann';
+
+/**
+ * Encode a Connect **join announcement** — the joiner's identity card only
+ * (rooms §3.4). It travels sealed under the room secret's exchange key so the
+ * minter learns WHO is joining (+ their fingerprint) and can mutually confirm.
+ * Device keys + certificate exchange over the existing device-exchange flow AFTER
+ * approval — not stuffed in here. Returns raw bytes for the caller to seal.
+ */
+export function encodeAnnouncement(card: InviteCard): Uint8Array {
+  if (!isValidCard(card)) throw new Error('Invalid announcement');
+  return encoder.encode(JSON.stringify({ v: INVITE_VERSION, k: ANNOUNCEMENT_KIND, card }));
+}
+
+/** Decode a Connect join announcement back to the joiner's identity card. */
+export function decodeAnnouncement(bytes: Uint8Array): InviteCard {
+  let parsed: { v?: number; k?: string; card?: InviteCard } | null;
+  try {
+    parsed = JSON.parse(decoder.decode(bytes)) as { v?: number; k?: string; card?: InviteCard };
+  } catch {
+    throw new Error('Invalid announcement');
+  }
+  if (!parsed || parsed.v !== INVITE_VERSION || parsed.k !== ANNOUNCEMENT_KIND || !isValidCard(parsed.card)) {
+    throw new Error('Invalid announcement');
+  }
+  return parsed.card;
+}
+
 // ----------------------------------------------------------------------------
 // Internals
 // ----------------------------------------------------------------------------
@@ -140,6 +169,15 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
 }
 
+/** Whether `c` is a structurally-valid identity card (public keys + optional name hint). */
+function isValidCard(c: unknown): c is InviteCard {
+  const card = c as Partial<InviteCard> | null;
+  if (!card || !isNonEmptyString(card.uid) || !isNonEmptyString(card.msk) || !isNonEmptyString(card.mek)) {
+    return false;
+  }
+  return card.name === undefined || typeof card.name === 'string';
+}
+
 /** Throw unless `p` is a structurally-valid current-version invite payload. */
 function assertValidPayload(p: unknown): asserts p is InvitePayload {
   const o = p as Partial<InvitePayload> | null;
@@ -148,14 +186,10 @@ function assertValidPayload(p: unknown): asserts p is InvitePayload {
     o.v !== INVITE_VERSION ||
     (o.t !== 'connect-1:1' && o.t !== 'room') ||
     !isNonEmptyString(o.s) ||
-    !o.card ||
-    !isNonEmptyString(o.card.uid) ||
-    !isNonEmptyString(o.card.msk) ||
-    !isNonEmptyString(o.card.mek)
+    !isValidCard(o.card)
   ) {
     throw new Error('Invalid invite');
   }
-  if (o.card.name !== undefined && typeof o.card.name !== 'string') throw new Error('Invalid invite');
   if (o.exp !== undefined && typeof o.exp !== 'number') throw new Error('Invalid invite');
   if (o.single !== undefined && typeof o.single !== 'boolean') throw new Error('Invalid invite');
 }

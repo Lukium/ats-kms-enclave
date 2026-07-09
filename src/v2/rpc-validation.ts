@@ -1343,3 +1343,110 @@ export function validateApplyContactAnnouncement(params: unknown): {
     ciphertext,
   };
 }
+
+// === Connect invite ceremony (rooms-and-trust §3.2/§3.4) ===
+
+/** Max invite TTL (30 days). */
+const MAX_INVITE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** Max sealed join-announcement ciphertext (a small identity card, padded). */
+const MAX_ANNOUNCEMENT_BYTES = 8192;
+
+function validateInviteId(method: string, value: unknown): string {
+  return validateBoundedString(method, 'inviteId', value, 128);
+}
+
+export function validateMintInvite(params: unknown): {
+  sid: string;
+  token: string;
+  nameHint?: string;
+  ttlMs?: number;
+  singleUse?: boolean;
+} {
+  const p = validateParamsObject('mintInvite', params);
+  const out: { sid: string; token: string; nameHint?: string; ttlMs?: number; singleUse?: boolean } = {
+    sid: validateString('mintInvite', 'sid', p.sid),
+    token: validateString('mintInvite', 'token', p.token),
+  };
+  if (p.nameHint !== undefined) {
+    out.nameHint = validateBoundedString('mintInvite', 'nameHint', p.nameHint, MAX_PEER_NAME_CHARS);
+  }
+  if (p.ttlMs !== undefined) {
+    const ttl = validateNumber('mintInvite', 'ttlMs', p.ttlMs);
+    if (!Number.isInteger(ttl) || ttl <= 0 || ttl > MAX_INVITE_TTL_MS) {
+      throw new RPCValidationError('mintInvite', 'ttlMs', `integer in (0, ${MAX_INVITE_TTL_MS}]`, p.ttlMs);
+    }
+    out.ttlMs = ttl;
+  }
+  if (p.singleUse !== undefined) {
+    out.singleUse = validateBoolean('mintInvite', 'singleUse', p.singleUse);
+  }
+  return out;
+}
+
+export function validateAcceptInvite(params: unknown): { sid: string; token: string; nameHint?: string } {
+  const p = validateParamsObject('acceptInvite', params);
+  const out: { sid: string; token: string; nameHint?: string } = {
+    sid: validateString('acceptInvite', 'sid', p.sid),
+    token: validateString('acceptInvite', 'token', p.token),
+  };
+  if (p.nameHint !== undefined) {
+    out.nameHint = validateBoundedString('acceptInvite', 'nameHint', p.nameHint, MAX_PEER_NAME_CHARS);
+  }
+  return out;
+}
+
+export function validateOpenInviteJoin(params: unknown): {
+  sid: string;
+  token: string;
+  inviteId: string;
+  ciphertext: ArrayBuffer;
+} {
+  const p = validateParamsObject('openInviteJoin', params);
+  const ciphertext = validateBuffer('openInviteJoin', 'ciphertext', p.ciphertext);
+  if (ciphertext.byteLength === 0 || ciphertext.byteLength > MAX_ANNOUNCEMENT_BYTES) {
+    throw new RPCValidationError(
+      'openInviteJoin',
+      'ciphertext',
+      `non-empty ArrayBuffer ≤ ${MAX_ANNOUNCEMENT_BYTES} bytes`,
+      p.ciphertext
+    );
+  }
+  return {
+    sid: validateString('openInviteJoin', 'sid', p.sid),
+    token: validateString('openInviteJoin', 'token', p.token),
+    inviteId: validateInviteId('openInviteJoin', p.inviteId),
+    ciphertext,
+  };
+}
+
+export function validateApproveInviteJoin(params: unknown): {
+  sid: string;
+  token: string;
+  inviteId: string;
+  peerUserId: string;
+} {
+  const p = validateParamsObject('approveInviteJoin', params);
+  return {
+    sid: validateString('approveInviteJoin', 'sid', p.sid),
+    token: validateString('approveInviteJoin', 'token', p.token),
+    inviteId: validateInviteId('approveInviteJoin', p.inviteId),
+    peerUserId: validatePeerUserId('approveInviteJoin', p.peerUserId),
+  };
+}
+
+export function validateForgetInvite(params: unknown): { sid: string; token: string; inviteId: string } {
+  const p = validateParamsObject('forgetInvite', params);
+  return {
+    sid: validateString('forgetInvite', 'sid', p.sid),
+    token: validateString('forgetInvite', 'token', p.token),
+    inviteId: validateInviteId('forgetInvite', p.inviteId),
+  };
+}
+
+export function validateListInvites(params: unknown): { sid: string; token: string } {
+  const p = validateParamsObject('listInvites', params);
+  return {
+    sid: validateString('listInvites', 'sid', p.sid),
+    token: validateString('listInvites', 'token', p.token),
+  };
+}

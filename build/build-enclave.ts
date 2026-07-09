@@ -651,6 +651,56 @@ h1 {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
+.kms-connect-hint {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  opacity: 0.85;
+  margin: 0 0 0.75rem;
+}
+.kms-connect-link {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  word-break: break-all;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+}
+.kms-connect-link:focus {
+  outline: none;
+  border-color: rgba(120, 160, 255, 0.6);
+}
+.kms-connect-meta {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-top: 0.4rem;
+}
+.kms-connect-peer {
+  text-align: center;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  margin-bottom: 0.5rem;
+}
+.kms-connect-peer-name {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+}
+.kms-connect-fp {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  word-break: break-all;
+  opacity: 0.9;
+}
 `;
 
   // Content-address the stylesheet (enclave.{hash}.css), exactly like the client
@@ -886,6 +936,58 @@ function generateEnclaveHTML(
         <div id="kms-mnemonic-finishing" class="kms-modal-loading hidden">
           <span class="kms-spinner"></span>
           <span>Finishing setup…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connect Modal (rooms-and-trust §3.2/§3.4) — mint (share a link) / accept (paste a link).
+       The room secret lives ONLY in this enclave popup: the mint blob is rendered here and
+       the accepted blob is entered here; neither ever reaches the PWA. -->
+  <div id="connect-modal" class="kms-modal hidden">
+    <div class="kms-modal-backdrop"></div>
+    <div class="kms-modal-content">
+      <div class="kms-modal-header">
+        <h3 id="kms-connect-title">🔗 Connect</h3>
+        <p class="kms-modal-subtitle" id="kms-connect-subtitle">Preparing…</p>
+      </div>
+      <div class="kms-modal-body">
+        <!-- Share (mint): show the link to send out-of-band -->
+        <div id="kms-connect-share" class="hidden">
+          <p class="kms-connect-hint">Send this link to the person you want to connect with, over a channel you trust (in person, a call, a message). They open it to connect back to you.</p>
+          <textarea id="kms-connect-link" class="kms-connect-link" readonly rows="3"></textarea>
+          <div id="kms-connect-expiry" class="kms-connect-meta"></div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-connect-copy" type="button" class="kms-auth-btn kms-secondary">Copy link</button>
+            <button id="kms-connect-done" type="button" class="kms-auth-btn kms-primary">Done</button>
+          </div>
+        </div>
+        <!-- Accept (paste): enter a link you received -->
+        <div id="kms-connect-accept" class="hidden">
+          <p class="kms-connect-hint">Paste the invite link you received.</p>
+          <textarea id="kms-connect-paste" class="kms-connect-link" rows="3" placeholder="https://kms.ats.run/connect#…"></textarea>
+          <div id="kms-connect-paste-error" class="kms-modal-error hidden"></div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-connect-cancel" type="button" class="kms-auth-btn kms-tertiary">Cancel</button>
+            <button id="kms-connect-check" type="button" class="kms-auth-btn kms-primary">Continue</button>
+          </div>
+        </div>
+        <!-- Accept (confirm): mutual confirmation — compare the safety number -->
+        <div id="kms-connect-confirm" class="hidden">
+          <p class="kms-connect-hint">Connect with this person? Compare the safety number with them over a trusted channel to be sure it's really them — the name is only a hint.</p>
+          <div class="kms-connect-peer">
+            <div id="kms-connect-peer-name" class="kms-connect-peer-name"></div>
+            <code id="kms-connect-peer-fp" class="kms-connect-fp"></code>
+          </div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-connect-confirm-back" type="button" class="kms-auth-btn kms-tertiary">Back</button>
+            <button id="kms-connect-confirm-connect" type="button" class="kms-auth-btn kms-primary">Connect</button>
+          </div>
+        </div>
+        <!-- Finishing state (worker processing) -->
+        <div id="kms-connect-finishing" class="kms-modal-loading hidden">
+          <span class="kms-spinner"></span>
+          <span>Finishing…</span>
         </div>
       </div>
     </div>

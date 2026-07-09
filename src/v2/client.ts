@@ -21,6 +21,8 @@ import type { RPCRequest, RPCResponse, AuthCredentials, StoredPushSubscription }
 import { formatError, getErrorMessage } from './error-utils.js';
 import { getPRFResults } from './webauthn-types.js';
 import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils.js';
+import { decodeInvite } from './invite.js';
+import { identityFingerprint } from './master-identity.js';
 
 // Global constant injected at build time by esbuild
 declare const __WORKER_FILENAME__: string;
@@ -376,6 +378,21 @@ export class KMSClient {
       return; // Don't forward to worker yet
     }
 
+    // Connect ceremony (rooms-and-trust §3.2/§3.4): mint/accept run in the enclave
+    // popup so the room secret is only ever shown/entered here, never in the PWA.
+    // These are session-scoped (sid/token) — no credential collection — but still
+    // need a popup to display the invite / collect the pasted link.
+    const connectCeremonyMethods = ['mintInvite', 'acceptInvite'];
+    if (request?.method && connectCeremonyMethods.includes(request.method)) {
+      void this.handleConnectViaPopup(request).catch((err: unknown) => {
+        console.error('[KMS Client] Connect ceremony via popup failed:', err);
+        if (request.id) {
+          this.sendToParent({ id: request.id, error: formatError('Connect ceremony failed', err) });
+        }
+      });
+      return; // Don't forward to worker yet — handleConnectViaPopup forwards it.
+    }
+
     // Special case: extendLeases only requires auth if requestAuth flag is set
     if (
       request?.method === 'extendLeases' &&
@@ -455,6 +472,34 @@ export class KMSClient {
             type: 'worker:mnemonic-cancelled',
             requestId: data.requestId as string,
             reason: 'No popup available to confirm the recovery phrase',
+          });
+        }
+        return;
+      }
+
+      // Connect ceremony (rooms §3.2/§3.4): relay the invite blob to the popup for
+      // display (mint), or tell it to collect a pasted link (accept). The blob only
+      // ever moves worker → popup over the private port, never to the parent PWA.
+      if ('type' in data && data.type === 'worker:show-invite') {
+        if (this.messagingPopupPort) {
+          this.messagingPopupPort.postMessage({ type: 'popup:show-invite', blob: data.blob as string });
+        } else {
+          this.worker?.postMessage({
+            type: 'worker:invite-show-cancelled',
+            requestId: data.requestId as string,
+            reason: 'No popup available to show the invite',
+          });
+        }
+        return;
+      }
+      if ('type' in data && data.type === 'worker:collect-invite') {
+        if (this.messagingPopupPort) {
+          this.messagingPopupPort.postMessage({ type: 'popup:collect-invite' });
+        } else {
+          this.worker?.postMessage({
+            type: 'worker:invite-collect-cancelled',
+            requestId: data.requestId as string,
+            reason: 'No popup available to enter the invite',
           });
         }
         return;
@@ -1465,6 +1510,81 @@ export class KMSClient {
       this.setupUnlockResponseListener(requestWithCredentials);
       this.worker?.postMessage(requestWithCredentials);
     }
+  }
+
+  /**
+   * Connect ceremony via the enclave popup (rooms-and-trust §3.2/§3.4).
+   * `mintInvite`/`acceptInvite` are session-scoped (sid/token) so there is NO
+   * credential collection — this opens a popup solely to DISPLAY the minted invite
+   * (share) or COLLECT a pasted link (accept), keeping the room secret inside the
+   * enclave. The blob rides the private worker↔popup port; the RPC result forwards
+   * to the parent PWA via the normal worker-message path (public data only).
+   */
+  private async handleConnectViaPopup(request: RPCRequest): Promise<void> {
+    const mode = request.method === 'mintInvite' ? 'share' : 'accept';
+    const requestId = `connect-popup-${Date.now()}`;
+    const popupURL = `${location.origin}/?mode=connect&parentOrigin=${this.parentOrigin}`;
+    const port = await this.openPopupChannel(popupURL, requestId);
+    this.messagingPopupPort = port;
+    const rpcId = request.id;
+
+    // Popup → iframe: relay the ceremony outcomes to the worker (matched by rpcId).
+    port.onmessage = (event: MessageEvent): void => {
+      const data = event.data as { type?: string; blob?: string };
+      if (!rpcId) return;
+      switch (data?.type) {
+        case 'popup:invite-shown':
+          this.worker?.postMessage({ type: 'worker:invite-shown', requestId: rpcId });
+          break;
+        case 'popup:invite-show-cancelled':
+          this.worker?.postMessage({ type: 'worker:invite-show-cancelled', requestId: rpcId });
+          break;
+        case 'popup:invite-blob':
+          this.worker?.postMessage({ type: 'worker:invite-blob', requestId: rpcId, blob: data.blob ?? '' });
+          break;
+        case 'popup:invite-collect-cancelled':
+          this.worker?.postMessage({ type: 'worker:invite-collect-cancelled', requestId: rpcId });
+          break;
+        default:
+          break;
+      }
+    };
+
+    // On the worker's final RPC response: notify the popup (confirm + close) and
+    // drop the port. The response itself forwards to the parent via the DEFAULT
+    // handleWorkerMessage path — do NOT sendToParent here (would double-forward).
+    const relayResult = (event: MessageEvent): void => {
+      const resp = event.data as RPCResponse;
+      if (resp.id !== rpcId) return;
+      this.worker?.removeEventListener('message', relayResult);
+      this.messagingPopupPort = null;
+      const errMsg =
+        resp.error === undefined ? undefined : typeof resp.error === 'string' ? resp.error : resp.error.message;
+      try {
+        port.postMessage({
+          type: 'popup:connect-result',
+          success: resp.error === undefined,
+          ...(errMsg !== undefined ? { error: errMsg } : {}),
+        });
+      } catch {
+        /* popup may already be gone */
+      }
+      if (resp.error === undefined) {
+        setTimeout(() => {
+          try {
+            port.close();
+          } catch {
+            /* ignore */
+          }
+        }, 2000);
+      }
+    };
+    this.worker?.addEventListener('message', relayResult);
+
+    // Open the connect modal in the popup, then forward the RPC (which drives the
+    // worker:show-invite / worker:collect-invite handshake back to the popup).
+    port.postMessage({ type: 'kms:connect', operation: 'connect', mode });
+    this.worker?.postMessage(request);
   }
 
   /**
@@ -2778,6 +2898,159 @@ export class KMSClient {
    * the whole phrase is supported). Posts `popup:mnemonic-confirmed` on success or
    * `popup:mnemonic-cancelled` on cancel; the phrase never leaves this popup.
    */
+  /** Open the connect-modal shell in the popup for the given ceremony `mode`. */
+  showConnectCeremony(mode: 'share' | 'accept'): void {
+    document.getElementById('unlock-modal')?.classList.add('hidden');
+    document.getElementById('connect-modal')?.classList.remove('hidden');
+    if (mode === 'accept') {
+      this.renderConnectAccept();
+    } else {
+      const subtitle = document.getElementById('kms-connect-subtitle');
+      if (subtitle) subtitle.textContent = 'Generating your invite…';
+      this.showConnectView('finishing');
+    }
+  }
+
+  /** Render the share view: the invite link (with copy) to send out-of-band. */
+  renderConnectShare(blob: string): void {
+    const port = this.credentialPort;
+    const link = document.getElementById('kms-connect-link') as HTMLTextAreaElement | null;
+    if (!port || !link) {
+      port?.postMessage({ type: 'popup:invite-show-cancelled' });
+      return;
+    }
+    const url = `https://kms.ats.run/connect#c=${blob}`;
+    link.value = url;
+    const subtitle = document.getElementById('kms-connect-subtitle');
+    if (subtitle) subtitle.textContent = 'Share this link to connect';
+    this.showConnectView('share');
+
+    const copyBtn = document.getElementById('kms-connect-copy');
+    if (copyBtn) {
+      copyBtn.onclick = (): void => {
+        if (!navigator.clipboard) return;
+        void navigator.clipboard
+          .writeText(url)
+          .then(() => {
+            copyBtn.textContent = 'Copied ✓';
+          })
+          .catch(() => {
+            /* clipboard blocked — the user can still select the link */
+          });
+      };
+    }
+    const doneBtn = document.getElementById('kms-connect-done');
+    if (doneBtn) {
+      doneBtn.onclick = (): void => {
+        this.showConnectView('finishing');
+        port.postMessage({ type: 'popup:invite-shown' });
+      };
+    }
+  }
+
+  /** Render the accept view: paste a link, then confirm the sender's fingerprint. */
+  renderConnectAccept(): void {
+    const port = this.credentialPort;
+    const paste = document.getElementById('kms-connect-paste') as HTMLTextAreaElement | null;
+    if (!port || !paste) {
+      port?.postMessage({ type: 'popup:invite-collect-cancelled' });
+      return;
+    }
+    const subtitle = document.getElementById('kms-connect-subtitle');
+    if (subtitle) subtitle.textContent = 'Paste an invite link';
+    document.getElementById('kms-connect-paste-error')?.classList.add('hidden');
+    this.showConnectView('accept');
+
+    const cancelBtn = document.getElementById('kms-connect-cancel');
+    if (cancelBtn) {
+      cancelBtn.onclick = (): void => {
+        port.postMessage({ type: 'popup:invite-collect-cancelled' });
+      };
+    }
+    const checkBtn = document.getElementById('kms-connect-check');
+    if (checkBtn) {
+      checkBtn.onclick = (): void => {
+        void this.confirmConnectPaste(paste.value, port);
+      };
+    }
+  }
+
+  /** Decode a pasted link + show the sender's name/fingerprint for mutual confirmation. */
+  private async confirmConnectPaste(input: string, port: MessagePort): Promise<void> {
+    const errEl = document.getElementById('kms-connect-paste-error');
+    let card: { uid: string; name?: string; msk: string; mek: string };
+    try {
+      card = decodeInvite(input).card;
+    } catch {
+      if (errEl) {
+        errEl.textContent = "That doesn't look like a valid invite link.";
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+    const fp = await identityFingerprint(
+      new Uint8Array(base64urlToArrayBuffer(card.msk)),
+      new Uint8Array(base64urlToArrayBuffer(card.mek))
+    );
+    const nameEl = document.getElementById('kms-connect-peer-name');
+    if (nameEl) nameEl.textContent = card.name || card.uid;
+    const fpEl = document.getElementById('kms-connect-peer-fp');
+    if (fpEl) fpEl.textContent = this.formatConnectFingerprint(fp);
+    this.showConnectView('confirm');
+
+    const backBtn = document.getElementById('kms-connect-confirm-back');
+    if (backBtn) {
+      backBtn.onclick = (): void => {
+        this.showConnectView('accept');
+      };
+    }
+    const connectBtn = document.getElementById('kms-connect-confirm-connect');
+    if (connectBtn) {
+      connectBtn.onclick = (): void => {
+        this.showConnectView('finishing');
+        port.postMessage({ type: 'popup:invite-blob', blob: input });
+      };
+    }
+  }
+
+  /** Popup-side: react to the ceremony's final result (confirm+close, or show the error). */
+  handleConnectResult(success: boolean, error?: string): void {
+    const subtitle = document.getElementById('kms-connect-subtitle');
+    if (success) {
+      if (subtitle) subtitle.textContent = 'Done ✓';
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          /* ignore */
+        }
+      }, 1200);
+    } else {
+      const errEl = document.getElementById('kms-connect-paste-error');
+      if (errEl) {
+        errEl.textContent = error ?? 'Connect failed';
+        errEl.classList.remove('hidden');
+      }
+      this.showConnectView('accept');
+    }
+  }
+
+  /** Show exactly one connect-modal sub-view; hide the rest. */
+  private showConnectView(view: 'share' | 'accept' | 'confirm' | 'finishing'): void {
+    document.getElementById('connect-modal')?.classList.remove('hidden');
+    for (const v of ['share', 'accept', 'confirm', 'finishing']) {
+      document.getElementById(`kms-connect-${v}`)?.classList.toggle('hidden', v !== view);
+    }
+  }
+
+  /** Group a base64url fingerprint into uppercase blocks for out-of-band compare. */
+  private formatConnectFingerprint(fp: string): string {
+    const clean = fp.replace(/[_-]/g, '').toUpperCase();
+    const out: string[] = [];
+    for (let i = 0; i < clean.length; i += 5) out.push(clean.slice(i, i + 5));
+    return out.join(' ');
+  }
+
   showMnemonicCeremony(mnemonic: string): void {
     const port = this.credentialPort;
     const modal = document.getElementById('mnemonic-modal');
@@ -3201,7 +3474,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             port.onmessage = (portEvent: MessageEvent): void => {
               const portData = portEvent.data as {
                 type?: string;
-                operation?: 'setup' | 'unlock';
+                operation?: 'setup' | 'unlock' | 'connect';
+                mode?: 'share' | 'accept';
+                blob?: string;
                 method?: 'passkey-prf' | 'passkey-gate';
                 options?: {
                   hasPassphrase: boolean;
@@ -3237,6 +3512,21 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 return;
               }
 
+              // Connect ceremony (rooms §3.2/§3.4): render the invite link to share
+              // (mint), or the paste field to accept, or react to the final result.
+              if (portData?.type === 'popup:show-invite') {
+                client.renderConnectShare(portData.blob ?? '');
+                return;
+              }
+              if (portData?.type === 'popup:collect-invite') {
+                client.renderConnectAccept();
+                return;
+              }
+              if (portData?.type === 'popup:connect-result') {
+                client.handleConnectResult(portData.success === true, portData.error);
+                return;
+              }
+
               if (portData?.type === 'kms:connect') {
                 /* eslint-disable no-console */
                 console.log('[KMS Client] Popup received kms:connect via MessagePort', portData.operation ?? 'setup');
@@ -3265,6 +3555,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                     port.postMessage({ type: 'popup:connected' });
                     void client.runPopupUnlockCeremony();
                   }
+                } else if (portData.operation === 'connect') {
+                  // Connect ceremony (rooms §3.2/§3.4): no credentials — just open
+                  // the connect modal to display/collect the invite. The room secret
+                  // stays in this popup.
+                  (client as any).credentialPort = port;
+                  (client as any).isStatelessPopup = true;
+                  port.postMessage({ type: 'popup:connected' });
+                  client.showConnectCeremony(portData.mode === 'accept' ? 'accept' : 'share');
                 } else {
                   // Setup flow (unchanged): store transport params, show setup modal.
                   (client as any).transportPublicKey = portData.transportKey!;

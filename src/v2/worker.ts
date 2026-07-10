@@ -4516,6 +4516,11 @@ async function handleAcceptInvite(
 
   const blob = await collectInviteFromPopup(requestId);
   const payload = decodeInvite(blob);
+  if (payload.card.uid === session.userId) {
+    // Accepting your OWN invite would bind you to yourself (rooms §3.4). This also
+    // catches the common "pasted the wrong/stale link" case with a clear error.
+    throw new Error('You cannot accept your own invite link');
+  }
   if (isInviteExpired(payload, Date.now())) {
     throw new Error('This invite has expired');
   }

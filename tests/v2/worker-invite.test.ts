@@ -237,6 +237,16 @@ describe('acceptInvite', () => {
     const response = await driveAccept(sid, token, blob);
     expect(response.error).toMatch(/expired/);
   });
+
+  it('rejects accepting your OWN invite (self-connect guard)', async () => {
+    const { sid, token } = await setupAndOpen();
+    // A card whose uid is our own session userId ('alice') — e.g. a stale/own link.
+    const mine = await cardFor('alice', new Uint8Array(16).fill(0x0a));
+    const secret = new Uint8Array(32).fill(0x77);
+    const blob = encodeInvite(buildConnectInvite(mine, secret, { singleUse: true }));
+    const response = await driveAccept(sid, token, blob);
+    expect(response.error).toMatch(/your own invite/);
+  });
 });
 
 describe('openInviteJoin / approveInviteJoin', () => {

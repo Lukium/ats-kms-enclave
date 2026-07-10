@@ -2553,7 +2553,15 @@ export class KMSUser {
     ttlMs?: number;
     singleUse?: boolean;
   }): Promise<{ inviteId: string; scope: string }> {
-    return this.sendRequest<{ inviteId: string; scope: string }>('mintInvite', args);
+    // The Connect ceremony renders in the iframe modal (no popup — no credential is
+    // collected), so reveal the iframe for the duration of the RPC (mirrors
+    // extendLeases' requestAuth reveal). The enclave client also emits kms:show-iframe.
+    if (this.iframe) this.iframe.style.display = 'block';
+    try {
+      return await this.sendRequest<{ inviteId: string; scope: string }>('mintInvite', args);
+    } finally {
+      if (this.iframe) this.iframe.style.display = 'none';
+    }
   }
 
   /**
@@ -2566,10 +2574,16 @@ export class KMSUser {
     token: string;
     nameHint?: string;
   }): Promise<{ scope: string; peer: ConnectPeer; announcement: ArrayBuffer }> {
-    return this.sendRequest<{ scope: string; peer: ConnectPeer; announcement: ArrayBuffer }>(
-      'acceptInvite',
-      args
-    );
+    // Reveal the iframe modal for the paste + fingerprint-confirm ceremony (see mintInvite).
+    if (this.iframe) this.iframe.style.display = 'block';
+    try {
+      return await this.sendRequest<{ scope: string; peer: ConnectPeer; announcement: ArrayBuffer }>(
+        'acceptInvite',
+        args
+      );
+    } finally {
+      if (this.iframe) this.iframe.style.display = 'none';
+    }
   }
 
   /** Open an incoming join on one of our armed invites → the joiner's public identity. */

@@ -98,6 +98,13 @@ export class KMSClient {
   // popup UI. Set while handleMessagingUnlockViaPopup is in flight; else null.
   private messagingPopupPort: MessagePort | null = null;
 
+  // IFRAME-side id of the in-flight Connect ceremony RPC (mint/accept). The
+  // ceremony renders in the iframe modal (NOT a popup — no credential is
+  // collected), so its outcomes (worker:invite-shown / worker:invite-blob) post
+  // straight back to the worker, matched by this id. Set while
+  // handleConnectViaIframe is in flight; else null.
+  private pendingConnectRequestId: string | null = null;
+
   /**
    * Create a new KMS client bridge
    *
@@ -378,19 +385,23 @@ export class KMSClient {
       return; // Don't forward to worker yet
     }
 
-    // Connect ceremony (rooms-and-trust §3.2/§3.4): mint/accept run in the enclave
-    // popup so the room secret is only ever shown/entered here, never in the PWA.
-    // These are session-scoped (sid/token) — no credential collection — but still
-    // need a popup to display the invite / collect the pasted link.
+    // Connect ceremony (rooms-and-trust §3.2/§3.4): mint/accept are session-scoped
+    // (sid/token) with NO credential collection, so — unlike unlock — they do NOT
+    // need a top-level popup. They render in the IFRAME modal (the enclave surface
+    // that already holds the vault); the room secret is only ever displayed (mint)
+    // or entered (accept) inside the iframe, never in the PWA. The popup exists
+    // solely for first-party WebAuthn/passkey unlock, which this ceremony skips.
     const connectCeremonyMethods = ['mintInvite', 'acceptInvite'];
     if (request?.method && connectCeremonyMethods.includes(request.method)) {
-      void this.handleConnectViaPopup(request).catch((err: unknown) => {
-        console.error('[KMS Client] Connect ceremony via popup failed:', err);
+      try {
+        this.handleConnectViaIframe(request);
+      } catch (err: unknown) {
+        console.error('[KMS Client] Connect ceremony via iframe failed:', err);
         if (request.id) {
           this.sendToParent({ id: request.id, error: formatError('Connect ceremony failed', err) });
         }
-      });
-      return; // Don't forward to worker yet — handleConnectViaPopup forwards it.
+      }
+      return; // Don't forward to worker yet — handleConnectViaIframe forwards it.
     }
 
     // Special case: extendLeases only requires auth if requestAuth flag is set
@@ -477,31 +488,18 @@ export class KMSClient {
         return;
       }
 
-      // Connect ceremony (rooms §3.2/§3.4): relay the invite blob to the popup for
-      // display (mint), or tell it to collect a pasted link (accept). The blob only
-      // ever moves worker → popup over the private port, never to the parent PWA.
+      // Connect ceremony (rooms §3.2/§3.4): render the invite in the IFRAME modal.
+      // mint → display the (secret-bearing) link to share; accept → collect + confirm
+      // a pasted link. The blob is shown/entered inside the iframe (same origin as
+      // the vault) and its outcomes post straight back to the worker — it never
+      // reaches the parent PWA. worker:show-invite/collect-invite only arrive while a
+      // handleConnectViaIframe ceremony is in flight (pendingConnectRequestId set).
       if ('type' in data && data.type === 'worker:show-invite') {
-        if (this.messagingPopupPort) {
-          this.messagingPopupPort.postMessage({ type: 'popup:show-invite', blob: data.blob as string });
-        } else {
-          this.worker?.postMessage({
-            type: 'worker:invite-show-cancelled',
-            requestId: data.requestId as string,
-            reason: 'No popup available to show the invite',
-          });
-        }
+        this.renderConnectShare(data.blob as string);
         return;
       }
       if ('type' in data && data.type === 'worker:collect-invite') {
-        if (this.messagingPopupPort) {
-          this.messagingPopupPort.postMessage({ type: 'popup:collect-invite' });
-        } else {
-          this.worker?.postMessage({
-            type: 'worker:invite-collect-cancelled',
-            requestId: data.requestId as string,
-            reason: 'No popup available to enter the invite',
-          });
-        }
+        this.renderConnectAccept();
         return;
       }
 
@@ -1513,79 +1511,72 @@ export class KMSClient {
   }
 
   /**
-   * Connect ceremony via the enclave popup (rooms-and-trust §3.2/§3.4).
-   * `mintInvite`/`acceptInvite` are session-scoped (sid/token) so there is NO
-   * credential collection — this opens a popup solely to DISPLAY the minted invite
-   * (share) or COLLECT a pasted link (accept), keeping the room secret inside the
-   * enclave. The blob rides the private worker↔popup port; the RPC result forwards
-   * to the parent PWA via the normal worker-message path (public data only).
+   * Connect ceremony rendered in the IFRAME modal (rooms-and-trust §3.2/§3.4).
+   * `mintInvite`/`acceptInvite` are session-scoped (sid/token) with NO credential
+   * collection, so — unlike unlock — they do NOT need a top-level popup. They run
+   * in the iframe (the enclave surface that already holds the vault): the room
+   * secret is only ever displayed (mint) or entered (accept) here, never in the
+   * PWA. The worker drives the ceremony via worker:show-invite / worker:collect-
+   * invite (transport-agnostic); this client renders the modal and posts the
+   * outcomes (worker:invite-shown / worker:invite-blob) straight back to the
+   * worker — no cross-window MessagePort. The RPC result forwards to the PWA via
+   * the DEFAULT worker-message path (public data only).
    */
-  private async handleConnectViaPopup(request: RPCRequest): Promise<void> {
-    const mode = request.method === 'mintInvite' ? 'share' : 'accept';
-    const requestId = `connect-popup-${Date.now()}`;
-    const popupURL = `${location.origin}/?mode=connect&parentOrigin=${this.parentOrigin}`;
-    const port = await this.openPopupChannel(popupURL, requestId);
-    this.messagingPopupPort = port;
-    const rpcId = request.id;
-
-    // Popup → iframe: relay the ceremony outcomes to the worker (matched by rpcId).
-    port.onmessage = (event: MessageEvent): void => {
-      const data = event.data as { type?: string; blob?: string };
-      if (!rpcId) return;
-      switch (data?.type) {
-        case 'popup:invite-shown':
-          this.worker?.postMessage({ type: 'worker:invite-shown', requestId: rpcId });
-          break;
-        case 'popup:invite-show-cancelled':
-          this.worker?.postMessage({ type: 'worker:invite-show-cancelled', requestId: rpcId });
-          break;
-        case 'popup:invite-blob':
-          this.worker?.postMessage({ type: 'worker:invite-blob', requestId: rpcId, blob: data.blob ?? '' });
-          break;
-        case 'popup:invite-collect-cancelled':
-          this.worker?.postMessage({ type: 'worker:invite-collect-cancelled', requestId: rpcId });
-          break;
-        default:
-          break;
-      }
-    };
-
-    // On the worker's final RPC response: notify the popup (confirm + close) and
-    // drop the port. The response itself forwards to the parent via the DEFAULT
-    // handleWorkerMessage path — do NOT sendToParent here (would double-forward).
-    const relayResult = (event: MessageEvent): void => {
-      const resp = event.data as RPCResponse;
-      if (resp.id !== rpcId) return;
-      this.worker?.removeEventListener('message', relayResult);
-      this.messagingPopupPort = null;
-      const errMsg =
-        resp.error === undefined ? undefined : typeof resp.error === 'string' ? resp.error : resp.error.message;
-      try {
-        port.postMessage({
-          type: 'popup:connect-result',
-          success: resp.error === undefined,
-          ...(errMsg !== undefined ? { error: errMsg } : {}),
+  /* c8 ignore start - iframe connect-ceremony UI is exercised in the browser, not the unit env */
+  private handleConnectViaIframe(request: RPCRequest): void {
+    // Serialize ceremonies: the connect modal + pendingConnectRequestId are
+    // singletons, so refuse a second mint/accept while one is in flight rather
+    // than clobbering the live ceremony's state.
+    if (this.pendingConnectRequestId) {
+      if (request.id) {
+        this.sendToParent({
+          id: request.id,
+          error: formatError('Connect ceremony already in progress', new Error('busy')),
         });
-      } catch {
-        /* popup may already be gone */
       }
-      if (resp.error === undefined) {
-        setTimeout(() => {
-          try {
-            port.close();
-          } catch {
-            /* ignore */
-          }
-        }, 2000);
-      }
-    };
-    this.worker?.addEventListener('message', relayResult);
+      return;
+    }
+    const mode = request.method === 'mintInvite' ? 'share' : 'accept';
+    this.pendingConnectRequestId = request.id ?? null;
 
-    // Open the connect modal in the popup, then forward the RPC (which drives the
-    // worker:show-invite / worker:collect-invite handshake back to the popup).
-    port.postMessage({ type: 'kms:connect', operation: 'connect', mode });
+    // Reveal the iframe so its modal is visible. The PWA's kms-user wrapper also
+    // toggles iframe visibility around the request; this covers the worker-driven
+    // reveal path (mirrors handleUnlockRequest's kms:show-iframe).
+    this.sendToParent({ type: 'kms:show-iframe' });
+    this.showConnectCeremony(mode);
+
+    // On the worker's final RPC response: tear down the modal. The response itself
+    // forwards to the parent via the DEFAULT handleWorkerMessage path — do NOT
+    // sendToParent here (that would double-forward).
+    const onFinalResponse = (event: MessageEvent): void => {
+      const resp = event.data as RPCResponse;
+      if (resp.id !== request.id) return;
+      this.worker?.removeEventListener('message', onFinalResponse);
+      this.pendingConnectRequestId = null;
+      this.hideConnectModal();
+    };
+    this.worker?.addEventListener('message', onFinalResponse);
+
+    // Forward the RPC to the worker, which drives the show-invite / collect-invite
+    // handshake back to this client.
     this.worker?.postMessage(request);
   }
+
+  /** Hide the connect modal (the PWA's kms-user wrapper hides the iframe itself). */
+  private hideConnectModal(): void {
+    document.getElementById('connect-modal')?.classList.add('hidden');
+  }
+
+  /**
+   * Post a Connect ceremony outcome back to the worker, matched to the in-flight
+   * mint/accept RPC. No-ops if no ceremony is active (defensive).
+   */
+  private emitInviteOutcome(type: string, blob?: string): void {
+    const requestId = this.pendingConnectRequestId;
+    if (!requestId) return;
+    this.worker?.postMessage({ type, requestId, ...(blob !== undefined ? { blob } : {}) });
+  }
+  /* c8 ignore stop */
 
   /**
    * Popup-side WebAuthn unlock ceremony (BUG-008). Runs in the top-level
@@ -2891,15 +2882,14 @@ export class KMSClient {
   }
 
   /**
-   * BUG-007 recovery-phrase backup ceremony, run in the top-level popup after the
-   * worker mints a fresh account root and relays `popup:show-mnemonic`. Two steps:
-   * (1) reveal the 12 words (with a copy button); (2) a SEPARATE confirm screen —
-   * words hidden — where the user re-enters a highlighted required subset (paste of
-   * the whole phrase is supported). Posts `popup:mnemonic-confirmed` on success or
-   * `popup:mnemonic-cancelled` on cancel; the phrase never leaves this popup.
+   * Open the connect-modal shell (in the iframe) for the given ceremony `mode`.
+   * `share` waits on the worker's minted blob (worker:show-invite → renderConnect-
+   * Share); `accept` immediately renders the paste field (worker:collect-invite is
+   * satisfied by the blob the user enters). Runs in the iframe — same origin as the
+   * vault — so the room secret never reaches the PWA.
    */
-  /** Open the connect-modal shell in the popup for the given ceremony `mode`. */
-  showConnectCeremony(mode: 'share' | 'accept'): void {
+  /* c8 ignore start - iframe connect-ceremony UI is exercised in the browser, not the unit env */
+  private showConnectCeremony(mode: 'share' | 'accept'): void {
     document.getElementById('unlock-modal')?.classList.add('hidden');
     document.getElementById('connect-modal')?.classList.remove('hidden');
     if (mode === 'accept') {
@@ -2912,11 +2902,10 @@ export class KMSClient {
   }
 
   /** Render the share view: the invite link (with copy) to send out-of-band. */
-  renderConnectShare(blob: string): void {
-    const port = this.credentialPort;
+  private renderConnectShare(blob: string): void {
     const link = document.getElementById('kms-connect-link') as HTMLTextAreaElement | null;
-    if (!port || !link) {
-      port?.postMessage({ type: 'popup:invite-show-cancelled' });
+    if (!link) {
+      this.emitInviteOutcome('worker:invite-show-cancelled');
       return;
     }
     const url = `https://kms.ats.run/connect#c=${blob}`;
@@ -2943,17 +2932,16 @@ export class KMSClient {
     if (doneBtn) {
       doneBtn.onclick = (): void => {
         this.showConnectView('finishing');
-        port.postMessage({ type: 'popup:invite-shown' });
+        this.emitInviteOutcome('worker:invite-shown');
       };
     }
   }
 
   /** Render the accept view: paste a link, then confirm the sender's fingerprint. */
-  renderConnectAccept(): void {
-    const port = this.credentialPort;
+  private renderConnectAccept(): void {
     const paste = document.getElementById('kms-connect-paste') as HTMLTextAreaElement | null;
-    if (!port || !paste) {
-      port?.postMessage({ type: 'popup:invite-collect-cancelled' });
+    if (!paste) {
+      this.emitInviteOutcome('worker:invite-collect-cancelled');
       return;
     }
     const subtitle = document.getElementById('kms-connect-subtitle');
@@ -2964,19 +2952,19 @@ export class KMSClient {
     const cancelBtn = document.getElementById('kms-connect-cancel');
     if (cancelBtn) {
       cancelBtn.onclick = (): void => {
-        port.postMessage({ type: 'popup:invite-collect-cancelled' });
+        this.emitInviteOutcome('worker:invite-collect-cancelled');
       };
     }
     const checkBtn = document.getElementById('kms-connect-check');
     if (checkBtn) {
       checkBtn.onclick = (): void => {
-        void this.confirmConnectPaste(paste.value, port);
+        void this.confirmConnectPaste(paste.value);
       };
     }
   }
 
   /** Decode a pasted link + show the sender's name/fingerprint for mutual confirmation. */
-  private async confirmConnectPaste(input: string, port: MessagePort): Promise<void> {
+  private async confirmConnectPaste(input: string): Promise<void> {
     const errEl = document.getElementById('kms-connect-paste-error');
     let card: { uid: string; name?: string; msk: string; mek: string };
     try {
@@ -3008,32 +2996,11 @@ export class KMSClient {
     if (connectBtn) {
       connectBtn.onclick = (): void => {
         this.showConnectView('finishing');
-        port.postMessage({ type: 'popup:invite-blob', blob: input });
+        this.emitInviteOutcome('worker:invite-blob', input);
       };
     }
   }
-
-  /** Popup-side: react to the ceremony's final result (confirm+close, or show the error). */
-  handleConnectResult(success: boolean, error?: string): void {
-    const subtitle = document.getElementById('kms-connect-subtitle');
-    if (success) {
-      if (subtitle) subtitle.textContent = 'Done ✓';
-      setTimeout(() => {
-        try {
-          window.close();
-        } catch {
-          /* ignore */
-        }
-      }, 1200);
-    } else {
-      const errEl = document.getElementById('kms-connect-paste-error');
-      if (errEl) {
-        errEl.textContent = error ?? 'Connect failed';
-        errEl.classList.remove('hidden');
-      }
-      this.showConnectView('accept');
-    }
-  }
+  /* c8 ignore stop */
 
   /** Show exactly one connect-modal sub-view; hide the rest. */
   private showConnectView(view: 'share' | 'accept' | 'confirm' | 'finishing'): void {
@@ -3512,20 +3479,9 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                 return;
               }
 
-              // Connect ceremony (rooms §3.2/§3.4): render the invite link to share
-              // (mint), or the paste field to accept, or react to the final result.
-              if (portData?.type === 'popup:show-invite') {
-                client.renderConnectShare(portData.blob ?? '');
-                return;
-              }
-              if (portData?.type === 'popup:collect-invite') {
-                client.renderConnectAccept();
-                return;
-              }
-              if (portData?.type === 'popup:connect-result') {
-                client.handleConnectResult(portData.success === true, portData.error);
-                return;
-              }
+              // Connect ceremony (rooms §3.2/§3.4) now renders in the IFRAME modal,
+              // not a popup (no credential is collected), so there are no
+              // popup:show-invite / collect-invite / connect-result relays here.
 
               if (portData?.type === 'kms:connect') {
                 /* eslint-disable no-console */
@@ -3555,14 +3511,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
                     port.postMessage({ type: 'popup:connected' });
                     void client.runPopupUnlockCeremony();
                   }
-                } else if (portData.operation === 'connect') {
-                  // Connect ceremony (rooms §3.2/§3.4): no credentials — just open
-                  // the connect modal to display/collect the invite. The room secret
-                  // stays in this popup.
-                  (client as any).credentialPort = port;
-                  (client as any).isStatelessPopup = true;
-                  port.postMessage({ type: 'popup:connected' });
-                  client.showConnectCeremony(portData.mode === 'accept' ? 'accept' : 'share');
                 } else {
                   // Setup flow (unchanged): store transport params, show setup modal.
                   (client as any).transportPublicKey = portData.transportKey!;

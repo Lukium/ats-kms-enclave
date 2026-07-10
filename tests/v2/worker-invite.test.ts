@@ -252,8 +252,8 @@ describe('openInviteJoin / approveInviteJoin', () => {
     const key = await deriveExchangeKey(secret);
     const sealed = await encryptSelfMessage(key, encodeAnnouncement(bob), DEVICE_EXCHANGE_CONTEXT);
 
-    // Alice opens the join → sees Bob's public identity, nothing committed yet.
-    const opened = getResult<{ peer: { uid: string; name?: string; fingerprint: string } }>(
+    // Alice opens the join → sees Bob's public identity + an approvalId, nothing committed yet.
+    const opened = getResult<{ peer: { uid: string; name?: string; fingerprint: string }; approvalId: string }>(
       expectOk(await handleMessage(createRequest('openInviteJoin', { sid, token, inviteId, ciphertext: toAb(sealed) })))
     );
     expect(opened.peer.uid).toBe('bob-uid');
@@ -261,12 +261,15 @@ describe('openInviteJoin / approveInviteJoin', () => {
     expect(opened.peer.fingerprint).toBe(
       await identityFingerprint(await masterSigningPublicRaw(bobRoot), await masterEncryptionPublicRaw(bobRoot))
     );
+    expect(typeof opened.approvalId).toBe('string');
 
-    // Approve → Bob is bound as a contact on the same scope; the single-use invite is consumed.
-    const approved = getResult<{ scope: string }>(
-      expectOk(await handleMessage(createRequest('approveInviteJoin', { sid, token, inviteId, peerUserId: 'bob-uid' })))
+    // Approve BY approvalId → the enclave binds the uid it opened (bob-uid), returns it,
+    // and consumes the single-use invite. The caller never supplies the uid.
+    const approved = getResult<{ scope: string; peerUserId: string }>(
+      expectOk(await handleMessage(createRequest('approveInviteJoin', { sid, token, approvalId: opened.approvalId })))
     );
     expect(approved.scope).toBe(scope);
+    expect(approved.peerUserId).toBe('bob-uid');
 
     const cs = getResult<{ scope: string }>(
       expectOk(await handleMessage(createRequest('getContactScope', { sid, token, peerUserId: 'bob-uid' })))
@@ -277,6 +280,18 @@ describe('openInviteJoin / approveInviteJoin', () => {
       expectOk(await handleMessage(createRequest('listInvites', { sid, token })))
     );
     expect(list.invites).toHaveLength(0); // consumed
+
+    // Replaying the same approvalId fails — the approval was consumed.
+    const replay = await handleMessage(createRequest('approveInviteJoin', { sid, token, approvalId: opened.approvalId }));
+    expect(replay.error).toMatch(/No such pending approval/);
+  });
+
+  it('approveInviteJoin errors for an unknown approvalId', async () => {
+    const { sid, token } = await setupAndOpen();
+    const res = await handleMessage(
+      createRequest('approveInviteJoin', { sid, token, approvalId: 'no-such-approval' })
+    );
+    expect(res.error).toMatch(/No such pending approval/);
   });
 
   it('openInviteJoin errors for an unknown invite', async () => {

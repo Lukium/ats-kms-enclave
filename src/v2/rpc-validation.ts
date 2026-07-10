@@ -1422,15 +1422,15 @@ export function validateOpenInviteJoin(params: unknown): {
 export function validateApproveInviteJoin(params: unknown): {
   sid: string;
   token: string;
-  inviteId: string;
-  peerUserId: string;
+  approvalId: string;
 } {
   const p = validateParamsObject('approveInviteJoin', params);
   return {
     sid: validateString('approveInviteJoin', 'sid', p.sid),
     token: validateString('approveInviteJoin', 'token', p.token),
-    inviteId: validateInviteId('approveInviteJoin', p.inviteId),
-    peerUserId: validatePeerUserId('approveInviteJoin', p.peerUserId),
+    // The enclave derives the bound peer uid from the opened join (rooms §3.4);
+    // the caller supplies only the opaque approvalId minted by openInviteJoin.
+    approvalId: validateBoundedString('approveInviteJoin', 'approvalId', p.approvalId, 128),
   };
 }
 

@@ -2586,24 +2586,33 @@ export class KMSUser {
     }
   }
 
-  /** Open an incoming join on one of our armed invites → the joiner's public identity. */
+  /**
+   * Open an incoming join on one of our armed invites → the joiner's public
+   * identity + an opaque `approvalId`. The enclave parks the opened identity so
+   * approveInviteJoin binds to exactly this uid (rooms §3.4) — nothing is
+   * committed here.
+   */
   async openInviteJoin(args: {
     sid: string;
     token: string;
     inviteId: string;
     ciphertext: ArrayBuffer;
-  }): Promise<{ peer: ConnectPeer }> {
-    return this.sendRequest<{ peer: ConnectPeer }>('openInviteJoin', args);
+  }): Promise<{ peer: ConnectPeer; approvalId: string }> {
+    return this.sendRequest<{ peer: ConnectPeer; approvalId: string }>('openInviteJoin', args);
   }
 
-  /** Approve a join (mutual confirmation): bind the peer as a contact; returns the scope. */
+  /**
+   * Approve a join (mutual confirmation) by the `approvalId` from openInviteJoin.
+   * The enclave derives the bound peer uid from the opened join internally (the
+   * caller cannot substitute one), consumes the approval + single-use invite, and
+   * returns the channel scope + the bound peerUserId.
+   */
   async approveInviteJoin(args: {
     sid: string;
     token: string;
-    inviteId: string;
-    peerUserId: string;
-  }): Promise<{ scope: string }> {
-    return this.sendRequest<{ scope: string }>('approveInviteJoin', args);
+    approvalId: string;
+  }): Promise<{ scope: string; peerUserId: string }> {
+    return this.sendRequest<{ scope: string; peerUserId: string }>('approveInviteJoin', args);
   }
 
   /** Cancel one of our own armed invites, dropping its stored secret. */

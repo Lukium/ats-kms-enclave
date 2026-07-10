@@ -453,6 +453,27 @@ const pendingInviteShows = new Map<string, CeremonyResolvers<void>>();
 const pendingInviteCollects = new Map<string, CeremonyResolvers<string>>();
 
 /**
+ * Pending join approvals (rooms §3.4). openInviteJoin decrypts a joiner's
+ * announcement and parks the OPENED identity here — enclave-held, memory-only,
+ * keyed by a random approvalId. approveInviteJoin then consumes it by approvalId
+ * and binds the invite secret to exactly the uid we opened, so the caller can't
+ * substitute a different uid, approve without opening, or replay. Cleared on
+ * approve / expiry / worker restart.
+ */
+const APPROVAL_TTL_MS = 600_000; // 10 minutes to confirm a join
+const pendingJoinApprovals = new Map<
+  string,
+  { inviteId: string; userId: string; card: InviteCard; expiresAt: number }
+>();
+
+/** Drop expired pending approvals (lazy sweep, run on each open). */
+function pruneExpiredApprovals(now: number): void {
+  for (const [id, a] of pendingJoinApprovals) {
+    if (now >= a.expiresAt) pendingJoinApprovals.delete(id);
+  }
+}
+
+/**
  * Show the invite blob in the enclave popup and resolve once the user has shared
  * it / closed the ceremony. The blob carries the room secret, so it goes ONLY to
  * the popup (same origin) — never returned to the PWA. Rejects on cancel/timeout.
@@ -4525,7 +4546,7 @@ async function handleAcceptInvite(
 async function handleOpenInviteJoin(
   params: { sid: string; token: string; inviteId: string; ciphertext: ArrayBuffer },
   requestId: string
-): Promise<{ peer: ConnectPeer }> {
+): Promise<{ peer: ConnectPeer; approvalId: string }> {
   const session = await requireCapability(params.sid, params.token);
   const loaded = await loadInvite(session.userId, params.inviteId, session.messagingKEK);
   if (!loaded) {
@@ -4540,6 +4561,19 @@ async function handleOpenInviteJoin(
   const plain = await decryptSelfMessage(key, params.ciphertext, DEVICE_EXCHANGE_CONTEXT);
   const card = decodeAnnouncement(new Uint8Array(plain));
 
+  // Park the OPENED identity so approveInviteJoin can bind the invite secret to
+  // exactly this uid (rooms §3.4). The caller gets an opaque approvalId back — it
+  // cannot supply a substitute uid, approve without opening, or replay.
+  const now = Date.now();
+  pruneExpiredApprovals(now);
+  const approvalId = crypto.randomUUID();
+  pendingJoinApprovals.set(approvalId, {
+    inviteId: params.inviteId,
+    userId: session.userId,
+    card,
+    expiresAt: now + APPROVAL_TTL_MS,
+  });
+
   await logOperation({
     op: 'messaging.invite.join',
     kid: `messaging:${session.userId}`,
@@ -4547,27 +4581,48 @@ async function handleOpenInviteJoin(
     userId: session.userId,
     details: { inviteId: params.inviteId, peer: card.uid },
   });
-  return { peer: await toConnectPeer(card) };
+  return { peer: await toConnectPeer(card), approvalId };
 }
 
 /**
- * Approve a join (rooms §3.4 mutual confirmation): bind the invite's secret to the
- * confirmed peer as a real contact; consume the invite if single-use. Returns the
- * channel `scope` so the PWA can finish the device-key exchange.
+ * Approve a join (rooms §3.4 mutual confirmation) by the approvalId minted in
+ * openInviteJoin. Binds the invite's secret to the uid we ACTUALLY opened (derived
+ * internally — never caller-supplied), consumes the pending approval so it can't be
+ * replayed, and consumes a single-use invite (invalidating any other pending
+ * approvals bound to it). Returns the channel `scope` + the bound `peerUserId` so
+ * the PWA can finish the device-key exchange.
  */
 async function handleApproveInviteJoin(
-  params: { sid: string; token: string; inviteId: string; peerUserId: string },
+  params: { sid: string; token: string; approvalId: string },
   requestId: string
-): Promise<{ scope: string }> {
+): Promise<{ scope: string; peerUserId: string }> {
   const session = await requireCapability(params.sid, params.token);
-  const loaded = await loadInvite(session.userId, params.inviteId, session.messagingKEK);
+  const pending = pendingJoinApprovals.get(params.approvalId);
+  if (!pending || pending.userId !== session.userId) {
+    throw new Error('No such pending approval');
+  }
+  if (Date.now() >= pending.expiresAt) {
+    pendingJoinApprovals.delete(params.approvalId);
+    throw new Error('This approval has expired');
+  }
+  const loaded = await loadInvite(session.userId, pending.inviteId, session.messagingKEK);
   if (!loaded) {
+    pendingJoinApprovals.delete(params.approvalId);
     throw new Error('No such armed invite');
   }
-  await storeContactSecret(session.userId, params.peerUserId, loaded.secret, session.messagingKEK);
+  // Bind to the identity we opened — NOT a caller-supplied uid.
+  const peerUserId = pending.card.uid;
+  await storeContactSecret(session.userId, peerUserId, loaded.secret, session.messagingKEK);
   loaded.secret.fill(0);
+
+  // Consume the pending approval (no replay). Consume a single-use invite and drop
+  // any other pending approvals bound to it (they now reference a gone invite).
+  pendingJoinApprovals.delete(params.approvalId);
   if (loaded.meta.singleUse !== false) {
-    await deleteMessagingInvite(params.inviteId); // consume a single-use invite (§3.3)
+    await deleteMessagingInvite(pending.inviteId); // consume a single-use invite (§3.3)
+    for (const [id, a] of pendingJoinApprovals) {
+      if (a.inviteId === pending.inviteId) pendingJoinApprovals.delete(id);
+    }
   }
 
   await logOperation({
@@ -4575,9 +4630,9 @@ async function handleApproveInviteJoin(
     kid: `messaging:${session.userId}`,
     requestId,
     userId: session.userId,
-    details: { inviteId: params.inviteId, peer: params.peerUserId },
+    details: { inviteId: pending.inviteId, peer: peerUserId },
   });
-  return { scope: loaded.meta.scope };
+  return { scope: loaded.meta.scope, peerUserId };
 }
 
 /** Cancel one of our own armed invites (rooms §3.3), dropping its stored secret. */

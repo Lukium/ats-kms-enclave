@@ -21,8 +21,26 @@ export type { InviteType };
 /** Raw room-secret size (bytes). */
 const ROOM_SECRET_BYTES = 32;
 
+/** Ed25519 (msk) / X25519 (mek) master public key size (bytes). */
+const MASTER_KEY_BYTES = 32;
+
 /** Current invite blob version; bump on any wire-format change. */
 const INVITE_VERSION = 1;
+
+/**
+ * Hardening bounds for UNTRUSTED invite/announcement input (rooms §3.4). A blob
+ * is pasted/scanned by the user, so it must be validated defensively before any
+ * invite is honored: cap the raw size, require the crypto fields to decode to
+ * their exact byte lengths, bound the human-supplied strings, and reject
+ * unknown/out-of-range fields.
+ */
+/** Cap the raw blob before base64 decoding (a well-formed invite is ~600 chars). */
+const MAX_INVITE_BLOB_CHARS = 4096;
+/** Upper bounds on the human-supplied card fields (defense in depth). */
+const MAX_UID_CHARS = 128;
+const MAX_NAME_CHARS = 128;
+/** Reject absurd expiries: a positive safe integer no later than year 2100 (ms epoch). */
+const MAX_EXP_MS = 4_102_444_800_000;
 
 /** The minter's identity card as carried in an invite (rooms §2.3). Public keys only. */
 export interface InviteCard {
@@ -90,6 +108,11 @@ export function encodeInvite(payload: InvitePayload): string {
  * payload. Throws on anything that isn't a well-formed, current-version invite.
  */
 export function decodeInvite(blob: string): InvitePayload {
+  // Cap the untrusted input before any decoding so a huge paste/scan can't force
+  // a large base64 + JSON parse.
+  if (typeof blob !== 'string' || blob.length > MAX_INVITE_BLOB_CHARS) {
+    throw new Error('Invalid invite');
+  }
   const token = extractToken(blob);
   let parsed: unknown;
   try {
@@ -169,27 +192,61 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
 }
 
-/** Whether `c` is a structurally-valid identity card (public keys + optional name hint). */
-function isValidCard(c: unknown): c is InviteCard {
-  const card = c as Partial<InviteCard> | null;
-  if (!card || !isNonEmptyString(card.uid) || !isNonEmptyString(card.msk) || !isNonEmptyString(card.mek)) {
+/** Whether `s` is a base64url string that decodes to EXACTLY `bytes` bytes. */
+function isB64urlOfLength(s: unknown, bytes: number): boolean {
+  if (typeof s !== 'string' || s.length === 0) return false;
+  try {
+    return base64urlToArrayBuffer(s).byteLength === bytes;
+  } catch {
     return false;
   }
-  return card.name === undefined || typeof card.name === 'string';
 }
 
-/** Throw unless `p` is a structurally-valid current-version invite payload. */
+/** Whether `o` is a plain object whose keys are all within `allowed` (reject extras). */
+function hasOnlyKeys(o: object, allowed: readonly string[]): boolean {
+  return Object.keys(o).every((k) => allowed.includes(k));
+}
+
+const CARD_KEYS = ['uid', 'name', 'msk', 'mek'] as const;
+const PAYLOAD_KEYS = ['v', 't', 'card', 's', 'exp', 'single'] as const;
+
+/**
+ * Whether `c` is a valid identity card: a plain object with ONLY the card keys, a
+ * bounded non-empty uid, an optional bounded name hint, and msk/mek that decode to
+ * exactly 32 bytes (Ed25519 / X25519 public keys).
+ */
+function isValidCard(c: unknown): c is InviteCard {
+  if (!c || typeof c !== 'object' || Array.isArray(c) || !hasOnlyKeys(c, CARD_KEYS)) {
+    return false;
+  }
+  const card = c as Partial<InviteCard>;
+  if (!isNonEmptyString(card.uid) || card.uid.length > MAX_UID_CHARS) return false;
+  if (card.name !== undefined && (typeof card.name !== 'string' || card.name.length > MAX_NAME_CHARS)) {
+    return false;
+  }
+  return isB64urlOfLength(card.msk, MASTER_KEY_BYTES) && isB64urlOfLength(card.mek, MASTER_KEY_BYTES);
+}
+
+/**
+ * Throw unless `p` is a valid current-version invite payload: a plain object with
+ * ONLY the payload keys, a 32-byte room secret, a valid card, and (when present) a
+ * bounded safe-integer expiry + boolean single-use flag.
+ */
 function assertValidPayload(p: unknown): asserts p is InvitePayload {
-  const o = p as Partial<InvitePayload> | null;
+  if (!p || typeof p !== 'object' || Array.isArray(p) || !hasOnlyKeys(p, PAYLOAD_KEYS)) {
+    throw new Error('Invalid invite');
+  }
+  const o = p as Partial<InvitePayload>;
   if (
-    !o ||
     o.v !== INVITE_VERSION ||
     (o.t !== 'connect-1:1' && o.t !== 'room') ||
-    !isNonEmptyString(o.s) ||
+    !isB64urlOfLength(o.s, ROOM_SECRET_BYTES) ||
     !isValidCard(o.card)
   ) {
     throw new Error('Invalid invite');
   }
-  if (o.exp !== undefined && typeof o.exp !== 'number') throw new Error('Invalid invite');
+  if (o.exp !== undefined && (!Number.isSafeInteger(o.exp) || o.exp <= 0 || o.exp > MAX_EXP_MS)) {
+    throw new Error('Invalid invite');
+  }
   if (o.single !== undefined && typeof o.single !== 'boolean') throw new Error('Invalid invite');
 }

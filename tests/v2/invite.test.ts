@@ -20,7 +20,10 @@ import {
   type InviteCard,
 } from '@/v2/invite';
 
-const card: InviteCard = { uid: 'alice-uuid', name: 'Alice', msk: 'bXNr', mek: 'bWVr' };
+// Real cards carry 32-byte Ed25519 (msk) / X25519 (mek) public keys, base64url.
+const MSK = roomSecretToB64url(new Uint8Array(32).fill(1));
+const MEK = roomSecretToB64url(new Uint8Array(32).fill(2));
+const card: InviteCard = { uid: 'alice-uuid', name: 'Alice', msk: MSK, mek: MEK };
 
 describe('generateRoomSecret', () => {
   it('is 32 random bytes, distinct per call, and round-trips through base64url', () => {
@@ -48,7 +51,7 @@ describe('encodeInvite / decodeInvite', () => {
   });
 
   it('omits absent optional fields (name / exp / single)', () => {
-    const payload = buildConnectInvite({ uid: 'u', msk: 'a', mek: 'b' }, generateRoomSecret());
+    const payload = buildConnectInvite({ uid: 'u', msk: MSK, mek: MEK }, generateRoomSecret());
     const out = decodeInvite(encodeInvite(payload));
     expect(out.card.name).toBeUndefined();
     expect(out.exp).toBeUndefined();
@@ -82,6 +85,50 @@ describe('decodeInvite rejects bad input', () => {
     expect(() => decodeInvite(b64({ v: 1, t: 'nope', card, s: 'x' }))).toThrow(/Invalid invite/);
     expect(() => decodeInvite(b64({ v: 1, t: 'room', card: { uid: 'u' }, s: 'x' }))).toThrow(/Invalid invite/);
     expect(() => decodeInvite(b64({ v: 1, t: 'room', card, s: '' }))).toThrow(/Invalid invite/);
+  });
+});
+
+describe('decodeInvite hardens against malformed input', () => {
+  // Inline base64url so these tests do not depend on the module's encoder.
+  const toBlob = (o: unknown): string => {
+    const bytes = new TextEncoder().encode(JSON.stringify(o));
+    let bin = '';
+    for (const byte of bytes) bin += String.fromCharCode(byte);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const secret = roomSecretToB64url(generateRoomSecret());
+  const base = { v: 1, t: 'connect-1:1', card, s: secret };
+
+  it('rejects an over-long blob before decoding', () => {
+    expect(() => decodeInvite('a'.repeat(4097))).toThrow(/Invalid invite/);
+  });
+
+  it('requires the room secret to be exactly 32 bytes', () => {
+    expect(() => decodeInvite(toBlob({ ...base, s: roomSecretToB64url(new Uint8Array(16)) }))).toThrow(/Invalid invite/);
+    expect(() => decodeInvite(toBlob({ ...base, s: roomSecretToB64url(new Uint8Array(31)) }))).toThrow(/Invalid invite/);
+  });
+
+  it('requires msk and mek to be exactly 32 bytes', () => {
+    const shortKey = roomSecretToB64url(new Uint8Array(16));
+    expect(() => decodeInvite(toBlob({ ...base, card: { ...card, msk: shortKey } }))).toThrow(/Invalid invite/);
+    expect(() => decodeInvite(toBlob({ ...base, card: { ...card, mek: shortKey } }))).toThrow(/Invalid invite/);
+  });
+
+  it('bounds the uid and name lengths', () => {
+    expect(() => decodeInvite(toBlob({ ...base, card: { ...card, uid: 'u'.repeat(129) } }))).toThrow(/Invalid invite/);
+    expect(() => decodeInvite(toBlob({ ...base, card: { ...card, name: 'n'.repeat(129) } }))).toThrow(/Invalid invite/);
+  });
+
+  it('requires a sane expiry (positive safe integer, not absurdly far future)', () => {
+    expect(() => decodeInvite(toBlob({ ...base, exp: -1 }))).toThrow(/Invalid invite/);
+    expect(() => decodeInvite(toBlob({ ...base, exp: 1.5 }))).toThrow(/Invalid invite/);
+    expect(() => decodeInvite(toBlob({ ...base, exp: 5_000_000_000_000 }))).toThrow(/Invalid invite/); // > year 2100
+    expect(decodeInvite(toBlob({ ...base, exp: 1_000 })).exp).toBe(1_000);
+  });
+
+  it('rejects unknown fields on the payload or the card', () => {
+    expect(() => decodeInvite(toBlob({ ...base, evil: 1 }))).toThrow(/Invalid invite/);
+    expect(() => decodeInvite(toBlob({ ...base, card: { ...card, evil: 1 } }))).toThrow(/Invalid invite/);
   });
 });
 

@@ -2916,16 +2916,38 @@ export class KMSClient {
 
     const copyBtn = document.getElementById('kms-connect-copy');
     if (copyBtn) {
+      const markCopied = (): void => {
+        copyBtn.textContent = 'Copied ✓';
+      };
+      // Fallback for when the async clipboard API is unavailable/blocked: select the
+      // link and use the legacy execCommand (works in this iframe on a user gesture).
+      const execCopy = (): boolean => {
+        try {
+          link.focus();
+          link.select();
+          if (document.execCommand('copy')) {
+            markCopied();
+            return true;
+          }
+        } catch {
+          /* fall through */
+        }
+        return false;
+      };
       copyBtn.onclick = (): void => {
-        if (!navigator.clipboard) return;
-        void navigator.clipboard
-          .writeText(url)
-          .then(() => {
-            copyBtn.textContent = 'Copied ✓';
-          })
-          .catch(() => {
-            /* clipboard blocked — the user can still select the link */
-          });
+        // Select first so the user can always Ctrl+C manually even if both fail.
+        link.focus();
+        link.select();
+        if (navigator.clipboard?.writeText) {
+          void navigator.clipboard
+            .writeText(url)
+            .then(markCopied)
+            .catch(() => {
+              execCopy();
+            });
+        } else {
+          execCopy();
+        }
       };
     }
     const doneBtn = document.getElementById('kms-connect-done');

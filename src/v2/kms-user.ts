@@ -226,7 +226,11 @@ export class KMSUser {
       this.iframe.style.display = 'none'; // Hidden by default
 
       this.iframe.sandbox.add('allow-scripts', 'allow-same-origin');
-      this.iframe.allow = 'publickey-credentials-get; publickey-credentials-create';
+      // clipboard-write: the Connect ceremony's "Copy link" button runs in this
+      // cross-origin iframe; navigator.clipboard.writeText is blocked there without
+      // this Permissions-Policy delegation (it worked in the old top-level popup).
+      this.iframe.allow =
+        'publickey-credentials-get; publickey-credentials-create; clipboard-write';
 
       // Setup message handler (store bound reference for later removal)
       this.boundMessageHandler = this.handleMessage.bind(this);

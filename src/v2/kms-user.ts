@@ -229,8 +229,12 @@ export class KMSUser {
       // clipboard-write: the Connect ceremony's "Copy link" button runs in this
       // cross-origin iframe; navigator.clipboard.writeText is blocked there without
       // this Permissions-Policy delegation (it worked in the old top-level popup).
+      // camera: the Connect accept-view QR scanner uses getUserMedia in the iframe
+      // (paired with the enclave's own `camera=(self)` Permissions-Policy). Delegated
+      // to the iframe origin only; the parent PWA must itself permit camera to
+      // delegate it (top-level documents allow it by default).
       this.iframe.allow =
-        'publickey-credentials-get; publickey-credentials-create; clipboard-write';
+        'publickey-credentials-get; publickey-credentials-create; clipboard-write; camera';
 
       // Setup message handler (store bound reference for later removal)
       this.boundMessageHandler = this.handleMessage.bind(this);

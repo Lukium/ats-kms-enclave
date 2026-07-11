@@ -24,7 +24,7 @@
   # Permissions Policy - Explicitly deny all unnecessary browser features
   # The KMS enclave only needs: JavaScript execution, IndexedDB, WebCrypto, postMessage, and WebAuthn
   # All other browser APIs are explicitly denied for defense in depth
-  Permissions-Policy: accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
+  Permissions-Policy: accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(self), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
 
   # Cross-Origin Policies - DISABLED (cross-origin isolation not achievable with iframe embedding)
   # Cross-Origin-Opener-Policy: same-origin-allow-popups

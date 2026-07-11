@@ -691,6 +691,23 @@ h1 {
   background: #ffffff;
   border-radius: 0.6rem;
 }
+.kms-connect-scan {
+  display: flex;
+  justify-content: center;
+  margin: 0.25rem 0 0.5rem;
+}
+.kms-connect-scan.hidden {
+  display: none;
+}
+.kms-connect-video {
+  width: 240px;
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: #000000;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
 .kms-connect-meta {
   font-size: 0.75rem;
   opacity: 0.7;
@@ -979,9 +996,16 @@ function generateEnclaveHTML(
             <button id="kms-connect-done" type="button" class="kms-auth-btn kms-primary">Done</button>
           </div>
         </div>
-        <!-- Accept (paste): enter a link you received -->
+        <!-- Accept: scan the other person's QR in person, or paste a link -->
         <div id="kms-connect-accept" class="hidden">
-          <p class="kms-connect-hint">Paste the invite link you received.</p>
+          <p class="kms-connect-hint">Scan the other person's invite QR in person, or paste the link they sent you.</p>
+          <div id="kms-connect-scan" class="kms-connect-scan hidden">
+            <video id="kms-connect-video" class="kms-connect-video" playsinline muted></video>
+          </div>
+          <div id="kms-connect-scan-status" class="kms-connect-meta"></div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-connect-scan-btn" type="button" class="kms-auth-btn kms-secondary">📷 Scan QR code</button>
+          </div>
           <textarea id="kms-connect-paste" class="kms-connect-link" rows="3" placeholder="https://kms.ats.run/connect#…"></textarea>
           <div id="kms-connect-paste-error" class="kms-modal-error hidden"></div>
           <div class="kms-mnemonic-actions">

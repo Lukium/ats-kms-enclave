@@ -23,7 +23,7 @@ import { getPRFResults } from './webauthn-types.js';
 import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils.js';
 import { decodeInvite } from './invite.js';
 import { identityFingerprint } from './master-identity.js';
-import { qrSvg } from './qr.js';
+import { qrSvg, decodeQr } from './qr.js';
 
 // Global constant injected at build time by esbuild
 declare const __WORKER_FILENAME__: string;
@@ -105,6 +105,10 @@ export class KMSClient {
   // straight back to the worker, matched by this id. Set while
   // handleConnectViaIframe is in flight; else null.
   private pendingConnectRequestId: string | null = null;
+  // Connect accept-view QR scanner: the live camera stream + a run flag for the
+  // decode loop. Both torn down on success, cancel, view change, and modal close.
+  private connectScanStream: MediaStream | null = null;
+  private connectScanning = false;
 
   /**
    * Create a new KMS client bridge
@@ -1565,6 +1569,7 @@ export class KMSClient {
 
   /** Hide the connect modal (the PWA's kms-user wrapper hides the iframe itself). */
   private hideConnectModal(): void {
+    this.stopConnectScan();
     document.getElementById('connect-modal')?.classList.add('hidden');
   }
 
@@ -2979,14 +2984,26 @@ export class KMSClient {
       return;
     }
     const subtitle = document.getElementById('kms-connect-subtitle');
-    if (subtitle) subtitle.textContent = 'Paste an invite link';
+    if (subtitle) subtitle.textContent = 'Scan or paste an invite';
     document.getElementById('kms-connect-paste-error')?.classList.add('hidden');
+    const scanStatus = document.getElementById('kms-connect-scan-status');
+    if (scanStatus) scanStatus.textContent = '';
     this.showConnectView('accept');
 
     const cancelBtn = document.getElementById('kms-connect-cancel');
     if (cancelBtn) {
       cancelBtn.onclick = (): void => {
         this.emitInviteOutcome('worker:invite-collect-cancelled');
+      };
+    }
+    const scanBtn = document.getElementById('kms-connect-scan-btn');
+    if (scanBtn) {
+      scanBtn.onclick = (): void => {
+        if (this.connectScanning) {
+          this.stopConnectScan();
+        } else {
+          void this.startConnectScan();
+        }
       };
     }
     const checkBtn = document.getElementById('kms-connect-check');
@@ -3038,11 +3055,92 @@ export class KMSClient {
 
   /** Show exactly one connect-modal sub-view; hide the rest. */
   private showConnectView(view: 'share' | 'accept' | 'confirm' | 'finishing'): void {
+    // Any view change stops a running scan (leaving accept, or re-entering it).
+    this.stopConnectScan();
     document.getElementById('connect-modal')?.classList.remove('hidden');
     for (const v of ['share', 'accept', 'confirm', 'finishing']) {
       document.getElementById(`kms-connect-${v}`)?.classList.toggle('hidden', v !== view);
     }
   }
+
+  /**
+   * Start the accept-view QR scanner: open the camera in the iframe and decode
+   * frames until an invite QR is found, then hand its text to the same paste path
+   * (confirmConnectPaste). Best-effort — if the camera is denied/unavailable
+   * (notably iOS Safari in a cross-origin iframe), we surface a hint and the user
+   * pastes the link instead. Runs entirely in the iframe; camera pixels are decoded
+   * locally and never leave the enclave origin.
+   */
+  /* c8 ignore start - camera UI is exercised in the browser, not the unit env */
+  private async startConnectScan(): Promise<void> {
+    const scanBox = document.getElementById('kms-connect-scan');
+    const video = document.getElementById('kms-connect-video') as HTMLVideoElement | null;
+    const status = document.getElementById('kms-connect-scan-status');
+    const btn = document.getElementById('kms-connect-scan-btn');
+    if (!scanBox || !video) return;
+    if (status) status.textContent = 'Requesting camera…';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      this.connectScanStream = stream;
+      this.connectScanning = true;
+      video.srcObject = stream;
+      await video.play();
+      scanBox.classList.remove('hidden');
+      if (btn) btn.textContent = 'Stop scanning';
+      if (status) status.textContent = 'Point the camera at the invite QR…';
+      this.connectScanLoop(video);
+    } catch {
+      this.stopConnectScan();
+      if (status) status.textContent = 'Camera unavailable — paste the invite link below instead.';
+    }
+  }
+
+  /** Grab video frames onto a canvas and decode each until an invite QR appears. */
+  private connectScanLoop(video: HTMLVideoElement): void {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const tick = (): void => {
+      if (!this.connectScanning || !ctx) return;
+      if (video.readyState >= 2 && video.videoWidth > 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        try {
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const text = decodeQr(img.data, img.width, img.height);
+          // Only accept a Connect invite QR (has the secret fragment); ignore any
+          // other QR the camera happens to see. confirmConnectPaste re-validates.
+          if (text && text.includes('#c=')) {
+            this.stopConnectScan();
+            void this.confirmConnectPaste(text);
+            return;
+          }
+        } catch {
+          /* transient frame read error — keep scanning */
+        }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /** Stop the scanner: end the camera stream, halt the loop, reset the UI. */
+  private stopConnectScan(): void {
+    this.connectScanning = false;
+    if (this.connectScanStream) {
+      for (const track of this.connectScanStream.getTracks()) track.stop();
+      this.connectScanStream = null;
+    }
+    const video = document.getElementById('kms-connect-video') as HTMLVideoElement | null;
+    if (video) video.srcObject = null;
+    document.getElementById('kms-connect-scan')?.classList.add('hidden');
+    const btn = document.getElementById('kms-connect-scan-btn');
+    if (btn) btn.textContent = '📷 Scan QR code';
+  }
+  /* c8 ignore stop */
 
   /** Group a base64url fingerprint into uppercase blocks for out-of-band compare. */
   private formatConnectFingerprint(fp: string): string {

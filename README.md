@@ -2,13 +2,13 @@
 
 ## Verification Summary
 
-**Status:** ❌ FAILED
+**Status:** ✅ VERIFIED
 
-**Timestamp:** Sat, 11 Jul 2026 23:16:22 GMT
+**Timestamp:** Sat, 11 Jul 2026 23:20:13 GMT
 
 **Worker Hash:** 261ab51e
 
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/29171484017)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/29171948939)
 
 ---
 
@@ -74,9 +74,9 @@ Current version is in allowed list
 **Allowed Hashes:**
 - `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b`
 
-### ❌ Security Headers
+### ✅ Security Headers
 
-Some headers failed
+All headers verified
 
 #### content-security-policy ✅
 
@@ -93,19 +93,11 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 - `https://phase2-demo.allthe.services` - Demo for the KMS enclave itself
 - `http://localhost:5173` - Local development counterpart of the dev build
 
-#### permissions-policy ❌
+#### permissions-policy ✅
 
-**Expected:**
-```
-accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
-```
+**Expected:** `accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(self), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()`
 
-**Actual:**
-```
-accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(self), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
-```
-
-**Issue:** Mismatch
+**Actual:** ✅ Matches
 
 #### x-content-type-options ✅
 
@@ -201,6 +193,6 @@ The hash from the last command should match: `261ab51e9c6d55dc65f4d831c4c44ddf20
 
 ---
 
-*Last updated: Sat, 11 Jul 2026 23:16:22 GMT*
+*Last updated: Sat, 11 Jul 2026 23:20:13 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

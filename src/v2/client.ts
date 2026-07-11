@@ -3269,9 +3269,9 @@ export class KMSClient {
     const port = this.credentialPort;
     const modal = document.getElementById('mnemonic-modal');
     const input = document.getElementById('kms-mnemonic-input');
-    const field = document.getElementById('kms-mnemonic-input-field') as HTMLTextAreaElement | null;
+    const grid = document.getElementById('kms-mnemonic-input-grid');
     const errEl = document.getElementById('kms-mnemonic-input-error');
-    if (!port || !modal || !input || !field) {
+    if (!port || !modal || !input || !grid) {
       port?.postMessage({ type: 'popup:mnemonic-cancelled' });
       return;
     }
@@ -3289,9 +3289,39 @@ export class KMSClient {
     }
     input.classList.remove('hidden');
     modal.classList.remove('hidden');
-    field.value = '';
     errEl?.classList.add('hidden');
-    field.focus();
+
+    // Build a 12-word entry grid — the same numbered-cell layout as the backup
+    // confirm grid, for consistency. Pasting a whole phrase into any field fills
+    // all 12 (reuses the confirm grid's paste behavior).
+    grid.innerHTML = '';
+    const inputs: HTMLInputElement[] = [];
+    for (let i = 0; i < 12; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'kms-mnemonic-cell';
+      const num = document.createElement('span');
+      num.className = 'kms-mnemonic-num';
+      num.textContent = String(i + 1);
+      const field = document.createElement('input');
+      field.type = 'text';
+      field.autocomplete = 'off';
+      field.spellcheck = false;
+      field.className = 'kms-mnemonic-input';
+      field.onpaste = (e: ClipboardEvent): void => {
+        const parts = (e.clipboardData?.getData('text') ?? '').trim().split(/\s+/).filter(Boolean);
+        if (parts.length > 1) {
+          e.preventDefault();
+          for (let j = 0; j < inputs.length; j++) {
+            if (parts[j] !== undefined) inputs[j]!.value = normalizeMnemonicWord(parts[j]!);
+          }
+        }
+      };
+      inputs.push(field);
+      cell.appendChild(num);
+      cell.appendChild(field);
+      grid.appendChild(cell);
+    }
+    inputs[0]?.focus();
 
     const cancelBtn = document.getElementById('kms-mnemonic-input-cancel');
     if (cancelBtn) {
@@ -3303,16 +3333,23 @@ export class KMSClient {
     const submitBtn = document.getElementById('kms-mnemonic-input-submit');
     if (submitBtn) {
       submitBtn.onclick = (): void => {
-        const words = field.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-        if (words.length !== 12) {
+        const words = inputs.map((el) => normalizeMnemonicWord(el.value));
+        let ok = true;
+        for (let i = 0; i < inputs.length; i++) {
+          const empty = words[i] === '';
+          if (empty) ok = false;
+          inputs[i]!.classList.toggle('kms-invalid', empty);
+        }
+        if (!ok) {
           if (errEl) {
-            errEl.textContent = `Enter all 12 words (you entered ${words.length}).`;
+            errEl.textContent = 'Enter all 12 words.';
             errEl.classList.remove('hidden');
           }
           return;
         }
-        // Hand off to the worker (it validates the checksum) and show a working
-        // state; on a bad phrase the RPC rejects and the PWA surfaces the error.
+        // Hand off to the worker (it validates the BIP39 checksum) and show a
+        // working state; a bad phrase rejects and the PWA surfaces the error.
+        errEl?.classList.add('hidden');
         input.classList.add('hidden');
         document.getElementById('kms-mnemonic-finishing')?.classList.remove('hidden');
         port.postMessage({ type: 'popup:mnemonic-entered', mnemonic: words.join(' ') });

@@ -1,3 +1,4 @@
+import jsQR from 'jsqr';
 import { qrcodegen } from './qrcodegen';
 
 /**
@@ -34,4 +35,15 @@ export function qrSvg(text: string, border = 4): string {
     `<path d="${parts.join('')}" fill="#000000"/>`,
     `</svg>`,
   ].join('');
+}
+
+/**
+ * Decode a QR code from raw RGBA pixel data (a captured camera frame). Returns the
+ * decoded text, or null if no QR is present. Pure computation — runs on the iframe
+ * main thread over a canvas frame; camera pixels never leave the enclave origin.
+ * Used by the Connect accept-view scanner to read a peer's invite QR in person.
+ */
+export function decodeQr(data: Uint8ClampedArray, width: number, height: number): string | null {
+  const result = jsQR(data, width, height);
+  return result ? result.data : null;
 }

@@ -1,5 +1,37 @@
 import { describe, it, expect } from 'vitest';
-import { qrSvg } from '../../src/v2/qr';
+import { qrSvg, decodeQr } from '../../src/v2/qr';
+import { qrcodegen } from '../../src/v2/qrcodegen';
+
+/**
+ * Render a QR of `text` to an RGBA pixel buffer (white background, black modules,
+ * `scale` px per module, `border`-module quiet zone) — a synthetic "camera frame"
+ * for exercising decodeQr without a camera.
+ */
+function renderQrToImageData(
+  text: string,
+  scale = 8,
+  border = 4
+): { data: Uint8ClampedArray; width: number; height: number } {
+  const qr = qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.MEDIUM);
+  const dim = (qr.size + border * 2) * scale;
+  const data = new Uint8ClampedArray(dim * dim * 4).fill(255); // opaque white
+  for (let y = 0; y < qr.size; y++) {
+    for (let x = 0; x < qr.size; x++) {
+      if (!qr.getModule(x, y)) continue;
+      for (let dy = 0; dy < scale; dy++) {
+        for (let dx = 0; dx < scale; dx++) {
+          const px = ((y + border) * scale + dy) * dim + ((x + border) * scale + dx);
+          const i = px * 4;
+          data[i] = 0;
+          data[i + 1] = 0;
+          data[i + 2] = 0;
+          // alpha stays 255
+        }
+      }
+    }
+  }
+  return { data, width: dim, height: dim };
+}
 
 /** Parse the square viewBox dimension (modules + quiet zone) out of the SVG. */
 function viewBoxDim(svg: string): number {
@@ -50,5 +82,20 @@ describe('qrSvg', () => {
     const svg = qrSvg('https://kms.ats.run/connect#c=<script>&"quote"');
     expect(svg).not.toContain('<script>');
     expect(svg).not.toContain('&"quote"');
+  });
+});
+
+describe('decodeQr', () => {
+  it('round-trips an encoded QR back to its text (encode -> render -> decode)', () => {
+    const text = 'https://kms.ats.run/connect#c=' + 'A'.repeat(40);
+    const { data, width, height } = renderQrToImageData(text);
+    expect(decodeQr(data, width, height)).toBe(text);
+  });
+
+  it('returns null for a blank (all-white) frame', () => {
+    const width = 64;
+    const height = 64;
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    expect(decodeQr(data, width, height)).toBeNull();
   });
 });

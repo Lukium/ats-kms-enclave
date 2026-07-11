@@ -13,6 +13,20 @@ out/
 *.js.map
 *.d.ts.map
 
+# Generated enclave artifacts under placeholders/cf-pages. The build writes copies
+# here, but CI reads ONLY the static inputs from this dir (_headers, _routes.json,
+# logo.png, favicon.png, sigstore/) and deploys the freshly-built dist/enclave. Keep
+# those inputs tracked; ignore everything the build regenerates so it stops being
+# committed dirt.
+/placeholders/cf-pages/index.html
+/placeholders/cf-pages/manifest.json
+/placeholders/cf-pages/.well-known/kms-manifest.json
+/placeholders/cf-pages/enclave.css
+/placeholders/cf-pages/enclave.*.css
+/placeholders/cf-pages/enclave-client.*.js
+/placeholders/cf-pages/kms-worker.*.js
+/placeholders/cf-pages/kms-worker.*.meta.json
+
 # Test coverage
 coverage/
 .nyc_output/

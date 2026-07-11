@@ -21,6 +21,9 @@ export default defineConfig({
         'dist/**',
         '**/*.d.ts',
         '**/*.config.*',
+        // Vendored, verbatim third-party (Nayuki QR generator, MIT) — audited as a
+        // unit against its upstream SHA, not by line coverage.
+        'src/v2/qrcodegen.ts',
       ],
       // 80% coverage required for V2
       thresholds: {

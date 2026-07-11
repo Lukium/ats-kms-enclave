@@ -675,6 +675,22 @@ h1 {
   outline: none;
   border-color: rgba(120, 160, 255, 0.6);
 }
+.kms-connect-qr {
+  display: flex;
+  justify-content: center;
+  margin: 0.25rem 0 0.85rem;
+}
+.kms-connect-qr:empty {
+  display: none;
+}
+.kms-connect-qr svg {
+  width: 200px;
+  height: 200px;
+  padding: 10px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border-radius: 0.6rem;
+}
 .kms-connect-meta {
   font-size: 0.75rem;
   opacity: 0.7;
@@ -954,7 +970,8 @@ function generateEnclaveHTML(
       <div class="kms-modal-body">
         <!-- Share (mint): show the link to send out-of-band -->
         <div id="kms-connect-share" class="hidden">
-          <p class="kms-connect-hint">Send this link to the person you want to connect with, over a channel you trust (in person, a call, a message). They open it to connect back to you.</p>
+          <p class="kms-connect-hint">Have them scan this code in person, or send the link below over a channel you trust (a call, a message). Either way, they open it to connect back to you.</p>
+          <div id="kms-connect-qr" class="kms-connect-qr"></div>
           <textarea id="kms-connect-link" class="kms-connect-link" readonly rows="3"></textarea>
           <div id="kms-connect-expiry" class="kms-connect-meta"></div>
           <div class="kms-mnemonic-actions">

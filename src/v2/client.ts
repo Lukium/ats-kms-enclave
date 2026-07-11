@@ -23,6 +23,7 @@ import { getPRFResults } from './webauthn-types.js';
 import { arrayBufferToBase64url, base64urlToArrayBuffer } from './crypto-utils.js';
 import { decodeInvite } from './invite.js';
 import { identityFingerprint } from './master-identity.js';
+import { qrSvg } from './qr.js';
 
 // Global constant injected at build time by esbuild
 declare const __WORKER_FILENAME__: string;
@@ -2910,6 +2911,17 @@ export class KMSClient {
     }
     const url = `https://kms.ats.run/connect#c=${blob}`;
     link.value = url;
+    // Render an in-person-scannable QR of the link. Encoded here in the iframe
+    // (never the PWA) because the link's fragment carries the room secret. The SVG
+    // is derived purely from the module grid — no untrusted text in markup.
+    const qrBox = document.getElementById('kms-connect-qr');
+    if (qrBox) {
+      try {
+        qrBox.innerHTML = qrSvg(url);
+      } catch {
+        qrBox.innerHTML = ''; // link + copy remain the fallback
+      }
+    }
     const subtitle = document.getElementById('kms-connect-subtitle');
     if (subtitle) subtitle.textContent = 'Share this link to connect';
     this.showConnectView('share');

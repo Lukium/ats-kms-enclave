@@ -1247,7 +1247,10 @@ async function main() {
     writeFileSync(cfFaviconPath, readFileSync(join(distDir, 'enclave/favicon.png')));
     console.log(`  ✅ ${cfFaviconPath}`);
 
-    // Update the .well-known/kms-manifest.json with real data
+    // Update the .well-known/kms-manifest.json with real data. Ensure the dir
+    // exists first: the manifest is a generated (gitignored) file, so a fresh
+    // checkout (CI) has no placeholders/cf-pages/.well-known/ dir to write into.
+    mkdirSync(join(cfPagesDir, '.well-known'), { recursive: true });
     const cfManifestPath = join(cfPagesDir, '.well-known/kms-manifest.json');
     const cfManifest = {
       schema: 1,

@@ -21,8 +21,8 @@
     <text x="54" y="14">KMS Verified</text>
 
     <!-- Timestamp -->
-    <text x="185" y="15" fill="#000" fill-opacity=".3">Jul 10, 18:45 UTC</text>
-    <text x="184" y="14">Jul 10, 18:45 UTC</text>
+    <text x="185" y="15" fill="#000" fill-opacity=".3">Jul 11, 10:38 UTC</text>
+    <text x="184" y="14">Jul 11, 10:38 UTC</text>
 
     <!-- Hash -->
     <text x="300" y="15" fill="#fff" fill-opacity=".8">78f9a3c3</text>

@@ -641,6 +641,23 @@ h1 {
   font-size: 0.8125rem;
   opacity: 0.85;
 }
+.kms-mnemonic-input-field {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+}
+.kms-mnemonic-input-field:focus {
+  outline: none;
+  border-color: rgba(120, 160, 255, 0.6);
+}
 .kms-mnemonic-actions {
   display: flex;
   flex-wrap: wrap;
@@ -981,6 +998,16 @@ function generateEnclaveHTML(
           <div class="kms-mnemonic-actions">
             <button id="kms-mnemonic-back" type="button" class="kms-auth-btn kms-tertiary">Back</button>
             <button id="kms-mnemonic-verify" type="button" class="kms-auth-btn kms-primary">Verify &amp; finish</button>
+          </div>
+        </div>
+        <!-- Restore: enter an existing recovery phrase -->
+        <div id="kms-mnemonic-input" class="hidden">
+          <p class="kms-mnemonic-confirm-hint">Enter your 12-word recovery phrase, in order, separated by spaces. You can paste the whole phrase.</p>
+          <textarea id="kms-mnemonic-input-field" class="kms-mnemonic-input-field" rows="3" placeholder="word1 word2 word3 …" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></textarea>
+          <div id="kms-mnemonic-input-error" class="kms-modal-error hidden"></div>
+          <div class="kms-mnemonic-actions">
+            <button id="kms-mnemonic-input-cancel" type="button" class="kms-auth-btn kms-tertiary">Cancel</button>
+            <button id="kms-mnemonic-input-submit" type="button" class="kms-auth-btn kms-primary">Restore</button>
           </div>
         </div>
         <!-- Finishing state (after confirm, while the worker persists) -->

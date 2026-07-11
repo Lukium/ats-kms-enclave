@@ -2184,6 +2184,50 @@ export class KMSUser {
   }
 
   /**
+   * Restore an account on THIS device from its 12-word recovery phrase — the other
+   * half of BUG-007. Like {@link provisionMessaging} (single unlock, auth collected
+   * in the top-level kms.ats.run popup), but instead of minting a fresh account
+   * root, the user ENTERS their phrase in the enclave popup (it NEVER reaches the
+   * PWA) and the account root — hence the same master identity + self-channel — is
+   * re-derived from it. Returns the public bundle (upload it) + the open session.
+   *
+   * @category Messaging Operations
+   */
+  async provisionMessagingFromMnemonic(
+    userId: string,
+    options?: { signedPreKeyId?: number; oneTimePrekeyCount?: number }
+  ): Promise<{
+    bundle: PublicPreKeyBundle;
+    sid: string;
+    token: string;
+    exp: number;
+  }> {
+    if (this.iframe) {
+      this.iframe.style.display = 'none';
+    }
+    try {
+      const result = await this.sendRequest<{
+        bundle: PublicPreKeyBundle;
+        sid: string;
+        token: string;
+        exp: number;
+      }>('provisionMessagingFromMnemonic', {
+        userId,
+        ...options,
+      });
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      return result;
+    } catch (error) {
+      if (this.iframe) {
+        this.iframe.style.display = 'none';
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Fetch a user's public prekey bundle (public bytes only, no authentication).
    *
    * @category Messaging Operations

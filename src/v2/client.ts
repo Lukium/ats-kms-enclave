@@ -359,6 +359,7 @@ export class KMSClient {
       'addEnrollment',
       'setupMessaging',
       'provisionMessaging',
+      'provisionMessagingFromMnemonic',
       'setupAccountRoot',
       'openMessaging',
     ];
@@ -370,6 +371,7 @@ export class KMSClient {
     const messagingUnlockMethods = [
       'setupMessaging',
       'provisionMessaging',
+      'provisionMessagingFromMnemonic',
       'setupAccountRoot',
       'openMessaging',
     ];
@@ -488,6 +490,22 @@ export class KMSClient {
             type: 'worker:mnemonic-cancelled',
             requestId: data.requestId as string,
             reason: 'No popup available to confirm the recovery phrase',
+          });
+        }
+        return;
+      }
+
+      // Restore: worker wants the user to ENTER their recovery phrase. Relay to the
+      // top-level popup (where messaging UI lives) over the private port — the
+      // entered phrase must NOT reach the parent PWA.
+      if ('type' in data && data.type === 'worker:collect-mnemonic') {
+        if (this.messagingPopupPort) {
+          this.messagingPopupPort.postMessage({ type: 'popup:collect-mnemonic' });
+        } else {
+          this.worker?.postMessage({
+            type: 'worker:mnemonic-cancelled',
+            requestId: data.requestId as string,
+            reason: 'No popup available to enter the recovery phrase',
           });
         }
         return;
@@ -1376,6 +1394,7 @@ export class KMSClient {
           passphrase?: string;
           prfOutput?: number[];
           error?: string;
+          mnemonic?: string;
         };
 
         if (data?.type === 'popup:credentials') {
@@ -1393,6 +1412,17 @@ export class KMSClient {
           // let the worker persist the account root (keyed by the RPC id).
           if (rpcId) {
             this.worker?.postMessage({ type: 'worker:mnemonic-confirmed', requestId: rpcId });
+          }
+        } else if (data?.type === 'popup:mnemonic-entered') {
+          // Restore: user entered a recovery phrase in the popup → hand it to the
+          // worker (keyed by the RPC id) to import the account root. The phrase
+          // stays inside kms.ats.run; it never reaches the parent PWA.
+          if (rpcId) {
+            this.worker?.postMessage({
+              type: 'worker:mnemonic-entered',
+              requestId: rpcId,
+              mnemonic: typeof data.mnemonic === 'string' ? data.mnemonic : '',
+            });
           }
         } else if (data?.type === 'popup:mnemonic-cancelled') {
           // BUG-007: user cancelled the backup → worker persists nothing.
@@ -3227,6 +3257,70 @@ export class KMSClient {
     }
   }
 
+  /**
+   * Restore ceremony (the other half of BUG-007): collect a 12-word recovery
+   * phrase in the enclave popup and post it back over the private port. The phrase
+   * stays inside kms.ats.run — only the result (entered/cancelled) leaves this
+   * window; it never reaches the parent PWA. The worker validates the BIP39
+   * checksum, so light 12-word checking here is enough.
+   */
+  /* c8 ignore start - in-popup recovery-phrase entry UI runs in the browser */
+  showMnemonicInputCeremony(): void {
+    const port = this.credentialPort;
+    const modal = document.getElementById('mnemonic-modal');
+    const input = document.getElementById('kms-mnemonic-input');
+    const field = document.getElementById('kms-mnemonic-input-field') as HTMLTextAreaElement | null;
+    const errEl = document.getElementById('kms-mnemonic-input-error');
+    if (!port || !modal || !input || !field) {
+      port?.postMessage({ type: 'popup:mnemonic-cancelled' });
+      return;
+    }
+
+    // Reframe the shared mnemonic modal for restore.
+    const header = modal.querySelector('.kms-modal-header h3');
+    if (header) header.textContent = '🔑 Restore from your recovery phrase';
+    const sub = modal.querySelector('.kms-modal-header .kms-modal-subtitle');
+    if (sub) sub.textContent = 'Enter the 12 words you saved when you first set up messaging.';
+
+    // Show only the input view.
+    document.getElementById('unlock-modal')?.classList.add('hidden');
+    for (const v of ['reveal', 'confirm', 'finishing']) {
+      document.getElementById(`kms-mnemonic-${v}`)?.classList.add('hidden');
+    }
+    input.classList.remove('hidden');
+    modal.classList.remove('hidden');
+    field.value = '';
+    errEl?.classList.add('hidden');
+    field.focus();
+
+    const cancelBtn = document.getElementById('kms-mnemonic-input-cancel');
+    if (cancelBtn) {
+      cancelBtn.onclick = (): void => {
+        modal.classList.add('hidden');
+        port.postMessage({ type: 'popup:mnemonic-cancelled' });
+      };
+    }
+    const submitBtn = document.getElementById('kms-mnemonic-input-submit');
+    if (submitBtn) {
+      submitBtn.onclick = (): void => {
+        const words = field.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (words.length !== 12) {
+          if (errEl) {
+            errEl.textContent = `Enter all 12 words (you entered ${words.length}).`;
+            errEl.classList.remove('hidden');
+          }
+          return;
+        }
+        // Hand off to the worker (it validates the checksum) and show a working
+        // state; on a bad phrase the RPC rejects and the PWA surfaces the error.
+        input.classList.add('hidden');
+        document.getElementById('kms-mnemonic-finishing')?.classList.remove('hidden');
+        port.postMessage({ type: 'popup:mnemonic-entered', mnemonic: words.join(' ') });
+      };
+    }
+  }
+  /* c8 ignore stop */
+
   /** Pick `count` distinct random positions in `[0,total)` for the confirm screen. */
   private pickRequiredMnemonicIndices(total: number, count: number): Set<number> {
     const picks = new Set<number>();
@@ -3614,6 +3708,14 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
               // stays in this enclave popup; only confirmed/cancelled goes back.
               if (portData?.type === 'popup:show-mnemonic') {
                 client.showMnemonicCeremony(portData.mnemonic ?? '');
+                return;
+              }
+
+              // Restore: worker wants the recovery phrase — run the in-popup 12-word
+              // entry ceremony. The entered phrase stays in this enclave popup; only
+              // the result (entered/cancelled) goes back over the port.
+              if (portData?.type === 'popup:collect-mnemonic') {
+                client.showMnemonicInputCeremony();
                 return;
               }
 

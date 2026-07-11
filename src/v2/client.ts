@@ -2923,6 +2923,12 @@ export class KMSClient {
     if (qrBox) {
       try {
         qrBox.innerHTML = qrSvg(url);
+        // Tap to enlarge the QR to fill the viewport (easier to scan from a
+        // distance), tap again to shrink. Reset on each (re)render.
+        qrBox.classList.remove('kms-qr-enlarged');
+        qrBox.onclick = (): void => {
+          qrBox.classList.toggle('kms-qr-enlarged');
+        };
       } catch {
         qrBox.innerHTML = ''; // link + copy remain the fallback
       }

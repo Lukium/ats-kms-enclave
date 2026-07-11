@@ -679,6 +679,7 @@ h1 {
   display: flex;
   justify-content: center;
   margin: 0.25rem 0 0.85rem;
+  cursor: zoom-in;
 }
 .kms-connect-qr:empty {
   display: none;
@@ -690,6 +691,23 @@ h1 {
   box-sizing: border-box;
   background: #ffffff;
   border-radius: 0.6rem;
+}
+/* Tap-to-enlarge: fill the viewport with the QR so a phone camera can read it
+   from a comfortable distance; tap again to shrink back. */
+.kms-connect-qr.kms-qr-enlarged {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  margin: 0;
+  padding: 4vmin;
+  background: #ffffff;
+  cursor: zoom-out;
+}
+.kms-connect-qr.kms-qr-enlarged svg {
+  width: min(92vw, 92vh);
+  height: min(92vw, 92vh);
+  padding: 0;
+  border-radius: 0;
 }
 .kms-connect-scan {
   display: flex;
@@ -987,7 +1005,7 @@ function generateEnclaveHTML(
       <div class="kms-modal-body">
         <!-- Share (mint): show the link to send out-of-band -->
         <div id="kms-connect-share" class="hidden">
-          <p class="kms-connect-hint">Have them scan this code in person, or send the link below over a channel you trust (a call, a message). Either way, they open it to connect back to you.</p>
+          <p class="kms-connect-hint">Have them scan this code in person (tap it to enlarge for easier scanning), or send the link below over a channel you trust (a call, a message). Either way, they open it to connect back to you.</p>
           <div id="kms-connect-qr" class="kms-connect-qr"></div>
           <textarea id="kms-connect-link" class="kms-connect-link" readonly rows="3"></textarea>
           <div id="kms-connect-expiry" class="kms-connect-meta"></div>

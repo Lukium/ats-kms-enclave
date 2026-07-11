@@ -38,6 +38,46 @@ async function enrollAlice(): Promise<void> {
   expect(res.error).toBeUndefined();
 }
 
+/**
+ * Drive provisionMessagingFromMnemonic (restore): wait for the worker's
+ * `worker:collect-mnemonic`, then dispatch the entered phrase (or a cancel).
+ */
+async function restore(
+  creds: typeof aliceCreds,
+  mnemonic: string | undefined,
+  action: 'enter' | 'cancel'
+): Promise<RPCResponse> {
+  const postSpy = vi.spyOn(self, 'postMessage');
+  const req = createRequest('provisionMessagingFromMnemonic', { credentials: creds });
+  const responsePromise = handleMessage(req);
+  let settled = false;
+  void responsePromise.finally(() => {
+    settled = true;
+  });
+
+  let collect: { type: string } | undefined;
+  for (let i = 0; i < 1500 && !collect && !settled; i++) {
+    await new Promise((r) => setTimeout(r, 10));
+    collect = postSpy.mock.calls
+      .map((c) => c[0] as { type: string })
+      .find((m) => m?.type === 'worker:collect-mnemonic');
+  }
+  if (collect && !settled) {
+    self.dispatchEvent(
+      new MessageEvent('message', {
+        data:
+          action === 'enter'
+            ? { type: 'worker:mnemonic-entered', requestId: req.id, mnemonic }
+            : { type: 'worker:mnemonic-cancelled', requestId: req.id },
+      })
+    );
+  }
+
+  const response = await responsePromise;
+  postSpy.mockRestore();
+  return response;
+}
+
 interface ShownMnemonic {
   type: string;
   requestId: string;
@@ -185,5 +225,50 @@ describe('provisionMessaging — mint + confirm (BUG-007/BUG-011)', () => {
       await handleMessage(createRequest('hasAccountRoot', { userId: 'alice' }))
     );
     expect(hasRoot.present).toBe(false);
+  });
+});
+
+describe('provisionMessagingFromMnemonic — restore (BUG-007 other half)', () => {
+  it('restores the SAME identity from the phrase (self-channel matches the mint)', async () => {
+    // Mint the account and capture the recovery phrase + self-channel scope.
+    await enrollAlice();
+    const { response: mint, shown } = await provision({}, 'confirm');
+    expect(mint.error).toBeUndefined();
+    const mintOut = getResult<{ sid: string; token: string }>(mint);
+    const beforeSelf = getResult<{ selfScope: string }>(
+      await handleMessage(createRequest('getSelfScope', { sid: mintOut.sid, token: mintOut.token }))
+    );
+    const phrase = shown!.mnemonic;
+
+    // Restore RE-DERIVES the account root from the phrase (not the stored root), so
+    // a faithful backup reproduces the same self-channel / identity — cert
+    // continuity (rooms §2). Proves the shown phrase is a real recovery secret.
+    const res = await restore(aliceCreds, phrase, 'enter');
+    expect(res.error).toBeUndefined();
+    const restoredOut = getResult<{ sid: string; token: string }>(res);
+    const afterSelf = getResult<{ selfScope: string }>(
+      await handleMessage(createRequest('getSelfScope', { sid: restoredOut.sid, token: restoredOut.token }))
+    );
+    expect(afterSelf.selfScope).toBe(beforeSelf.selfScope);
+    expect(
+      getResult<{ present: boolean }>(await handleMessage(createRequest('hasAccountRoot', { userId: 'alice' }))).present
+    ).toBe(true);
+  });
+
+  it('rejects an invalid recovery phrase (bad checksum) and persists no root', async () => {
+    await enrollAlice();
+    // 12x"abandon" is a valid word count but an invalid BIP39 checksum.
+    const bad = Array(12).fill('abandon').join(' ');
+    const res = await restore(aliceCreds, bad, 'enter');
+    expect(res.error).toBeDefined();
+    expect(
+      getResult<{ present: boolean }>(await handleMessage(createRequest('hasAccountRoot', { userId: 'alice' }))).present
+    ).toBe(false);
+  });
+
+  it('cancelling phrase entry aborts with an error', async () => {
+    await enrollAlice();
+    const res = await restore(aliceCreds, undefined, 'cancel');
+    expect(res.error).toBeDefined();
   });
 });

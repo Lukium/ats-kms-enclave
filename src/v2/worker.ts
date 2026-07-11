@@ -434,6 +434,32 @@ function requireMnemonicConfirmation(requestId: string, mnemonic: string): Promi
   });
 }
 
+/**
+ * The inverse of {@link requireMnemonicConfirmation}: ask the enclave popup to
+ * COLLECT a 12-word recovery phrase from the user (restore), and resolve with the
+ * entered phrase. Like the confirm flow, the phrase moves worker → client → popup
+ * (all kms.ats.run) and NEVER touches the PWA. Rejects on cancel/timeout.
+ */
+const pendingMnemonicInputs = new Map<
+  string,
+  {
+    resolve: (mnemonic: string) => void;
+    reject: (reason: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
+
+function requireMnemonicInput(requestId: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingMnemonicInputs.delete(requestId);
+      reject(new Error('Recovery-phrase entry timed out'));
+    }, MNEMONIC_CONFIRM_TIMEOUT_MS);
+    pendingMnemonicInputs.set(requestId, { resolve, reject, timeout });
+    self.postMessage({ type: 'worker:collect-mnemonic', requestId });
+  });
+}
+
 // ============================================================================
 // Connect invite ceremony (rooms-and-trust §3.2/§3.4) — popup handshakes
 // ============================================================================
@@ -1100,6 +1126,7 @@ const handleWorkerMessage = (event: MessageEvent): void => {
     type: string;
     requestId?: string;
     reason?: string;
+    mnemonic?: string;
     credentials?: {
       method: 'passphrase' | 'passkey-prf' | 'passkey-gate';
       transportKeyId: string;
@@ -1191,6 +1218,27 @@ const handleWorkerMessage = (event: MessageEvent): void => {
         clearTimeout(pending.timeout);
         pendingMnemonicConfirms.delete(requestId);
         pending.reject(new Error(message.reason || 'Recovery-phrase backup was cancelled'));
+      }
+      // Restore: the same cancel signal aborts an in-progress phrase entry.
+      const input = pendingMnemonicInputs.get(requestId);
+      if (input) {
+        clearTimeout(input.timeout);
+        pendingMnemonicInputs.delete(requestId);
+        input.reject(new Error(message.reason || 'Recovery-phrase entry was cancelled'));
+      }
+    }
+    return;
+  }
+
+  // Restore: the user entered a recovery phrase in the enclave popup.
+  if ('type' in message && message.type === 'worker:mnemonic-entered') {
+    const requestId = message.requestId;
+    if (requestId) {
+      const pending = pendingMnemonicInputs.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingMnemonicInputs.delete(requestId);
+        pending.resolve(typeof message.mnemonic === 'string' ? message.mnemonic : '');
       }
     }
     return;
@@ -1470,6 +1518,13 @@ export async function handleMessage(request: RPCRequest): Promise<RPCResponse> {
 
       case 'provisionMessaging':
         result = await handleProvisionMessaging(validators.validateProvisionMessaging(params), id);
+        break;
+
+      case 'provisionMessagingFromMnemonic':
+        result = await handleProvisionMessagingFromMnemonic(
+          validators.validateProvisionMessaging(params),
+          id
+        );
         break;
 
       case 'getMessagingBundle':
@@ -3619,6 +3674,101 @@ async function handleProvisionMessaging(
     lockTime: capture.lockTime,
     duration: capture.duration,
     details: { signedPreKeyId, oneTimePrekeyCount, sid, mintedAccountRoot: minted },
+  });
+
+  return { bundle, sid, token, exp };
+}
+
+/**
+ * Restore an account on THIS device from its 12-word recovery phrase — the other
+ * half of BUG-007. Mirrors {@link handleProvisionMessaging} (single unlock: set up
+ * this device's Signal identity, then open a session), but instead of minting a
+ * fresh account root it IMPORTS one from a phrase the user enters IN THE ENCLAVE
+ * POPUP (never the PWA). Because the account root is deterministic, the master
+ * identity + self-channel come out identical to before, so peers still recognize
+ * this account via certificate continuity (rooms §2: reset+restore = same identity).
+ *
+ * Phase 1 provisions the device identity + captures the MKEK out of withUnlock (so
+ * the master secret is zeroized before the human phrase entry). Phase 2 collects +
+ * validates the phrase (BIP39 checksum via mnemonicToAccountRoot) and overwrites
+ * the stored root — recovery is deliberate. Phase 3 opens the session.
+ */
+async function handleProvisionMessagingFromMnemonic(
+  params: {
+    credentials: AuthCredentials;
+    signedPreKeyId: number;
+    oneTimePrekeyCount: number;
+  },
+  requestId: string
+): Promise<{
+  bundle: PublicPreKeyBundle;
+  sid: string;
+  token: string;
+  exp: number;
+}> {
+  const { credentials, signedPreKeyId, oneTimePrekeyCount } = params;
+  const sid = crypto.randomUUID();
+
+  // Phase 1 (under one unlock): provision this device's Signal identity + prekeys
+  // and derive the messaging KEK. Capture the non-extractable keys out of
+  // withUnlock so the master secret is gone before the human enters the phrase.
+  const capture = await withUnlock(credentials, async (mkek, ms) => {
+    await ensureAuditKey(mkek);
+    const messagingKEK = await deriveMessagingKEK(ms);
+    await generateIdentity(credentials.userId, messagingKEK);
+    await generateSignedPrekey(credentials.userId, messagingKEK, signedPreKeyId);
+    await generateOneTimePrekeys(credentials.userId, messagingKEK, 1, oneTimePrekeyCount);
+    const bundle = await getPublicBundle(credentials.userId);
+    return { mkek, messagingKEK, bundle };
+  });
+
+  const { mkek, messagingKEK, bundle } = capture.result;
+
+  // Phase 2: collect the recovery phrase in the enclave popup (never the PWA),
+  // derive the account root from it (mnemonicToAccountRoot validates the BIP39
+  // checksum + length → throws on a bad phrase), and overwrite the stored root.
+  const phrase = await requireMnemonicInput(requestId);
+  const accountRoot = await mnemonicToAccountRoot(phrase.trim());
+  await storeAccountRoot(credentials.userId, accountRoot, mkek);
+
+  // Phase 3: derive the self-channel + master identity from the imported root and
+  // open the session (identical to provision; the root is deterministic so this
+  // reproduces the original identity), then zeroize the root.
+  const selfKey = await deriveSelfKey(accountRoot);
+  const selfScope = await deriveSelfScope(accountRoot);
+  const masterIdentity = await deriveMasterIdentity(accountRoot, {
+    identityKey: new Uint8Array(bundle.identityKey),
+    identitySigningKey: new Uint8Array(bundle.identitySigningKey),
+  });
+  accountRoot.fill(0);
+
+  const capKeyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+  const nowMs = Date.now();
+  const iat = Math.floor(nowMs / 1000);
+  const exp = iat + Math.floor(MESSAGING_ABSOLUTE_MAX_MS / 1000);
+  const token = await mintCapabilityToken(sid, capKeyPair.privateKey, iat, exp);
+
+  const session: MessagingSession = {
+    messagingKEK,
+    userId: credentials.userId,
+    capPubKey: capKeyPair.publicKey,
+    absoluteExp: nowMs + MESSAGING_ABSOLUTE_MAX_MS,
+    idleExp: nowMs + MESSAGING_IDLE_TIMEOUT_MS,
+    selfKey,
+    selfScope,
+  };
+  applyMasterIdentity(session, masterIdentity);
+  messagingSessions.set(sid, session);
+
+  await logOperation({
+    op: 'messaging.provisionFromMnemonic',
+    kid: `messaging:${credentials.userId}`,
+    requestId,
+    userId: credentials.userId,
+    unlockTime: capture.unlockTime,
+    lockTime: capture.lockTime,
+    duration: capture.duration,
+    details: { signedPreKeyId, oneTimePrekeyCount, sid },
   });
 
   return { bundle, sid, token, exp };

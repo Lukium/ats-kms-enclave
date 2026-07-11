@@ -631,6 +631,7 @@ export type RPCMethod =
   // === Signal messaging (Phase 2) ===
   | 'setupMessaging'
   | 'provisionMessaging'
+  | 'provisionMessagingFromMnemonic'
   | 'getMessagingBundle'
   | 'getPrekeyCount'
   | 'openMessaging'

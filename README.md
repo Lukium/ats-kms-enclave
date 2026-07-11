@@ -2,13 +2,13 @@
 
 ## Verification Summary
 
-**Status:** ✅ VERIFIED
+**Status:** ❌ FAILED
 
-**Timestamp:** Sat, 11 Jul 2026 15:08:23 GMT
+**Timestamp:** Sat, 11 Jul 2026 23:02:26 GMT
 
-**Worker Hash:** 78f9a3c3
+**Worker Hash:** 261ab51e
 
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/29157363568)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/29171484017)
 
 ---
 
@@ -45,38 +45,38 @@ All hashes verified
 
 | Artifact | Status | Expected | Actual |
 |----------|--------|----------|--------|
-| **Worker SHA256** | ✅ | `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596` | `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596` |
-| **Worker SRI** | ✅ | `sha384-pT2gjyhJPYEYmu0WRqwKfP575cNtEIaDhnBkIJoZ5XW1PxOJFKkqVICEi2H/IItH` | `sha384-pT2gjyhJPYEYmu0WRqwKfP575cNtEIaDhnBkIJoZ5XW1PxOJFKkqVICEi2H/IItH` |
-| **Client.js SRI** | ✅ | `sha384-O36Jm2wJNuL69YAnqUCTPV+MBvNu/LkElSulkgRk9XJrju44WYcxZEQ2KSwbgvux` | `sha384-O36Jm2wJNuL69YAnqUCTPV+MBvNu/LkElSulkgRk9XJrju44WYcxZEQ2KSwbgvux` |
-| **Enclave.css SRI** | ✅ | `sha384-e3w+2760ON2/r9/HvtBMttl2g7LMCH9CkTk1gOLaTQ4w67+r/vW3X/OR3PR/V8R4` | `sha384-e3w+2760ON2/r9/HvtBMttl2g7LMCH9CkTk1gOLaTQ4w67+r/vW3X/OR3PR/V8R4` |
+| **Worker SHA256** | ✅ | `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b` | `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b` |
+| **Worker SRI** | ✅ | `sha384-fRqsReZZTYi6zza5NFVzpM7LwZLvonrUAEQmEm7B/hK/++k5vQ7v3L9zDeonhISq` | `sha384-fRqsReZZTYi6zza5NFVzpM7LwZLvonrUAEQmEm7B/hK/++k5vQ7v3L9zDeonhISq` |
+| **Client.js SRI** | ✅ | `sha384-jGkR7C/l4VDdJtGoW5qYFpWBWnJkKg4Br/U+Ft+mI9MEMq1klQ7Bhe/Nk+VvlcYZ` | `sha384-jGkR7C/l4VDdJtGoW5qYFpWBWnJkKg4Br/U+Ft+mI9MEMq1klQ7Bhe/Nk+VvlcYZ` |
+| **Enclave.css SRI** | ✅ | `sha384-U/2zRKw7f5PpwjqjmSAEdA9jfTqP8ty/nj1CpGtleAOxYW80WFLCqm6GrKLLk1iY` | `sha384-U/2zRKw7f5PpwjqjmSAEdA9jfTqP8ty/nj1CpGtleAOxYW80WFLCqm6GrKLLk1iY` |
 
 
 ### ✅ GitHub Attestation
 
 Attestation verified via GitHub CLI
 
-**Artifact:** `kms-worker.78f9a3c3.js`
+**Artifact:** `kms-worker.261ab51e.js`
 
-**Commit:** `9525ad5c5f849316137ef326b5ab0aa5a9042ae5`
+**Commit:** `b8253ca50f8b9cce6c4463a19724bb9d0a65599f`
 
 **Rekor Transparency Log:**
-https://search.sigstore.dev?logIndex=2138786999
+https://search.sigstore.dev?logIndex=2146771431
 
 **Repository Attestations:**
-https://github.com/Lukium/ats-kms-enclave/attestations/34798442
+https://github.com/Lukium/ats-kms-enclave/attestations/34908798
 
 ### ✅ Allowed List
 
 Current version is in allowed list
 
-**Current Hash:** `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596`
+**Current Hash:** `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b`
 
 **Allowed Hashes:**
-- `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596`
+- `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b`
 
-### ✅ Security Headers
+### ❌ Security Headers
 
-All headers verified
+Some headers failed
 
 #### content-security-policy ✅
 
@@ -93,11 +93,19 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 - `https://phase2-demo.allthe.services` - Demo for the KMS enclave itself
 - `http://localhost:5173` - Local development counterpart of the dev build
 
-#### permissions-policy ✅
+#### permissions-policy ❌
 
-**Expected:** `accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()`
+**Expected:**
+```
+accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
+```
 
-**Actual:** ✅ Matches
+**Actual:**
+```
+accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), bluetooth=(), camera=(self), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), speaker-selection=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()
+```
+
+**Issue:** Mismatch
 
 #### x-content-type-options ✅
 
@@ -127,22 +135,22 @@ The `frame-ancestors` directive controls which origins can embed the KMS enclave
 
 Build is reproducible - hash matches
 
-**Commit:** `9525ad5c5f849316137ef326b5ab0aa5a9042ae5`
+**Commit:** `b8253ca50f8b9cce6c4463a19724bb9d0a65599f`
 
-**Expected Hash:** `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596`
+**Expected Hash:** `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b`
 
-**Actual Hash:** `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596`
+**Actual Hash:** `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b`
 
 **Reproduce This Build:**
 ```bash
-git fetch origin 9525ad5c5f849316137ef326b5ab0aa5a9042ae5
-git checkout 9525ad5c5f849316137ef326b5ab0aa5a9042ae5
+git fetch origin b8253ca50f8b9cce6c4463a19724bb9d0a65599f
+git checkout b8253ca50f8b9cce6c4463a19724bb9d0a65599f
 pnpm install --frozen-lockfile
-SOURCE_DATE_EPOCH=1783707496 pnpm build:reproducible
-sha256sum dist/enclave/kms-worker.78f9a3c3.js
+SOURCE_DATE_EPOCH=1783809556 pnpm build:reproducible
+sha256sum dist/enclave/kms-worker.261ab51e.js
 ```
 
-The hash from the last command should match: `78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596`
+The hash from the last command should match: `261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b`
 
 
 ---
@@ -154,37 +162,37 @@ The hash from the last command should match: `78f9a3c36c64faa58be9d19d4fdb91488e
   "schema": 1,
   "current": {
     "version": "2.0.0",
-    "commit": "9525ad5c5f849316137ef326b5ab0aa5a9042ae5",
-    "artifact": "kms-worker.78f9a3c3.js",
-    "sha256": "78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596",
+    "commit": "b8253ca50f8b9cce6c4463a19724bb9d0a65599f",
+    "artifact": "kms-worker.261ab51e.js",
+    "sha256": "261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b",
     "files": {
       "worker": {
-        "filename": "kms-worker.78f9a3c3.js",
-        "sha256": "78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596",
-        "sri": "sha384-pT2gjyhJPYEYmu0WRqwKfP575cNtEIaDhnBkIJoZ5XW1PxOJFKkqVICEi2H/IItH"
+        "filename": "kms-worker.261ab51e.js",
+        "sha256": "261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b",
+        "sri": "sha384-fRqsReZZTYi6zza5NFVzpM7LwZLvonrUAEQmEm7B/hK/++k5vQ7v3L9zDeonhISq"
       },
       "client": {
-        "filename": "enclave-client.8bb2a0e1.js",
-        "sri": "sha384-O36Jm2wJNuL69YAnqUCTPV+MBvNu/LkElSulkgRk9XJrju44WYcxZEQ2KSwbgvux"
+        "filename": "enclave-client.6552bfa9.js",
+        "sri": "sha384-jGkR7C/l4VDdJtGoW5qYFpWBWnJkKg4Br/U+Ft+mI9MEMq1klQ7Bhe/Nk+VvlcYZ"
       },
       "css": {
-        "filename": "enclave.9f87d7da.css",
-        "sri": "sha384-e3w+2760ON2/r9/HvtBMttl2g7LMCH9CkTk1gOLaTQ4w67+r/vW3X/OR3PR/V8R4"
+        "filename": "enclave.ee7336df.css",
+        "sri": "sha384-U/2zRKw7f5PpwjqjmSAEdA9jfTqP8ty/nj1CpGtleAOxYW80WFLCqm6GrKLLk1iY"
       }
     },
-    "timestamp": "2026-07-10T18:18:56.635Z",
+    "timestamp": "2026-07-11T22:39:50.446Z",
     "build": {
       "reproducible": true,
       "environment": "production",
-      "SOURCE_DATE_EPOCH": "1783707496"
+      "SOURCE_DATE_EPOCH": "1783809556"
     },
     "attestation": {
-      "rekorUrl": "https://search.sigstore.dev?logIndex=2138786999",
-      "attestationUrl": "https://github.com/Lukium/ats-kms-enclave/attestations/34798442"
+      "rekorUrl": "https://search.sigstore.dev?logIndex=2146771431",
+      "attestationUrl": "https://github.com/Lukium/ats-kms-enclave/attestations/34908798"
     }
   },
   "allowed": [
-    "78f9a3c36c64faa58be9d19d4fdb91488e5fc8a22907c244865f07772f998596"
+    "261ab51e9c6d55dc65f4d831c4c44ddf20178bf60f52ade894863654e1dc079b"
   ],
   "deprecated": [],
   "comment": "Phase 2.1: Deterministic builds with SRI (Subresource Integrity)"
@@ -193,6 +201,6 @@ The hash from the last command should match: `78f9a3c36c64faa58be9d19d4fdb91488e
 
 ---
 
-*Last updated: Sat, 11 Jul 2026 15:08:23 GMT*
+*Last updated: Sat, 11 Jul 2026 23:02:26 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 

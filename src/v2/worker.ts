@@ -4390,18 +4390,41 @@ async function handleVerifyContactDevice(params: {
 const DEVICE_EXCHANGE_CONTEXT = 'device-exchange';
 const CONTACT_ANNOUNCEMENT_CONTEXT = 'contact-announcement';
 
-/** Serialize a self-channel contact announcement ({peerUserId, secret}). */
-function encodeContactAnnouncement(peerUserId: string, secret: Uint8Array): Uint8Array {
-  const obj = { peerUserId, secret: arrayBufferToBase64url(u8ToArrayBuffer(secret)) };
+/**
+ * Serialize a self-channel contact announcement ({peerUserId, secret}). `identity`
+ * is an OPAQUE, caller-supplied string (the PWA's serialized trust-ledger entry —
+ * the peer's public master keys + fingerprint); the enclave carries it verbatim so
+ * a propagated/restored contact gets a consistent safety number. It rides inside
+ * the self-key-encrypted payload, so it stays confidential to the account's devices.
+ */
+function encodeContactAnnouncement(peerUserId: string, secret: Uint8Array, identity?: string): Uint8Array {
+  const obj: { peerUserId: string; secret: string; identity?: string } = {
+    peerUserId,
+    secret: arrayBufferToBase64url(u8ToArrayBuffer(secret)),
+  };
+  if (identity !== undefined) obj.identity = identity;
   return new TextEncoder().encode(JSON.stringify(obj));
 }
 
-function decodeContactAnnouncement(bytes: Uint8Array): { peerUserId: string; secret: Uint8Array } {
-  const obj = JSON.parse(new TextDecoder().decode(bytes)) as { peerUserId?: unknown; secret?: unknown };
+function decodeContactAnnouncement(bytes: Uint8Array): {
+  peerUserId: string;
+  secret: Uint8Array;
+  identity?: string;
+} {
+  const obj = JSON.parse(new TextDecoder().decode(bytes)) as {
+    peerUserId?: unknown;
+    secret?: unknown;
+    identity?: unknown;
+  };
   if (typeof obj.peerUserId !== 'string' || typeof obj.secret !== 'string') {
     throw new Error('Malformed contact announcement');
   }
-  return { peerUserId: obj.peerUserId, secret: new Uint8Array(base64urlToArrayBuffer(obj.secret)) };
+  const out: { peerUserId: string; secret: Uint8Array; identity?: string } = {
+    peerUserId: obj.peerUserId,
+    secret: new Uint8Array(base64urlToArrayBuffer(obj.secret)),
+  };
+  if (typeof obj.identity === 'string') out.identity = obj.identity;
+  return out;
 }
 
 /** Load a contact's pairing secret or throw a clear error. */
@@ -4522,13 +4545,13 @@ async function handleOpenDeviceExchange(
  * self-channel; only this account's enclaves can open it.
  */
 async function handleSealContactAnnouncement(
-  params: { sid: string; token: string; peerUserId: string },
+  params: { sid: string; token: string; peerUserId: string; identity?: string },
   requestId: string
 ): Promise<{ ciphertext: ArrayBuffer }> {
   const session = await requireCapability(params.sid, params.token);
   const { selfKey } = requireSelfChannel(session);
   const secret = await requireContactSecret(session.userId, params.peerUserId, session.messagingKEK);
-  const payload = encodeContactAnnouncement(params.peerUserId, secret);
+  const payload = encodeContactAnnouncement(params.peerUserId, secret, params.identity);
   const out = await encryptSelfMessage(selfKey, payload, CONTACT_ANNOUNCEMENT_CONTEXT);
 
   await logOperation({
@@ -4550,11 +4573,11 @@ async function handleSealContactAnnouncement(
 async function handleApplyContactAnnouncement(
   params: { sid: string; token: string; ciphertext: ArrayBuffer },
   requestId: string
-): Promise<{ peerUserId: string; scope: string }> {
+): Promise<{ peerUserId: string; scope: string; identity?: string }> {
   const session = await requireCapability(params.sid, params.token);
   const { selfKey } = requireSelfChannel(session);
   const bytes = await decryptSelfMessage(selfKey, params.ciphertext, CONTACT_ANNOUNCEMENT_CONTEXT);
-  const { peerUserId, secret } = decodeContactAnnouncement(bytes);
+  const { peerUserId, secret, identity } = decodeContactAnnouncement(bytes);
   await storeContactSecret(session.userId, peerUserId, secret, session.messagingKEK);
   const scope = await deriveScope(secret);
 
@@ -4566,7 +4589,9 @@ async function handleApplyContactAnnouncement(
     details: { peer: peerUserId },
   });
 
-  return { peerUserId, scope };
+  const out: { peerUserId: string; scope: string; identity?: string } = { peerUserId, scope };
+  if (identity !== undefined) out.identity = identity;
+  return out;
 }
 
 // ============================================================================

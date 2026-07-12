@@ -195,6 +195,46 @@ describe('contact announcement (self-channel sync)', () => {
     expect(getResult<{ scope: string }>(got).scope).toBe(applied.scope)
   })
 
+  it('carries an opaque identity blob through seal → apply (safety-number propagation)', async () => {
+    const { sid, token } = await setupAndOpen(true)
+    const secret = secretBuf(0x33)
+    const identity = JSON.stringify({ uid: BOB, msk: 'MSK', mek: 'MEK', fingerprint: 'FP', trust: 'verified' })
+    await handleMessage(createRequest('setContactSecret', { sid, token, peerUserId: BOB, secret }))
+
+    const sealed = expectOk(
+      await handleMessage(
+        createRequest('sealContactAnnouncement', { sid, token, peerUserId: BOB, identity })
+      )
+    )
+    const { ciphertext } = getResult<{ ciphertext: ArrayBuffer }>(sealed)
+
+    const applied = expectOk(
+      await handleMessage(
+        createRequest('applyContactAnnouncement', { sid, token, ciphertext: ciphertext.slice(0) })
+      )
+    )
+    const out = getResult<{ peerUserId: string; identity?: string }>(applied)
+    expect(out.peerUserId).toBe(BOB)
+    expect(out.identity).toBe(identity)
+  })
+
+  it('omits identity on apply when none was sealed (backward-compatible)', async () => {
+    const { sid, token } = await setupAndOpen(true)
+    await handleMessage(
+      createRequest('setContactSecret', { sid, token, peerUserId: BOB, secret: secretBuf(0x44) })
+    )
+    const sealed = expectOk(
+      await handleMessage(createRequest('sealContactAnnouncement', { sid, token, peerUserId: BOB }))
+    )
+    const { ciphertext } = getResult<{ ciphertext: ArrayBuffer }>(sealed)
+    const applied = expectOk(
+      await handleMessage(
+        createRequest('applyContactAnnouncement', { sid, token, ciphertext: ciphertext.slice(0) })
+      )
+    )
+    expect(getResult<{ identity?: string }>(applied).identity).toBeUndefined()
+  })
+
   it('sealContactAnnouncement errors without an account root (no self-key)', async () => {
     const { sid, token } = await setupAndOpen(false)
     await handleMessage(createRequest('setContactSecret', { sid, token, peerUserId: BOB, secret: secretBuf(0x11) }))

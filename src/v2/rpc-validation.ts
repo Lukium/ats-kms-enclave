@@ -1313,13 +1313,22 @@ export function validateSealContactAnnouncement(params: unknown): {
   sid: string;
   token: string;
   peerUserId: string;
+  identity?: string;
 } {
   const p = validateParamsObject('sealContactAnnouncement', params);
-  return {
+  // Opaque caller-supplied blob (the PWA's serialized trust-ledger entry); bounded
+  // to keep a self-channel announcement small. The enclave never interprets it.
+  const identity = validateOptionalString('sealContactAnnouncement', 'identity', p.identity);
+  if (identity !== undefined && identity.length > 4096) {
+    throw new RPCValidationError('sealContactAnnouncement', 'identity', 'string of at most 4096 chars', identity);
+  }
+  const out: { sid: string; token: string; peerUserId: string; identity?: string } = {
     sid: validateString('sealContactAnnouncement', 'sid', p.sid),
     token: validateString('sealContactAnnouncement', 'token', p.token),
     peerUserId: validatePeerUserId('sealContactAnnouncement', p.peerUserId),
   };
+  if (identity !== undefined) out.identity = identity;
+  return out;
 }
 
 export function validateApplyContactAnnouncement(params: unknown): {

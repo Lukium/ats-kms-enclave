@@ -2566,11 +2566,17 @@ export class KMSUser {
     return this.sendRequest<{ payload: ArrayBuffer }>('openDeviceExchange', args);
   }
 
-  /** Seal a contact for self-channel propagation to the account's other devices. */
+  /**
+   * Seal a contact for self-channel propagation to the account's other devices.
+   * `identity` is an OPAQUE caller blob (the PWA's serialized trust-ledger entry —
+   * the peer's public master keys) carried verbatim so propagated/restored contacts
+   * keep a consistent safety number.
+   */
   async sealContactAnnouncement(args: {
     sid: string;
     token: string;
     peerUserId: string;
+    identity?: string;
   }): Promise<{ ciphertext: ArrayBuffer }> {
     return this.sendRequest<{ ciphertext: ArrayBuffer }>('sealContactAnnouncement', args);
   }
@@ -2580,8 +2586,8 @@ export class KMSUser {
     sid: string;
     token: string;
     ciphertext: ArrayBuffer;
-  }): Promise<{ peerUserId: string; scope: string }> {
-    return this.sendRequest<{ peerUserId: string; scope: string }>(
+  }): Promise<{ peerUserId: string; scope: string; identity?: string }> {
+    return this.sendRequest<{ peerUserId: string; scope: string; identity?: string }>(
       'applyContactAnnouncement',
       args
     );

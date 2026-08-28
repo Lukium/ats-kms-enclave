@@ -4,11 +4,11 @@
 
 **Status:** ✅ VERIFIED
 
-**Timestamp:** Thu, 27 Aug 2026 12:49:08 GMT
+**Timestamp:** Fri, 28 Aug 2026 18:48:08 GMT
 
 **Worker Hash:** f3442c7b
 
-**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/33073655010)
+**Workflow Run:** [View Details](https://github.com/Lukium/ats-kms-enclave/actions/runs/33200921695)
 
 ---
 
@@ -193,6 +193,6 @@ The hash from the last command should match: `f3442c7b4f988ff59de8a9b6c44f4c9598
 
 ---
 
-*Last updated: Thu, 27 Aug 2026 12:49:08 GMT*
+*Last updated: Fri, 28 Aug 2026 18:48:08 GMT*
 *Verifier: [github.com/lukium/ats-kms/tree/verifier](https://github.com/lukium/ats-kms/tree/verifier)*
 
